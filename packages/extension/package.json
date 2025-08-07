@@ -1,0 +1,51 @@
+{
+    "name": "vscode-type-c-langium",
+    "description": "The extension specific package",
+    "version": "0.0.1",
+    "displayName": "type-c-langium",
+    "type": "module",
+    "engines": {
+        "vscode": "^1.67.0"
+    },
+    "categories": [
+        "Programming Languages"
+    ],
+    "contributes": {
+        "languages": [{
+            "id": "type-c",
+            "aliases": ["Type-C", "type-c"],
+            "extensions": [".tc"],
+            "configuration": "./language-configuration.json"
+        }],
+        "grammars": [{
+            "language": "type-c",
+            "scopeName": "source.type-c",
+            "path": "syntaxes/type-c.tmLanguage.json"
+        }]
+    },
+    "activationEvents": [
+        "onLanguage:type-c"
+    ],
+    "main": "./out/extension/main.cjs",
+    "scripts": {
+        "clean": "shx rm -fr *.tsbuildinfo out syntaxes",
+        "vscode:prepublish": "npm run build && npm run --include-workspace-root --workspace=../.. lint",
+        "build:prepare": "shx mkdir -p ./syntaxes/ && shx cp -f ../language/syntaxes/type-c.tmLanguage.json ./syntaxes/type-c.tmLanguage.json",
+        "build": "npm run build:prepare && tsc -b tsconfig.json && node esbuild.mjs",
+        "build:clean": "npm run clean && npm run build",
+        "watch": "npm run build:prepare && concurrently -n tsc,esbuild -c blue,yellow \"tsc -b tsconfig.json --watch\" \"node esbuild.mjs --watch\""
+    },
+    "dependencies": {
+        "type-c-language": "0.0.1",
+        "vscode-languageclient": "~9.0.1",
+        "vscode-languageserver": "~9.0.1"
+    },
+    "devDependencies": {
+        "@types/vscode": "~1.67.0",
+        "concurrently": "~8.2.1",
+        "esbuild": "~0.25.5"
+    },
+    "vsce": {
+      "dependencies": false
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "projectName": "TypeC",
+    "languages": [
+        {
+            "id": "type-c",
+            "grammar": "src/type-c.langium",
+            "fileExtensions": [
+                "tc"
+            ],
+            "textMate": {
+                "out": "syntaxes/type-c.tmLanguage.json"
+            }
+        }
+    ],
+    "out": "src/generated"
+}

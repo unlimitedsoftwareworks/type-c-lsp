@@ -1,9 +1,11 @@
-
-let sum = 1
-
-fn x(arr: u32[]) {
-    for let i: u64 = (let z = 0 in z); i < arr ; i += 1 {
-        sum += arr[i]
-    }
-    return arr.length
+type Point = {
+    x: u32, y: u32, z: u32
 }
+
+fn sum(p: Point) -> u32 {
+    return p.x + p.y + p.z + 1
+}
+
+fn x<T>(arr: T[]) -> T {
+    return arr.resize(300)
+} 

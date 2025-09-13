@@ -5,14 +5,14 @@ export const prototypes = `
  */
 prototype for array {
     /**
-     * @brief: Returns the size of the array.
+     * @brief: Returns the length of the array.
      */
-    size: u64,
+    length: u64,
     
     /**
-     * @brief: Resizes the array to the given size.
-     * @param newSize: The new size of the array.
+     * @brief: Resizes the array to the given length.
+     * @param newSize: The new length of the array.
      */
-    fn resize<T>(newSize: u64) -> T[]
+    fn resize<T>(newLength: u64) -> T[]
 }
 `;

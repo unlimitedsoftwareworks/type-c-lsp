@@ -5,6 +5,7 @@ import { TypeCScopeComputation } from './scope-system/tc-scope-computation.js';
 import { registerValidationChecks, TypeCValidator } from './type-c-validator.js';
 import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
+import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -16,6 +17,9 @@ export type TypeCAddedServices = {
     references: {
         ScopeComputation: TypeCScopeComputation,
         ScopeProvider: TypeCScopeProvider
+    },
+    typing: {
+        TypeProvider: TypeCTypeProvider
     }
 }
 
@@ -37,6 +41,9 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),
         ScopeProvider: (services: TypeCServices) => new TypeCScopeProvider(services),
+    },
+    typing: {
+        TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services)
     }
 };
 

@@ -11,8 +11,7 @@ type ReferencableSymbol =
     ast.GenericType |
     ast.ExternFFIDecl |
     ast.SubModule |
-    ast.BuildinSymbolID |
-    ast.BuildinSymbolFn;
+    ast.BuiltinDefinition;
 
 export class TypeCScopeComputation extends DefaultScopeComputation {
     override collectExportedSymbols(document: LangiumDocument, cancelToken?: CancellationToken): Promise<AstNodeDescription[]> {
@@ -42,7 +41,7 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 return !node.isLocal;
             }
 
-            if(ast.isBuildinSymbolID(node) || ast.isBuildinSymbolFn(node)) {
+            if(ast.isBuiltinDefinition(node)) {
                 return true;
             }
     
@@ -53,10 +52,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         AstUtils.streamContents(node).forEach(item => {
             if(isExportable(item)) {
                 items.push(item);
-            }
-
-            if(ast.isBuiltinDefinition(item)) {
-                items.push(...item.symbols);
             }
         });
 
@@ -73,7 +68,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
             for (const declaration of declarations) {
                 const name = this.nameProvider.getName(declaration);
                 symbols.add(container, this.descriptions.createDescription(declaration, name, document));
-                console.log('Added symbol:', name, declaration.$type);
             }
         }
     }
@@ -119,7 +113,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         else if (ast.isModule(container)) {
             //console.log('Found program');
             declarations.push(...this.getGlobalDeclarations(container));
-            declarations.push(...this.getBuiltins(container));
         }
         else if (ast.isVariableDeclarationStatement(container)) {
             //console.log('Found variable declaration statement');
@@ -146,22 +139,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         else if (ast.isForStatement(container)) {
             if (container.init) {
                 declarations.push(...this.getDeclarationsFromContainer(container.init));
-            }
-        }
-        else if (ast.isBuiltinDefinition(container)) {
-            declarations.push(...container.symbols);
-        }
-
-        return declarations;
-    }
-
-    private getBuiltins(container: ast.Module): ReferencableSymbol[] {
-        const declarations: ReferencableSymbol[] = [];
-        for(const builtin of container.definitions) {
-            if(ast.isBuiltinDefinition(builtin)) {
-                for(const symbol of builtin.symbols) {
-                    declarations.push(symbol);
-                }
             }
         }
         return declarations;
@@ -218,6 +195,8 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
             } else if (ast.isVariableDeclarationStatement(def)) {
                 declarations.push(...def.declarations.variables);
             } else if (ast.isNamespaceDecl(def)) {
+                declarations.push(def);
+            } else if (ast.isBuiltinDefinition(def)) {
                 declarations.push(def);
             }
         }

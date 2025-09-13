@@ -75,6 +75,11 @@ import { TypeDescription } from "./type-c-types.js";
 import { getMinStorageForInt } from "./type-utils.js";
 import { prototypeURI } from "../builtins/index.js";
 import { createGenericType } from "./datatypes/generic-type.js";
+import {
+  createPrototypeFunctionParameterDescription,
+  createPrototypeFunctionType,
+  isDescPrototypeFunctionType,
+} from "./datatypes/prototype-type.js";
 
 export type NamedAstNode = AstNode & { name: string };
 
@@ -369,6 +374,11 @@ export class TypeCTypeProvider {
   inferFunctionCall(node: ast.FunctionCall): TypeDescription {
     const fnType = this.inferExpression(node.expr);
     if (isDescFunctionType(fnType)) {
+      if (fnType.returnType) {
+        return fnType.returnType;
+      }
+      return createVoidType();
+    } else if (isDescPrototypeFunctionType(fnType)) {
       if (fnType.returnType) {
         return fnType.returnType;
       }
@@ -857,7 +867,7 @@ export class TypeCTypeProvider {
       );
     }
     // We reach this by coming from classes/interface/implementation methods
-    else if (ast.isFunctionHeader(node) || ast.isBuiltinSymbolFn(node)) {
+    else if (ast.isFunctionHeader(node)) {
       type = createFunctionType(
         node.args.map((p) =>
           createFunctionParameterDescription(
@@ -871,6 +881,24 @@ export class TypeCTypeProvider {
           ? this.createTypeFromNode(node.returnType, genericsMap)
           : undefined,
         false,
+        node
+      );
+    } else if (ast.isBuiltinSymbolFn(node)) {
+      if (node.genericParameters?.length) {
+        initGenericMap([], node.genericParameters);
+      }
+      type = createPrototypeFunctionType(
+        node.args.map((p) =>
+          createPrototypeFunctionParameterDescription(
+            p.name,
+            this.createTypeFromNode(p.type, genericsMap),
+            p.isMut,
+            p
+          )
+        ),
+        node.returnType
+          ? this.createTypeFromNode(node.returnType, genericsMap)
+          : undefined,
         node
       );
     } else if (ast.isBuiltinSymbolID(node)) {
@@ -937,7 +965,7 @@ export class TypeCTypeProvider {
     } else if (isDescInterfaceType(type)) {
       return this.getInterfaceIdentifiableFields(type);
     } else if (isDescEnumType(type)) {
-    /*
+      /*
     else if(isDescImplementationType(type)) {
         return type.attributes;
     }

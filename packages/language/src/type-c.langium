@@ -729,7 +729,7 @@ WildCardPattern:
  * Currently applicable to coroutines and arrays.
  */
 BuiltinDefinition:
-    'prototype' 'for' name=('array' | 'coroutine') '{' symbols+=BuiltinSymbol (',' symbols+=BuiltinSymbol)* '}'
+    'prototype' 'for' name=('array' | 'coroutine') '{' symbols+=BuiltinSymbol (symbols+=BuiltinSymbol)* '}'
     ;
 
 BuiltinSymbol:

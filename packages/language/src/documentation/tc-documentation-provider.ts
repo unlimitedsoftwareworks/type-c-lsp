@@ -13,7 +13,6 @@ export class TypeCDocumentationProvider extends JSDocDocumentationProvider {
     
     override getDocumentation(node: AstNode): string | undefined {
         let type = this.typeProvider.inferType(node);
-        return `\`${type.toString()}\``;
+        return `${type.toString()}`;
     }
-    
 }

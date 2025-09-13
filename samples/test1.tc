@@ -3,12 +3,13 @@ type Point = {
 }
 
 fn sum(p: Point) -> u32 {
-    return p.x + p.y + p.z + 1
+    return {x: 1, y: 2}
 }
 
-fn x<T>(arr: T[]) -> T {
-    let x = arr.resize(300) 
-    return x
+fn x(arr: u32[]) -> u32 { 
+    let x = [arr.resize(300), 1]
+    let z = arr.slice(1, 2)
+    return z
 }  
 
-let z = x<u32>([1, 2, 3])
+let z = x([1, 2, 3])

@@ -17,6 +17,7 @@ import { NamespaceDefinitionTypeDescription } from "./datatypes/namespace-type.j
 import { NeverType } from "./datatypes/never-type.js";
 import { NullTypeDescription } from "./datatypes/null-type.js";
 import { NullableTypeDescription } from "./datatypes/nullable-type.js";
+import { PrototypeFunctionTypeDescription } from "./datatypes/prototype-type.js";
 import { ReferenceTypeDescription } from "./datatypes/reference-type.js";
 import { StringEnumTypeDescription } from "./datatypes/string-enum-type.js";
 import { StringTypeDescription } from "./datatypes/string-type.js";
@@ -59,6 +60,7 @@ export type TypeDescription =
     UnsetTypeDescription |
     ReferenceTypeDescription |
     UnionTypeDescription | // Union is used as a constraint for generics, that is all.
+    PrototypeFunctionTypeDescription |
 
     /**
      * The following types are used for auto-completion, they should never propagate 

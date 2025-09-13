@@ -7,5 +7,8 @@ fn sum(p: Point) -> u32 {
 }
 
 fn x<T>(arr: T[]) -> T {
-    return arr.resize(300)
-} 
+    let x = arr.resize(300) 
+    return x
+}  
+
+let z = x<u32>([1, 2, 3])

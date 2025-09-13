@@ -6,6 +6,7 @@ import { registerValidationChecks, TypeCValidator } from './type-c-validator.js'
 import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
+import { TypeCDocumentationProvider } from './documentation/tc-documentation-provider.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -20,6 +21,9 @@ export type TypeCAddedServices = {
     },
     typing: {
         TypeProvider: TypeCTypeProvider
+    },
+    documentation: {
+        DocumentationProvider: TypeCDocumentationProvider
     }
 }
 
@@ -44,6 +48,9 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     },
     typing: {
         TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services)
+    },
+    documentation: {
+        DocumentationProvider: (services: TypeCServices) => new TypeCDocumentationProvider(services)
     }
 };
 

@@ -654,8 +654,8 @@ type IdentifiableReference =
     ExternFFIDecl |
     StructField |
     VariantConstructor |
-    BuildinSymbolID |
-    BuildinSymbolFn;
+    BuiltinSymbolID |
+    BuiltinSymbolFn;
 
 // Qualified reference that can handle all complex cases
 QualifiedReference:
@@ -729,12 +729,12 @@ WildCardPattern:
  * Currently applicable to coroutines and arrays.
  */
 BuiltinDefinition:
-    'prototype' 'for' name=('array' | 'coroutine') '{' symbols+=BuildinSymbol (',' symbols+=BuildinSymbol)* '}'
+    'prototype' 'for' name=('array' | 'coroutine') '{' symbols+=BuiltinSymbol (',' symbols+=BuiltinSymbol)* '}'
     ;
 
-BuildinSymbol:
-    {infer BuildinSymbolID} name=ID ':' type=DataType<false> |
-    {infer BuildinSymbolFn} 'fn' name=ID GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
+BuiltinSymbol:
+    {infer BuiltinSymbolID} name=ID ':' type=DataType<false> |
+    {infer BuiltinSymbolFn} 'fn' name=ID GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
 
 
  

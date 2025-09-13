@@ -99,7 +99,7 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
             // Add parameters
             declarations.push(...container.header.args ?? []);  
         }
-        else if (ast.isBuildinSymbolFn(container)) {
+        else if (ast.isBuiltinSymbolFn(container)) {
             declarations.push(...container.genericParameters ?? []);
         }
         else if (ast.isBlockStatement(container)) {

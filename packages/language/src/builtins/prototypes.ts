@@ -13,6 +13,6 @@ prototype for array {
      * @brief: Resizes the array to the given length.
      * @param newSize: The new length of the array.
      */
-    fn resize<T>(newLength: u64) -> T[]
+    fn resize<T>(newLength: u64) -> void
 }
 `;

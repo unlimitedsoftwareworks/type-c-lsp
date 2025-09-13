@@ -1,79 +1,80 @@
 import {
-    AstNode,
-    AstUtils,
-    DocumentCache,
-    DocumentState,
-    IndexManager,
+  AstNode,
+  AstUtils,
+  DocumentCache,
+  DocumentState,
+  IndexManager,
 } from "langium";
 import { LangiumServices } from "langium/lsp";
 import * as ast from "../generated/ast.js";
 import { createAnyType } from "./datatypes/any-type.js";
 import {
-    ArrayTypeDescription,
-    createArrayType,
-    isDescArrayType,
+  ArrayTypeDescription,
+  createArrayType,
+  isDescArrayType,
 } from "./datatypes/array-type.js";
 import { createBoolType } from "./datatypes/bool-type.js";
 import {
-    ClassMethodDescription,
-    ClassTypeDescription,
-    createClassAttributeDescription,
-    createClassDefinitionType,
-    createClassMethodDescription,
-    createClassType,
-    isDescClassDefinitionType,
-    isDescClassType,
+  ClassMethodDescription,
+  ClassTypeDescription,
+  createClassAttributeDescription,
+  createClassDefinitionType,
+  createClassMethodDescription,
+  createClassType,
+  isDescClassDefinitionType,
+  isDescClassType,
 } from "./datatypes/class-type.js";
 import { createCoroutineType } from "./datatypes/coroutine-type.js";
 import {
-    createEnumCaseDescription,
-    createEnumType,
-    isDescEnumType,
+  createEnumCaseDescription,
+  createEnumType,
+  isDescEnumType,
 } from "./datatypes/enum-type.js";
 import { createErrorType } from "./datatypes/error-type.js";
 import {
-    createFFIDefinitionType,
-    isDescFFIDefinitionType,
+  createFFIDefinitionType,
+  isDescFFIDefinitionType,
 } from "./datatypes/ffi-type.js";
 import { createFloatType } from "./datatypes/float-type.js";
 import {
-    createFunctionParameterDescription,
-    createFunctionType,
-    FunctionTypeDescription,
-    isDescFunctionType,
+  createFunctionParameterDescription,
+  createFunctionType,
+  FunctionTypeDescription,
+  isDescFunctionType,
 } from "./datatypes/function-type.js";
 import { createIntegerType } from "./datatypes/integer-type.js";
 import {
-    createInterfaceMethodDescription,
-    createInterfaceType,
-    InterfaceMethodDescription,
-    InterfaceTypeDescription,
-    isDescInterfaceType,
+  createInterfaceMethodDescription,
+  createInterfaceType,
+  InterfaceMethodDescription,
+  InterfaceTypeDescription,
+  isDescInterfaceType,
 } from "./datatypes/interface-type.js";
 import {
-    createNamespaceDefinitionType,
-    isDescNamespaceDefinitionType,
+  createNamespaceDefinitionType,
+  isDescNamespaceDefinitionType,
 } from "./datatypes/namespace-type.js";
 import { createNullType } from "./datatypes/null-type.js";
 import { isDescNullableType } from "./datatypes/nullable-type.js";
 import { createStringType } from "./datatypes/string-type.js";
 import {
-    createStructFieldDescription,
-    createStructType,
-    isDescStructType,
+  createStructFieldDescription,
+  createStructType,
+  isDescStructType,
 } from "./datatypes/struct-type.js";
 import { createTupleType } from "./datatypes/tuple-type.js";
 import { createVariantConstructorType } from "./datatypes/variant-consturctor-type.js";
 import {
-    createVariantDefinitionType,
-    createVariantType,
-    isDescVariantDefinitionType,
-    VariantTypeDescription,
+  createVariantDefinitionType,
+  createVariantType,
+  isDescVariantDefinitionType,
+  VariantTypeDescription,
 } from "./datatypes/variant-type.js";
 import { createVoidType } from "./datatypes/void-type.js";
 import { TypeDescription } from "./type-c-types.js";
 import { getMinStorageForInt } from "./type-utils.js";
 import { prototypeURI } from "../builtins/index.js";
+import { createGenericType } from "./datatypes/generic-type.js";
 
 export type NamedAstNode = AstNode & { name: string };
 
@@ -856,7 +857,7 @@ export class TypeCTypeProvider {
       );
     }
     // We reach this by coming from classes/interface/implementation methods
-    else if (ast.isFunctionHeader(node)) {
+    else if (ast.isFunctionHeader(node) || ast.isBuiltinSymbolFn(node)) {
       type = createFunctionType(
         node.args.map((p) =>
           createFunctionParameterDescription(
@@ -872,6 +873,8 @@ export class TypeCTypeProvider {
         false,
         node
       );
+    } else if (ast.isBuiltinSymbolID(node)) {
+      type = this.createTypeFromNode(node.type, genericsMap);
     } else if (ast.isArrayType(node)) {
       type = createArrayType(
         this.createTypeFromNode(node.arrayOf, genericsMap),
@@ -897,15 +900,22 @@ export class TypeCTypeProvider {
       if (genericType) {
         type = this.createTypeFromNode(genericType, genericsMap);
       } else {
-        type = createErrorType(
-          `Cannot find type ${node.name} in generics map [${Array.from(
-            genericsMap.entries()
-          )
-            .map((e) => e[0].name)
-            .join(", ")}]`,
-          node
-        );
+        type = createGenericType(node.name, node);
       }
+    } else if (ast.isFunctionDeclaration(node)) {
+      type = createFunctionType(
+        node.header.args.map((p) =>
+          createFunctionParameterDescription(
+            p.name,
+            this.createTypeFromNode(p.type, genericsMap),
+            p.isMut,
+            p
+          )
+        ),
+        this.createTypeFromNode(node.header.returnType, genericsMap),
+        node.fnType === "cfn",
+        node
+      );
     }
 
     if (!type) {
@@ -1067,7 +1077,13 @@ export class TypeCTypeProvider {
      */
 
     const uris = new Set<string>([prototypeURI]);
-    const allElements = this.indexManager.allElements(undefined, uris).filter(e => ast.isBuiltinDefinition(e.node)).toArray().filter( e => (e.node as ast.BuiltinDefinition).name == "array").map(e => (e.node as ast.BuiltinDefinition).symbols).flat();
+    const allElements = this.indexManager
+      .allElements(undefined, uris)
+      .filter((e) => ast.isBuiltinDefinition(e.node))
+      .toArray()
+      .filter((e) => (e.node as ast.BuiltinDefinition).name == "array")
+      .map((e) => (e.node as ast.BuiltinDefinition).symbols)
+      .flat();
     return allElements;
   }
 }

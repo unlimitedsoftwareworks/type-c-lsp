@@ -1,12 +1,18 @@
 import type { LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node.js';
-import type * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node.js';
+import { TypeCFileSystemProvider } from './tc-file-system-provider.js';
 
 let client: LanguageClient;
 
 // This function is called when the extension is activated.
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    context.subscriptions.push(vscode.workspace.registerFileSystemProvider('tcd', new TypeCFileSystemProvider(), {
+        isReadonly: true,
+        isCaseSensitive: true
+    }));
+
     client = await startLanguageClient(context);
 }
 

@@ -1,6 +1,3 @@
-@BuiltinSymbols for array {
-    length
-}
 
 let sum = 1
 
@@ -8,5 +5,5 @@ fn x(arr: u32[]) {
     for let i: u64 = (let z = 0 in z); i < arr ; i += 1 {
         sum += arr[i]
     }
-    return sum
+    return arr.length
 }

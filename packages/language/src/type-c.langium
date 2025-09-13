@@ -67,9 +67,7 @@ FnDecl<allowLocal> returns FunctionDeclaration:
     (
         ('=' expr=TupleExpression) | 
         (body=BlockStatement)
-    ) {
-        infer FunctionDefinition
-    };
+    );
 
 CFnDecl<allowLocal> returns FunctionDeclaration:
     (<allowLocal>isLocal?='local')?
@@ -655,7 +653,9 @@ type IdentifiableReference =
     GenericType |
     ExternFFIDecl |
     StructField |
-    VariantConstructor;
+    VariantConstructor |
+    BuildinSymbolID |
+    BuildinSymbolFn;
 
 // Qualified reference that can handle all complex cases
 QualifiedReference:
@@ -729,12 +729,12 @@ WildCardPattern:
  * Currently applicable to coroutines and arrays.
  */
 BuiltinDefinition:
-    '@' 'BuiltinSymbols' 'for' target=('array' | 'coroutine') '{' symbols+=BuildinSymbol (',' symbols+=BuildinSymbol)* '}'
+    'prototype' 'for' target=('array' | 'coroutine') '{' symbols+=BuildinSymbol (',' symbols+=BuildinSymbol)* '}'
     ;
 
 BuildinSymbol:
-    {infer BuildinSymbolID} name=ID; //  |
-    //{infer BuildinSymbolFn} 'fn' '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
+    {infer BuildinSymbolID} name=ID ':' type=DataType<false> |
+    {infer BuildinSymbolFn} 'fn' name=ID GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
 
 
  

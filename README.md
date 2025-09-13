@@ -1,4 +1,7 @@
-# Workspace overview
+# Type-C LSP Powered by Langium
+Work in progress. `samples` folder contains some examples.
+
+## Workspace overview
 
 Depending on the selection during the project generation you will have one or more packages contained in the packages directory.
 Please check the specific projects here:

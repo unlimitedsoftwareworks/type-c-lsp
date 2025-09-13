@@ -13,8 +13,8 @@
     "contributes": {
         "languages": [{
             "id": "type-c",
-            "aliases": ["Type-C", "type-c"],
-            "extensions": [".tc"],
+            "aliases": ["Type-C", "type-c", "tc"],
+            "extensions": [".tc", ".tcd"],
             "configuration": "./language-configuration.json"
         }],
         "grammars": [{
@@ -24,7 +24,7 @@
         }]
     },
     "activationEvents": [
-        "onLanguage:type-c"
+        "onLanguage:type-c", "onFileSystem:tcd"
     ],
     "main": "./out/extension/main.cjs",
     "scripts": {

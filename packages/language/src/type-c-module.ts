@@ -1,8 +1,10 @@
-import { type Module, inject } from 'langium';
+import { inject, type Module } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
 import { TypeCGeneratedModule, TypeCGeneratedSharedModule } from './generated/module.js';
-import { TypeCValidator, registerValidationChecks } from './type-c-validator.js';
 import { TypeCScopeComputation } from './scope-system/tc-scope-computation.js';
+import { registerValidationChecks, TypeCValidator } from './type-c-validator.js';
+import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
+import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -12,7 +14,8 @@ export type TypeCAddedServices = {
         TypeCValidator: TypeCValidator
     },
     references: {
-        ScopeComputation: TypeCScopeComputation
+        ScopeComputation: TypeCScopeComputation,
+        ScopeProvider: TypeCScopeProvider
     }
 }
 
@@ -32,7 +35,17 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         TypeCValidator: () => new TypeCValidator()
     },
     references: {
-        ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services)
+        ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),
+        ScopeProvider: (services: TypeCServices) => new TypeCScopeProvider(services),
+    }
+};
+
+/**
+ * Question: Where do these come from?
+ */
+export const TypeCSharedModule = {
+    workspace: {
+        WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)
     }
 };
 
@@ -57,7 +70,8 @@ export function createTypeCServices(context: DefaultSharedModuleContext): {
 } {
     const shared = inject(
         createDefaultSharedModule(context),
-        TypeCGeneratedSharedModule
+        TypeCGeneratedSharedModule,
+        TypeCSharedModule
     );
     const TypeC = inject(
         createDefaultModule({ shared }),

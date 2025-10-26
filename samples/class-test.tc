@@ -1,0 +1,22 @@
+type Array<T> = class {
+    let data: T[]
+    let capacity: u64
+    let length: u64
+
+    fn init(capacity: u64) {
+        this.data = []
+        this.capacity = capacity
+        this.length = 0
+    }
+
+    fn print() -> void{
+        return this.data
+    }
+
+}
+
+fn test() {
+    let arr: Array<u32> = new Array<u32>(10)
+    let c = arr.capacity
+    let a = arr.print()
+}

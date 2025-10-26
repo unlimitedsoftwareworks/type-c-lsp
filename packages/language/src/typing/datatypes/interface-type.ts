@@ -3,7 +3,8 @@ import { TypeDescription } from "../type-c-types.js";
 import { FunctionTypeDescription } from "./function-type.js";
 import { AbstractTypeDescription, getNameFromAstNode } from "./base.js";
 
-export interface InterfaceMethodDescription {
+export interface InterfaceMethodDescription extends AbstractTypeDescription {
+    $type: 'InterfaceMethod';
     $node?: AstNode;
     names: string[];
     header: FunctionTypeDescription;
@@ -12,6 +13,7 @@ export interface InterfaceMethodDescription {
 
 export function createInterfaceMethodDescription(names: string[], header: FunctionTypeDescription, node?: AstNode): InterfaceMethodDescription {
     return {
+        $type: 'InterfaceMethod',
         $node: node,
         names,
         header,

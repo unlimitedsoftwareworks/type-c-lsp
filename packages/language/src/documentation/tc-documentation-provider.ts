@@ -1,7 +1,6 @@
 import { AstNode, JSDocDocumentationProvider } from "langium";
-import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import { TypeCServices } from "../type-c-module.js";
-
+import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 
 export class TypeCDocumentationProvider extends JSDocDocumentationProvider {
     private readonly typeProvider: TypeCTypeProvider;

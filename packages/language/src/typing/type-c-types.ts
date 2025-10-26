@@ -2,7 +2,7 @@ import { AnonymousVariantConstructorTypeDescription } from "./datatypes/anonymou
 import { AnyTypeDescription } from "./datatypes/any-type.js";
 import { ArrayTypeDescription } from "./datatypes/array-type.js";
 import { BoolTypeDescription } from "./datatypes/bool-type.js";
-import { ClassDefinitionTypeDescription, ClassTypeDescription } from "./datatypes/class-type.js";
+import { ClassDefinitionTypeDescription, ClassMethodDescription, ClassTypeDescription } from "./datatypes/class-type.js";
 import { CoroutineTypeDescription } from "./datatypes/coroutine-type.js";
 import { EnumTypeDescription } from "./datatypes/enum-type.js";
 import { ErrorTypeDescription } from "./datatypes/error-type.js";
@@ -12,7 +12,7 @@ import { FunctionTypeDescription } from "./datatypes/function-type.js";
 import { GenericTypeDescription } from "./datatypes/generic-type.js";
 import { ImplementationTypeDescription } from "./datatypes/implementation-type.js";
 import { IntegerTypeDescription } from "./datatypes/integer-type.js";
-import { InterfaceTypeDescription } from "./datatypes/interface-type.js";
+import { InterfaceMethodDescription, InterfaceTypeDescription } from "./datatypes/interface-type.js";
 import { NamespaceDefinitionTypeDescription } from "./datatypes/namespace-type.js";
 import { NeverType } from "./datatypes/never-type.js";
 import { NullTypeDescription } from "./datatypes/null-type.js";
@@ -61,6 +61,8 @@ export type TypeDescription =
     ReferenceTypeDescription |
     UnionTypeDescription | // Union is used as a constraint for generics, that is all.
     PrototypeFunctionTypeDescription |
+    InterfaceMethodDescription |
+    ClassMethodDescription |
 
     /**
      * The following types are used for auto-completion, they should never propagate 

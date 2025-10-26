@@ -1,4 +1,15 @@
-import { AstNode, AstNodeDescription, AstUtils, DefaultScopeProvider, DocumentCache, MapScope, ReferenceInfo, Scope, Stream, stream } from "langium";
+import {
+    AstNode,
+    AstNodeDescription,
+    AstUtils,
+    DefaultScopeProvider,
+    DocumentCache,
+    MapScope,
+    ReferenceInfo,
+    Scope,
+    Stream,
+    stream,
+} from "langium";
 import { prototypeURI } from "../builtins/index.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
@@ -17,14 +28,10 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     }
 
     override getScope(context: ReferenceInfo): Scope {
-        {
-            const uris = new Set<string>([prototypeURI]);
-            console.log(this.indexManager.allElements(ast.BuiltinDefinition.$type, uris).toArray());
-        }
         const container = context.container;
-        if(scopeUtils.isMemberResolution(context.container, context)) {
-            if(ast.isMemberAccess(container) && container.expr) {
-                return this.getScopeFromBaseExpressionType(container.expr)
+        if (scopeUtils.isMemberResolution(context.container, context)) {
+            if (ast.isMemberAccess(container) && container.expr) {
+                return this.getScopeFromBaseExpressionType(container.expr);
             }
         }
         return this.getLocalScope(context);
@@ -33,8 +40,8 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     /**
      * Infers the type of the base expression and returns the scope of the type, i.e all identifiable references
      * such as class methods, attributes, array/coroutine prototypes, etc.
-     * @param expr 
-     * @returns 
+     * @param expr
+     * @returns
      */
     private getScopeFromBaseExpressionType(expr: ast.Expression): Scope {
         const baseExprType = this.typeProvider.inferExpression(expr);
@@ -45,7 +52,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     /**
      * This is a reimplementation of the default getScope, minus the reflection check
      * Should scope provider care about the reflection check?
-     * @param context 
+     * @param context
      * @returns local scope
      */
     protected getLocalScope(context: ReferenceInfo): Scope {
@@ -57,7 +64,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             let currentNode: AstNode | undefined = context.container;
             do {
                 if (localSymbols.has(currentNode)) {
-                    scopes.push(localSymbols.getStream(currentNode))
+                    scopes.push(localSymbols.getStream(currentNode));
                 }
                 currentNode = currentNode.$container;
             } while (currentNode);
@@ -70,9 +77,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         return result;
     }
 
-    protected override getGlobalScope(referenceType: string, _context: ReferenceInfo): Scope {
+    protected override getGlobalScope(
+        referenceType: string,
+        _context: ReferenceInfo
+    ): Scope {
         const document = AstUtils.getDocument<ast.Module>(_context.container);
-        return this.globalCache.get(document.uri, referenceType, () => 
+        return this.globalCache.get(document.uri, referenceType, () =>
             this.createGlobalScope(referenceType, document.parseResult.value)
         );
     }
@@ -81,19 +91,24 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         return new MapScope(this.getGlobalScopeElements(referenceType, root));
     }
 
-
-    getGlobalScopeElements(referenceType: string, root: ast.Module, ownFile: boolean = false): Stream<AstNodeDescription> {
+    getGlobalScopeElements(
+        referenceType: string,
+        root: ast.Module,
+        ownFile: boolean = false
+    ): Stream<AstNodeDescription> {
         // The builtin language definition is implicitly imported by every file
         const uris = new Set<string>([prototypeURI]);
         // @TODO: circulate over all imports and add them to the URIs array!
-        
+
         if (ownFile) {
             uris.add(AstUtils.getDocument(root).uri.toString());
         }
         // Prioritize elements of type `RepeatingGroupDef` over `Record`, and `Message` over `MessageDecl`
         // Fields in `RepeatingGroupDef` have additional `req` and `opt` specifiers that override the type of the record fields
-        const allElements = this.indexManager.allElements(referenceType, uris).toArray();
-        
+        const allElements = this.indexManager
+            .allElements(referenceType, uris)
+            .toArray();
+
         return stream(allElements);
     }
 }

@@ -3,7 +3,6 @@ import * as ast from "../../generated/ast.js";
 import { TypeDescription } from "../type-c-types.js";
 import { AbstractTypeDescription, getNameFromAstNode } from "./base.js";
 import { FunctionTypeDescription } from "./function-type.js";
-import { InterfaceMethodDescription } from "./interface-type.js";
 
 
 export interface ClassAttributeDescription {
@@ -32,7 +31,12 @@ export function createClassAttributeDescription(name: string, type: TypeDescript
     };
 }
 
-export interface ClassMethodDescription extends InterfaceMethodDescription {
+export interface ClassMethodDescription extends AbstractTypeDescription {
+    $type: 'ClassMethod';
+    $node?: AstNode;
+    names: string[];
+    header: FunctionTypeDescription;
+    toString: () => string;
     expression?: ast.Expression;
     body?: ast.BlockStatement;
     isStatic: boolean;
@@ -51,6 +55,7 @@ export function createClassMethodDescription(
     node?: AstNode
 ): ClassMethodDescription {
     return {
+        $type: 'ClassMethod',
         names,
         header,
         expression,

@@ -5,6 +5,7 @@
 import { AstNode } from "langium";
 import { TypeDescription } from "../type-c-types.js";
 import { AbstractTypeDescription, getNameFromAstNode } from "./base.js";
+import { GenericTypeDescription } from "./generic-type.js";
 
 export interface PrototypeFunctionParameterDescription {
     name: string;
@@ -31,13 +32,15 @@ export function createPrototypeFunctionParameterDescription(
 
 export interface PrototypeFunctionTypeDescription extends AbstractTypeDescription {
     $type: 'PrototypeFunctionType';
+    genericParameters: GenericTypeDescription[];
     parameters: PrototypeFunctionParameterDescription[];
     returnType: TypeDescription | undefined;
 }
 
-export function createPrototypeFunctionType(parameters: PrototypeFunctionParameterDescription[], returnType: TypeDescription | undefined, node?: AstNode): PrototypeFunctionTypeDescription {
+export function createPrototypeFunctionType(genericParameters: GenericTypeDescription[], parameters: PrototypeFunctionParameterDescription[], returnType: TypeDescription | undefined, node?: AstNode): PrototypeFunctionTypeDescription {
     return {
         $type: 'PrototypeFunctionType',
+        genericParameters,
         parameters,
         returnType,
         $node: node,

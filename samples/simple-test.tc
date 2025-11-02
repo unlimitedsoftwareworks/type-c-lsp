@@ -1,0 +1,6 @@
+fn test() {
+	let x: u32 = 1
+	let y: i32 = 2
+	let z = x + y
+	let c = z
+}

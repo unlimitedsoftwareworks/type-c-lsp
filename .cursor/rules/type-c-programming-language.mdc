@@ -1,0 +1,36 @@
+---
+alwaysApply: true
+---
+
+# About
+Type-C is a general purpose programming language that is designed to be a safe and fast language for application level programming.
+
+# Language Features
+- Static typing with type inference
+- Generics with constraints
+- Classes and interfaces with inheritance
+- Variant types (algebraic data types) with pattern matching
+- Coroutines (generator-like constructs)
+- FFI declarations for external libraries
+- Namespaces for code organization
+- Multiple destructuring patterns
+- Operator overloading via method names
+
+# Type System
+
+Type-C supports a lot of data types:
+
+- Primitive Types: Basic types such as bool, u32, f64, etc.
+- Structs: Structured types that group together other types.
+- Enums: Enumerated types that can hold one of several values.
+- Variants: Variants, also known as algebraic data types, that can hold one of several types, with constructors.
+- Arrays: Arrays, a collection of elements of the same type.
+- Functions: Functions as data types, since Type-C supports first-class functions, functions need to be typed as well.
+- Interfaces: Interfaces, the basic building blocks of interface-oriented programming in type-c. Defines a set of methods that a class must implement.
+- Classes: Classes, a subset of object-oriented programming in type-c.
+- Implementations: Implementations, a group of methods that a class can reuse
+- Tuples: Tuples, a type that can hold a fixed number of elements of different types. Though it is only used for function return types and unpacking those values.
+- Nullables: Nullables, a type that can hold either a value or null.
+- `ReturnType<T>`: A type that can hold a return value of a function.
+
+

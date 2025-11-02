@@ -9,14 +9,19 @@ type Array<T> = class {
         this.length = 0
     }
 
-    fn print() -> void{
+    fn print() -> void {
         return this.data
+    }
+
+    fn clone() -> Array<T> {
+        return new Array<T>(this.capacity)
     }
 
 }
 
 fn test() {
-    let arr: Array<u32> = new Array<u32>(10)
-    let c = arr.capacity
-    let a = arr.print()
+    let arr = new Array<Array<u32> >(10)
+    let c = arr.clone()
+    let z: u32[] = [1, 2]
+    let y = z.length
 }

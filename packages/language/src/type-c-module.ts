@@ -7,6 +7,7 @@ import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCDocumentationProvider } from './documentation/tc-documentation-provider.js';
+import { TypeCHoverProvider } from './documentation/tc-hover-provider.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -51,6 +52,9 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     },
     documentation: {
         DocumentationProvider: (services: TypeCServices) => new TypeCDocumentationProvider(services)
+    },
+    lsp: {
+        HoverProvider: (services: TypeCServices) => new TypeCHoverProvider(services)
     }
 };
 

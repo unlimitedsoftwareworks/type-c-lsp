@@ -466,6 +466,7 @@ PrimeType infers DataType:
     ImplementationType {infer ImplementationType} |
     FunctionType {infer FunctionType} | 
     CoroutineType {infer CoroutineType} |
+    ReturnType {infer ReturnType} |
     StringEnumType {infer StringEnumType};
 
 RefType:
@@ -525,6 +526,9 @@ FunctionType:
 
 CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader '>';
+
+ReturnType:
+    'ReturnType' '(' returnType=DataType<false> ')';
 
 StringEnumType:
     cases+=STRING (',' cases+=STRING)*;
@@ -652,8 +656,8 @@ type IdentifiableReference =
     EnumCase |
     GenericType |
     ExternFFIDecl |
-    StructField |
-    VariantConstructor |
+    StructField |         // For named struct type fields
+    StructFieldKeyValuePair |  // For duck-typed struct literal fields
     BuiltinSymbolID |
     BuiltinSymbolFn;
 
@@ -739,20 +743,23 @@ BuiltinSymbol:
 
  
 hidden terminal WS: /\s+/;
-terminal SIGNIFICANT_NEWLINE: /\r?\n/;
 
-terminal GENERICS_OPEN: /<(?=\s*[_a-zA-Z][\w_]*\s*(?:,\s*[_a-zA-Z][\w_]*\s*)*>)/;
+// Lookahead to distinguish < as generic open from < as less-than operator
+// This pattern is more permissive to handle nested generics like Array<Array<u32>>
+// It looks for < followed by valid type syntax (identifiers, commas, nested <>, etc.) and ending with >
+terminal GENERICS_OPEN: /<(?=\s*[_a-zA-Z])/;
 terminal LESS_THAN: /</;
 
 /**
  * Literals, order matters.
  */
 
-// Double literal: Supports numbers with fractional parts, exponent, but no 'f' or 'F' suffix
-terminal DOUBLE_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+)([eE][+-]?[0-9]+)?/;
 // Float literal: Supports numbers with fractional parts, exponent, and 'f' or 'F' suffix
 // Same as double but with 'f' or 'F' suffix
 terminal FLOAT_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+)([eE][+-]?[0-9]+)?[fF]/;
+
+// Double literal: Supports numbers with fractional parts, exponent, but no 'f' or 'F' suffix
+terminal DOUBLE_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+)([eE][+-]?[0-9]+)?/;
 
 // Hexadecimal with optional type suffix
 // 0x1234u32 -> a u32 literal

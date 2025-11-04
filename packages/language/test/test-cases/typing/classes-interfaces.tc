@@ -1,0 +1,195 @@
+/**
+ * Tests for class and interface type inference
+ * - Class types
+ * - Class attributes and methods
+ * - Generic classes
+ * - Interface types
+ * - Method calls and member access
+ */
+
+// Simple class
+type Person = class {
+    let name: string
+    let age: u32
+
+    fn init(name: string, age: u32) {
+        this.name = name
+        this.age = age
+    }
+
+    fn greet() -> string {
+        return "Hello"
+    }
+
+    fn getAge() -> u32 {
+        return this.age
+    }
+}
+
+fn testSimpleClass() -> void {
+    let person: Person = new Person("Alice", 30)
+    let personName = person.name
+    let personAge = person.age
+    let greeting = person.greet()
+    let age = person.getAge()
+}
+
+// Generic class
+type Box<T> = class {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+
+    fn get() -> T {
+        return this.value
+    }
+
+    fn set(newValue: T) -> void {
+        this.value = newValue
+    }
+}
+
+fn testGenericClass() -> void {
+    let intBox: Box<i32> = new Box<i32>(42)
+    let boxValue = intBox.value
+    let retrieved = intBox.get()
+    
+    let strBox: Box<string> = new Box<string>("hello")
+    let strValue = strBox.value
+    let strRetrieved = strBox.get()
+}
+
+// Class with multiple methods and operator overloading
+type Counter = class {
+    let count: i32
+
+    fn init(start: i32) {
+        this.count = start
+    }
+
+    fn increment() -> Counter {
+        return this
+    }
+
+    fn + (other: Counter) -> Counter {
+        return new Counter(this.count)
+    }
+
+    fn getCount() -> i32 {
+        return this.count
+    }
+}
+
+fn testClassWithOperators() -> void {
+    let counter1: Counter = new Counter(0)
+    let counter2: Counter = new Counter(5)
+    let combined = counter1 + counter2
+    let finalCount = combined.getCount()
+}
+
+// Interface
+type Drawable = interface {
+    fn draw(n: Drawable) -> void
+    fn move(x: f64, y: f64) -> void
+}
+
+// Class implementing interface (structural typing)
+type Circle = class Drawable {
+    let radius: f64
+    let centerX: f64
+    let centerY: f64
+
+    fn init(radius: f64, x: f64, y: f64) {
+        this.radius = radius
+        this.centerX = x
+        this.centerY = y
+    }
+
+    fn draw(n: Drawable) -> void {
+        return
+    }
+
+    fn move(x: f64, y: f64) -> void {
+        this.centerX = x
+        this.centerY = y
+    }
+
+    fn getRadius() -> f64 {
+        return this.radius
+    }
+
+    static fn makeCircle(radius: f64, x: f64, y: f64) -> Circle {
+        return new Circle(radius, x, y)
+    }
+}
+
+fn makeCircle(radius: f64, x: f64, y: f64) -> Circle {
+    return new Circle(radius, x, y)
+}
+
+fn testInterface() -> void {
+    let circle: Circle = makeCircle(5.0, 0.0, 0.0)
+    let drawable: Drawable = circle
+    let radius = circle.getRadius()
+}
+
+// Nested generic class
+type Container<T> = class {
+    let items: T[]
+    let count: u64
+
+    fn init() {
+        this.items = []
+        this.count = 0u64
+    }
+
+    fn add(item: T) -> void {
+        this.count = this.count + 1u64
+    }
+
+    fn get(index: u64) -> T {
+        return this.items[0u64]
+    }
+}
+
+fn testNestedGenerics() -> void {
+    let container: Container<Box<i32> > = new Container<Box<i32> >()
+    let box1: Box<i32> = new Box<i32>(10)
+    let retrievedBox = container.get(0u64)
+    let innerValue = retrievedBox.value
+}
+
+// Class with generic method return type
+type Pair<A, B> = class {
+    let first: A
+    let second: B
+
+    fn init(first: A, second: B) {
+        this.first = first
+        this.second = second
+    }
+
+    fn getFirst() -> A {
+        return this.first
+    }
+
+    fn getSecond() -> B {
+        return this.second
+    }
+
+    fn swap() -> Pair<B, A> {
+        return new Pair<B, A >(this.second, this.first)
+    }
+}
+
+fn testMultipleGenerics() -> void {
+    let pair: Pair<string, i32> = new Pair<string, i32>("answer", 42)
+    let firstVal = pair.getFirst()
+    let secondVal = pair.getSecond()
+    let swapped = pair.swap()
+    let swappedFirst = swapped.getFirst()
+    let swappedSecond = swapped.getSecond()
+}
+

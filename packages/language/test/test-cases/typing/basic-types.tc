@@ -1,0 +1,64 @@
+/**
+ * Tests for basic type inference
+ * - Primitive types
+ * - Struct types
+ * - Type inference
+ */
+
+// Primitive integer types
+fn testIntegers() -> void {
+    let a: u8 = 255u8
+    let b: u16 = 65535u16
+    let c: u32 = 4294967295u32
+    let d: u64 = 18446744073709551615u64
+    
+    let e: i8 = -128i8
+    let f: i16 = -32768i16
+    let g: i32 = -2147483648i32
+    let h: i64 = -9223372036854775808i64
+}
+
+// Primitive float types
+fn testFloats() -> void {
+    let floatX = 3.14f
+    let floatY: f64 = 2.718281828
+}
+
+// Primitive bool and string
+fn testBoolString() -> void {
+    let flag: bool = true
+    let message: string = "hello"
+}
+
+// Struct type
+type Point = struct {
+    x: f64,
+    y: f64,
+}
+
+fn testStruct() -> void {
+    let origin: Point = { x: 0.0, y: 0.0 }
+    let px = origin.x
+}
+
+// Type inference with primitives
+fn testInference() -> void {
+    let inferredU32 = 42
+    let inferredF64 = 3.14
+    let inferredBool = false
+    let inferredString = "test"
+}
+
+// Type inference with struct via duck typing
+fn testStructInference() -> void {
+    let point = { x: 1.0, y: 2.0 }
+    let xCoord = point.x
+}
+
+// Binary operations preserve types
+fn testBinaryOps() -> void {
+    let sum = 10u32 + 20u32
+    let product = 5i32 * 3i32
+    let quotient = 100.0 / 4.0
+}
+

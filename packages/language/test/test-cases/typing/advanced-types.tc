@@ -1,0 +1,40 @@
+// Variant types
+type Option<T> = variant {
+    Some(value: T),
+    None,
+}
+
+fn testVariants() -> void {
+    let someValue: Option<i32> = Option.Some(42)
+    let noneValue: Option<string> = Option.None
+}
+
+// Array operations
+fn testArrayOps() -> void {
+    let numbers: i32[] = [1, 2, 3, 4, 5]
+    let len = numbers.length
+    let first = numbers[0]
+}
+
+// Nullable chains
+type LinkedNode<T> = class {
+    let value: T
+    let next: LinkedNode<T>?
+    
+    fn init(value: T) {
+        this.value = value
+        this.next = null
+    }
+}
+
+fn testNullableChains() -> void {
+    let node1: LinkedNode<i32> = new LinkedNode<i32>(1)
+    let nextNode = node1.next
+    let nextValue = node1.next?.value
+}
+
+// Type casting
+fn testTypeCasting() -> void {
+    let num: i32 = 42
+    let bigNum = num as i64
+}

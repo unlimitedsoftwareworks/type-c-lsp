@@ -1,0 +1,44 @@
+/**
+ * Test cases that SHOULD produce return type errors
+ * These are intentionally invalid to test validation
+ */
+
+// ERROR: Can't infer common type - i32 vs string
+fn badMixedTypes(n: u32) {
+    return match n {
+        0 => 42,
+        _ => "oops"
+    }
+}
+
+// ERROR: Can't infer common type - different struct fields with different types
+fn badStructTypes(n: u32) {
+    return match n {
+        0 => {x: 1u32, y: 2u32},
+        _ => {x: 1u64, y: 2u64}
+    }
+}
+
+// ERROR: Declared type doesn't match inferred type
+fn badDeclaredType() -> string {
+    return 42
+}
+
+// VALID: Can infer successfully
+fn goodInferred(n: u32) {
+    return match n {
+        0 => 1u32,
+        _ => 2u32
+    }
+}
+
+// VALID: Declared type matches inferred type
+fn goodDeclared() -> u32 {
+    return 42
+}
+
+fn main() -> void {
+    let a = goodInferred(0)
+    let b = goodDeclared()
+}
+

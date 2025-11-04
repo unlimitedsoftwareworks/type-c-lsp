@@ -1,5 +1,5 @@
-import type { TypeCServices } from './type-c-module.js';
-import { TypeCBaseValidation } from './validations/base-validation.js';
+import type { TypeCServices } from '../type-c-module.js';
+import { TypeCBaseValidation } from './base-validation.js';
 
 /**
  * Register custom validation checks.
@@ -9,7 +9,9 @@ export function registerValidationChecks(services: TypeCServices) {
     const validations: TypeCBaseValidation[] = [
         services.validation.TypeSystemValidator
     ]
+
     for (const validation of validations) {
         registry.register(validation.getChecks(), validation);
     }
 }
+

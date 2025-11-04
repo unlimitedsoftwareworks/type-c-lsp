@@ -1,0 +1,64 @@
+/**
+ * Tests for implicit type coercion
+ * 
+ * Safe conversions that should work:
+ * - Integer literals → any numeric type
+ * - Smaller integers → larger integers (widening)
+ * - Integers → floats (no precision loss for small values)
+ * - f32 → f64 (widening)
+ */
+
+// Integer literals should coerce to any numeric type
+fn takesF32(x: f32) -> f32 { return x }
+fn takesF64(x: f64) -> f64 { return x }
+fn takesI32(x: i32) -> i32 { return x }
+fn takesU64(x: u64) -> u64 { return x }
+
+fn testLiteralCoercion() -> void {
+    // Integer literals should work with any numeric type
+    let a = takesF32(0)      // i32 literal → f32
+    let b = takesF64(42)     // i32 literal → f64
+    let c = takesI32(100)    // i32 literal → i32 (exact match)
+    let d = takesU64(255)    // i32 literal → u64
+}
+
+// Widening integer conversions (safe)
+fn testIntegerWidening() -> void {
+    let x8: u8 = 10u8
+    let x16: u16 = x8        // u8 → u16 ✅
+    
+    let y32: i32 = -42
+    let y64: i64 = y32       // i32 → i64 ✅
+}
+
+// Integer to float conversion (safe for small values)
+fn testIntToFloat() -> void {
+    let i: i32 = 100
+    let f: f32 = i           // i32 → f32 ✅
+    
+    let j: u64 = 1000u64
+    let g: f64 = j           // u64 → f64 ✅
+}
+
+// Float widening (safe)
+fn testFloatWidening() -> void {
+    let small: f32 = 3.14
+    let large: f64 = small   // f32 → f64 ✅
+}
+
+// Mixed expression coercion
+fn testMixedExpressions() -> void {
+    let result1: f32 = 1 + 2         // (i32 + i32) → f32
+    let result2: f64 = 10 * 20       // (i32 * i32) → f64
+}
+
+// Function call coercion
+fn multiply(a: f64, b: f64) -> f64 {
+    return a * b
+}
+
+fn testFunctionCallCoercion() -> void {
+    let area = multiply(5, 10)       // Both i32 literals → f64
+    let mixed = multiply(5, 3.14)    // i32 literal + f64 literal
+}
+

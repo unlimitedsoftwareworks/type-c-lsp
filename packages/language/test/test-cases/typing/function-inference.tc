@@ -1,0 +1,28 @@
+// Recursive functions with contextual type inference for integer literals
+fn fib(n: u32) -> u32 = if n < 2 => n else fib(n - 1) + fib(n - 2)
+
+// Mutually recursive functions
+fn f1(x: u32) -> u32 = if x < 1 => 1 else f2(x - 1)
+fn f2(x: u32) -> u32 = if x < 2 => 2 else f1(x - 1) + f2(x - 2)
+
+fn f3() = 3u32
+fn anotherFib(n: u32) = 
+	match n {
+		0 => {x: 1i32, y: 2u32},
+		1 => {x: 3i32, y: 4u32, z: 5u32},
+		_ => {x: 6i32, y: 7u32, z: 8.0f}
+	}
+
+fn fiiib(n: u32) {
+	if n < 2 {
+		return 0u32
+	}
+	return fiiib(n - 1) + fiiib(n - 2)
+}
+
+fn main() -> void {
+	let z = fib(10)
+	let y = f3()
+	let x = fiiib(10)
+	let a = anotherFib(10)
+}

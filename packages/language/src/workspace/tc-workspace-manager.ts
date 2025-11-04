@@ -12,6 +12,8 @@ export class TCWorkspaceManager extends DefaultWorkspaceManager {
 
     protected override async loadAdditionalDocuments(_folders: WorkspaceFolder[], collector: (document: LangiumDocument) => void): Promise<void> {
         for (const [uri, content] of Object.entries(builtins)) {
+            // Skip non-document entries like libraryScheme
+            if (uri === 'libraryScheme') continue;
             collector(this.documentFactory.fromString(content, URI.parse(uri)));
         }
     }

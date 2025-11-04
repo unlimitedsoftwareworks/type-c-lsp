@@ -1,0 +1,128 @@
+/**
+ * Comprehensive struct type tests for Type-C
+ * Tests duck typing, structural subtyping, and field inference
+ */
+
+// Named struct type definition
+type Point = struct {
+    x: f64,
+    y: f64
+}
+
+type Point3D = struct {
+    x: f64,
+    y: f64,
+    z: f64
+}
+
+// Named struct with various types
+type Person = struct {
+    name: string,
+    age: u32,
+    height: f64
+}
+
+// Anonymous struct literals (duck typing)
+fn createPoint() {
+    return {x: 1.0, y: 2.0}
+}
+
+fn createPoint3D() {
+    return {x: 1.0, y: 2.0, z: 3.0}
+}
+
+// Struct with explicit type annotation
+fn createNamedPoint() -> Point {
+    return {x: 5.0, y: 10.0}
+}
+
+// Struct field access
+fn accessFields() {
+    let p = {x: 3.0, y: 4.0}
+    let xVal = p.x
+    let yVal = p.y
+    return xVal + yVal
+}
+
+// Nested structs
+type Rectangle = struct {
+    topLeft: Point,
+    bottomRight: Point
+}
+
+fn createRectangle() {
+    return {
+        topLeft: {x: 0.0, y: 0.0},
+        bottomRight: {x: 10.0, y: 10.0}
+    }
+}
+
+fn accessNestedFields() {
+    let rect = createRectangle()
+    let x1 = rect.topLeft.x
+    let y1 = rect.topLeft.y
+    let x2 = rect.bottomRight.x
+    let y2 = rect.bottomRight.y
+    return x2 - x1
+}
+
+// Structural subtyping: return common fields from match
+fn testStructuralSubtyping() {
+    return match true {
+        true => {x: 1.0, y: 2.0},
+        _ => {x: 3.0, y: 4.0, z: 5.0}
+    }
+}
+
+// Common type inference with structural subtyping
+fn getPointVariant(n: u32) {
+    return match n {
+        0 => {x: 1.0, y: 2.0},
+        1 => {x: 3.0, y: 4.0, z: 5.0},
+        _ => {x: 5.0, y: 6.0, z: 7.0}
+    }
+}
+
+// Struct with mixed field types
+fn createMixedStruct() {
+    return {
+        id: 42u32,
+        name: "test",
+        active: true,
+        score: 95.5
+    }
+}
+
+fn accessMixedStruct() {
+    let s = createMixedStruct()
+    let id = s.id
+    let name = s.name
+    let active = s.active
+    let score = s.score
+    return id
+}
+
+// Struct as function parameter
+fn calculateDistance(p: Point) -> f64 {
+    return p.x * p.x + p.y * p.y
+}
+
+fn testStructParameter() {
+    let point = {x: 3.0, y: 4.0}
+    return calculateDistance(point)
+}
+
+// Multiple struct variables
+fn testMultipleStructs() {
+    let p1 = {x: 1.0, y: 2.0}
+    let p2 = {x: 3.0, y: 4.0}
+    let dx = p2.x - p1.x
+    let dy = p2.y - p1.y
+    return dx + dy
+}
+
+fn main() -> void {
+    let point = createPoint()
+    let sum = accessFields()
+}
+

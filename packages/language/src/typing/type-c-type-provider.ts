@@ -21,6 +21,7 @@ import {
     MethodType,
     PrototypeMethodType,
     StructFieldType,
+    ErrorTypeDescription,
     isClassType,
     isStructType,
     isInterfaceType,
@@ -31,7 +32,8 @@ import {
     isNullableType,
     isTupleType,
     isReferenceType,
-    isPrototypeType
+    isPrototypeType,
+    isVariantType
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
@@ -43,6 +45,18 @@ import { simplifyType, substituteGenerics } from './type-utils.js';
 export class TypeCTypeProvider {
     /** Cache for computed types, keyed by AST node */
     private readonly typeCache = new WeakMap<AstNode, TypeDescription>();
+    
+    /** Cache for resolved reference types (avoids re-resolving references) */
+    private readonly resolvedReferenceCache = new WeakMap<AstNode, TypeDescription>();
+    
+    /**
+     * Tracks functions currently being inferred to prevent infinite recursion.
+     * 
+     * When inferring recursive functions like `fn fib(n) = fib(n-1) + fib(n-2)`,
+     * we need to detect when we're already inferring the same function to avoid
+     * stack overflow.
+     */
+    private readonly inferringFunctions = new Set<AstNode>();
     
     /** Services for accessing Langium infrastructure */
     protected readonly services: TypeCServices;
@@ -126,6 +140,95 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Gets the expected type for an expression based on its context.
+     * 
+     * **Purpose:**
+     * Determines what type is expected in a given context for:
+     * - Type checking (is inferred type compatible with expected?)
+     * - Context-sensitive scoping (variant constructors, enum cases)
+     * - Generic type inference
+     * 
+     * **Contexts where expected type exists:**
+     * 1. Variable declarations with annotations: `let x: T = expr` → T
+     * 2. Function arguments: `foo(expr)` → parameter type
+     * 3. Return statements: `return expr` → function return type
+     * 4. Assignment: `x = expr` → type of x
+     * 5. Binary operations: `x + expr` → type compatible with x
+     * 
+     * @param node The expression node to get expected type for
+     * @returns The expected type, or undefined if no expectation exists
+     * 
+     * @example
+     * ```typescript
+     * let x: Option<u32> = Some(42)
+     *                      ^^^^^^^^
+     * getExpectedType(Some(42)) → Option<u32>
+     * 
+     * foo(bar)  // where foo(param: i32)
+     *     ^^^
+     * getExpectedType(bar) → i32
+     * ```
+     */
+    getExpectedType(node: AstNode): TypeDescription | undefined {
+        const parent = node.$container;
+        
+        // Variable declaration with annotation
+        // let x: T = expr
+        if (ast.isVariableDeclaration(parent) && parent.annotation && parent.initializer === node) {
+            return this.getType(parent.annotation);
+        }
+        
+        // Function call argument
+        // foo(expr)
+        if (ast.isFunctionCall(parent)) {
+            const fnType = this.inferExpression(parent.expr);
+            if (isFunctionType(fnType)) {
+                // Find which argument position this is
+                const argIndex = parent.args?.findIndex(arg => arg === node);
+                if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
+                    return fnType.parameters[argIndex].type;
+                }
+            }
+        }
+        
+        // Return statement
+        // return expr
+        if (ast.isReturnStatement(parent)) {
+            // Find the containing function
+            const fn = AstUtils.getContainerOfType(parent, ast.isFunctionDeclaration);
+            if (fn && fn.header.returnType) {
+                return this.getType(fn.header.returnType);
+            }
+        }
+        
+        // Binary expressions: use the other operand's type as context
+        // This enables: n < 2 (where n is u32) → 2 is inferred as u32
+        if (ast.isBinaryExpression(parent)) {
+            // Assignment operators: right side uses left's type
+            const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
+            if (assignmentOps.includes(parent.op) && parent.right === node) {
+                return this.inferExpression(parent.left);
+            }
+            
+            // Comparison and arithmetic operators: use the OTHER operand's type
+            // BUT: Only use contextual typing for literals to avoid infinite recursion
+            const binaryOps = ['<', '>', '<=', '>=', '==', '!=', '+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>'];
+            if (binaryOps.includes(parent.op) && (ast.isIntegerLiteral(node) || ast.isFloatingPointLiteral(node))) {
+                // This is a literal - try to use the other operand's type
+                const otherOperand = parent.right === node ? parent.left : parent.right;
+                
+                // Only infer from the other operand if it's NOT also a literal (avoid circular inference)
+                if (!ast.isIntegerLiteral(otherOperand) && !ast.isFloatingPointLiteral(otherOperand)) {
+                    return this.inferExpression(otherOperand);
+                }
+            }
+        }
+        
+        // No expected type found
+        return undefined;
+    }
+
+    /**
      * Gets identifiable fields from a type for scope resolution and auto-completion.
      * 
      * **Purpose:**
@@ -203,13 +306,26 @@ export class TypeCTypeProvider {
         }
         
         // Struct fields
-        if (isStructType(type) && type.node && ast.isStructType(type.node)) {
-            nodes.push(...type.node.fields);
+        if (isStructType(type)) {
+            if (type.node && ast.isStructType(type.node)) {
+                // Named struct type - has AST nodes for fields
+                nodes.push(...type.node.fields);
+            } else if (type.node && ast.isStructFieldExprList(type.node)) {
+                // Duck-typed struct from literal - extract StructFieldKeyValuePair nodes
+                const fieldNodes = type.node.fields.filter(f => ast.isStructFieldKeyValuePair(f));
+                nodes.push(...fieldNodes);
+            }
         }
         
         // Interface methods
         if (isInterfaceType(type) && type.node && ast.isInterfaceType(type.node)) {
             nodes.push(...type.node.methods);
+        }
+        
+        // Variant constructors - exposed when accessing a variant type
+        // Example: Option.Some, Option.None
+        if (isVariantType(type) && type.node && ast.isVariantType(type.node)) {
+            nodes.push(...type.node.constructors);
         }
         
         // Prototype methods (for direct prototype access, though usually accessed via array/coroutine)
@@ -233,7 +349,10 @@ export class TypeCTypeProvider {
         if (ast.isUnionType(node)) return this.inferUnionType(node);
         if (ast.isJoinType(node)) return this.inferJoinType(node);
         // Tuple types are represented directly in grammar, not as separate AST nodes
-        if (node.$type === 'TupleType') return this.inferTupleTypeFromDataType(node as any);
+        if (node.$type === 'TupleType' && 'types' in node && Array.isArray(node.types)) {
+            // TypeScript needs explicit cast here since grammar-generated types aren't complete
+            return this.inferTupleTypeFromDataType(node as AstNode & { types: AstNode[] });
+        }
         if (ast.isPrimitiveType(node)) return factory.createPrimitiveTypeFromAST(node);
         if (ast.isStructType(node)) return this.inferStructType(node);
         if (ast.isVariantType(node)) return this.inferVariantType(node);
@@ -345,13 +464,10 @@ export class TypeCTypeProvider {
         return simplifyType(factory.createJoinType(types, node));
     }
 
-    private inferTupleTypeFromDataType(node: any): TypeDescription {
+    private inferTupleTypeFromDataType(node: AstNode & { types: AstNode[] }): TypeDescription {
         // Tuple types have a 'types' property with array of DataType
-        if (node.types && Array.isArray(node.types)) {
-            const elementTypes = node.types.map((t: any) => this.getType(t));
-            return factory.createTupleType(elementTypes, node);
-        }
-        return factory.createErrorType('Invalid tuple type', undefined, node);
+        const elementTypes = node.types.map(t => this.getType(t));
+        return factory.createTupleType(elementTypes, node);
     }
 
     private inferStructType(node: ast.StructType): TypeDescription {
@@ -418,14 +534,15 @@ export class TypeCTypeProvider {
     }
 
     private inferClassType(node: ast.ClassType): TypeDescription {
-        const attributes = node.attributes?.flatMap((attrDecl: any) => 
-            (attrDecl.attributes || []).map((a: any) => factory.createAttributeType(
-                a.name,
-                this.getType(a.type),
-                a.isStatic ?? false,
-                a.isConst ?? false,
-                a.isLocal ?? false
-            ))
+        // node.attributes is directly an Array<ClassAttributeDecl>
+        const attributes = node.attributes?.map(attrDecl => 
+            factory.createAttributeType(
+                attrDecl.name,
+                this.getType(attrDecl.type),
+                attrDecl.isStatic ?? false,
+                attrDecl.isConst ?? false,
+                attrDecl.isLocal ?? false
+            )
         ) ?? [];
 
         const methods = node.methods?.map(m => {
@@ -543,7 +660,7 @@ export class TypeCTypeProvider {
             return factory.createErrorType('Unresolved type reference', undefined, node);
         }
 
-        const declaration = node.qname.ref;
+        const declaration: AstNode = node.qname.ref;
         
         // Handle references to generic type parameters (e.g., T in Array<T>)
         if (ast.isGenericType(declaration)) {
@@ -559,7 +676,7 @@ export class TypeCTypeProvider {
         }
 
         // Handle any other identifiable references that might be types
-        const declType = (declaration as any).$type || 'unknown';
+        const declType = declaration.$type || 'unknown';
         return factory.createErrorType(
             `Reference does not point to a type declaration or generic parameter (found: ${declType})`, 
             undefined, 
@@ -576,7 +693,15 @@ export class TypeCTypeProvider {
             return refType;
         }
 
-        // Check if already resolved
+        // Check if already resolved in cache
+        if (refType.node) {
+            const cached = this.resolvedReferenceCache.get(refType.node);
+            if (cached) {
+                return cached;
+            }
+        }
+
+        // Check if already resolved in actualType property
         if (refType.actualType) {
             return refType.actualType;
         }
@@ -595,14 +720,18 @@ export class TypeCTypeProvider {
 
             const substitutedType = substituteGenerics(actualType, substitutions);
             
-            // Cache the resolved type (mutating for caching purposes)
-            (refType as any).actualType = substitutedType;
+            // Cache the resolved type
+            if (refType.node) {
+                this.resolvedReferenceCache.set(refType.node, substitutedType);
+            }
             
             return substitutedType;
         }
 
-        // Cache the resolved type (mutating for caching purposes)
-        (refType as any).actualType = actualType;
+        // Cache the resolved type
+        if (refType.node) {
+            this.resolvedReferenceCache.set(refType.node, actualType);
+        }
         
         return actualType;
     }
@@ -715,6 +844,21 @@ export class TypeCTypeProvider {
     // Declaration Type Inference
     // ========================================================================
 
+    /**
+     * Infers the type of a function declaration.
+     * 
+     * **For recursive functions:**
+     * - If return type is explicitly annotated → use it
+     * - If not annotated → try to infer from non-recursive paths (base cases)
+     * - If inference fails (no base cases) → ERROR
+     * 
+     * Examples:
+     * ```
+     * fn fib(n: u32) -> u32 = ...        // ✅ Explicit type
+     * fn fib(n: u32) = if n < 2 => n ... // ✅ Can infer u32 from base case
+     * fn fib(n: u32) = fib(n-1)          // ❌ Error: no base case to infer from
+     * ```
+     */
     private inferFunctionDeclaration(node: ast.FunctionDeclaration): TypeDescription {
         const genericParams = node.genericParameters?.map(g => this.inferGenericType(g)) as GenericTypeDescription[] ?? [];
         const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
@@ -722,20 +866,259 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
-        const returnType = node.header?.returnType 
-            ? this.getType(node.header.returnType)
-            : this.inferReturnTypeFromBody(node.body, node.expr);
+        
+        // For recursive functions: use explicit type if available
+        if (this.inferringFunctions.has(node)) {
+            if (node.header?.returnType) {
+                // Explicit return type provided - use it
+                const returnType = this.getType(node.header.returnType);
+                return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
+            } else {
+                // In recursive call - return an error placeholder to break cycle
+                // The actual return type will be inferred from non-recursive paths
+                // Using error type instead of void so validators ignore it
+                return factory.createFunctionType(
+                    params, 
+                    factory.createErrorType('__recursion_placeholder__', undefined, node),
+                    node.fnType, 
+                    genericParams, 
+                    node
+                );
+            }
+        }
+        
+        // Mark this function as being inferred
+        this.inferringFunctions.add(node);
+        
+        try {
+            const returnType = node.header?.returnType 
+                ? this.getType(node.header.returnType)
+                : this.inferReturnTypeFromBody(node.body, node.expr);
+            
+            // Check if inference failed (still have an error type)
+            if (returnType.kind === TypeKind.Error && !node.header?.returnType) {
+                return factory.createFunctionType(
+                    params,
+                    factory.createErrorType(
+                        'Cannot infer return type for recursive function. Add explicit return type annotation.',
+                        undefined,
+                        node
+                    ),
+                    node.fnType,
+                    genericParams,
+                    node
+                );
+            }
 
-        return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
+            return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
+        } finally {
+            // Always remove from the set, even if inference fails
+            this.inferringFunctions.delete(node);
+        }
     }
 
+    /**
+     * Infer return type from function body or expression.
+     * 
+     * Strategy:
+     * 1. If expression-body function: use expression type
+     * 2. If block-body function: collect all return statements (only from this function!)
+     * 3. Find common type of all returns
+     * 4. If no returns → void
+     */
     private inferReturnTypeFromBody(body?: ast.BlockStatement, expr?: ast.Expression): TypeDescription {
-        // TODO: Implement full return type inference from function body
-        // For now, return void
+        // Expression-body function: fn foo() = expr
         if (expr) {
             return this.getType(expr);
         }
+        
+        // Block-body function: fn foo() { ... }
+        if (body) {
+            const returnStatements = this.collectReturnStatements(body);
+            
+            if (returnStatements.length === 0) {
+                return factory.createVoidType();
+            }
+            
+            // Get types of all return expressions
+            const allReturnTypes = returnStatements
+                .map(stmt => stmt.expr ? this.getType(stmt.expr) : factory.createVoidType());
+            
+            // Filter out recursion placeholders (error types with specific message)
+            const nonPlaceholderTypes = allReturnTypes.filter(type => {
+                if (type.kind === TypeKind.Error) {
+                    const errorType = type as ErrorTypeDescription;
+                    return errorType.message !== '__recursion_placeholder__';
+                }
+                return true; // Keep non-error types
+            });
+            
+            // Use non-placeholder types if available, otherwise all types
+            const returnTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allReturnTypes;
+            
+            if (returnTypes.length === 0) {
+                return factory.createVoidType();
+            }
+            
+            // Find common type
+            return this.getCommonType(returnTypes);
+        }
+        
         return factory.createVoidType();
+    }
+
+    /**
+     * Collect all return statements from a block, but ONLY from this function level.
+     * Does NOT collect returns from nested functions!
+     */
+    private collectReturnStatements(block: ast.BlockStatement): ast.ReturnStatement[] {
+        const returns: ast.ReturnStatement[] = [];
+        
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function - don't collect its returns!
+            if (ast.isFunctionDeclaration(node)) {
+                return; // Don't traverse into nested functions
+            }
+            
+            if (ast.isReturnStatement(node)) {
+                returns.push(node);
+            }
+            
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+        
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+        
+        return returns;
+    }
+
+    /**
+     * Find the common type of multiple types.
+     * 
+     * Used for:
+     * - Return type inference (all return statements)
+     * - Array literal inference (all elements)
+     * - Match expression inference (all arms)
+     * 
+     * Strategy:
+     * 1. If all types are identical → use that type
+     * 2. If all are structs → find common fields (structural subtyping)
+     * 3. If types are compatible via coercion → use the wider type (TODO)
+     * 4. Otherwise → error type
+     */
+    private getCommonType(types: TypeDescription[]): TypeDescription {
+        if (types.length === 0) {
+            return factory.createVoidType();
+        }
+        
+        if (types.length === 1) {
+            return types[0];
+        }
+        
+        // Check if all types are identical
+        const firstType = types[0];
+        const allIdentical = types.every(t => t.toString() === firstType.toString());
+        
+        if (allIdentical) {
+            return firstType;
+        }
+        
+        // Check if all are struct types - use structural subtyping
+        const allStructs = types.every(t => isStructType(t));
+        if (allStructs) {
+            return this.getCommonStructType(types);
+        }
+        
+        // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
+        // For now, if types differ, it's an error
+        return factory.createErrorType(
+            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+            undefined,
+            firstType.node
+        );
+    }
+
+    /**
+     * Find the common struct type (intersection of fields).
+     * 
+     * Type-C uses structural subtyping for structs:
+     * - `{x: u32, y: u32, z: u32}` is compatible with `{x: u32, y: u32}`
+     * - Common fields must have EXACT matching types (u32 ≠ u64)
+     * 
+     * Example:
+     * ```
+     * {x: 1u32, y: 2u32}         // struct { x: u32, y: u32 }
+     * {x: 3u32, y: 4u32, z: 5u32} // struct { x: u32, y: u32, z: u32 }
+     * → struct { x: u32, y: u32 }  // Common fields only
+     * ```
+     */
+    private getCommonStructType(types: TypeDescription[]): TypeDescription {
+        const structTypes = types as any[]; // All verified to be StructTypeDescription
+        
+        // Get all field names from each struct
+        const allFieldSets = structTypes.map(st => {
+            const fields = new Map<string, TypeDescription>();
+            if (st.fields) {
+                for (const field of st.fields) {
+                    fields.set(field.name, field.type);
+                }
+            }
+            return fields;
+        });
+        
+        // Find common field names (intersection)
+        const firstFieldSet = allFieldSets[0];
+        const commonFieldNames = new Set<string>();
+        
+        for (const fieldName of firstFieldSet.keys()) {
+            const isPresentInAll = allFieldSets.every(fieldSet => fieldSet.has(fieldName));
+            if (isPresentInAll) {
+                commonFieldNames.add(fieldName);
+            }
+        }
+        
+        if (commonFieldNames.size === 0) {
+            return factory.createErrorType(
+                `Cannot infer common struct type: no common fields found`,
+                undefined,
+                types[0].node
+            );
+        }
+        
+        // Check that all common fields have EXACT same types
+        const commonFields: StructFieldType[] = [];
+        
+        for (const fieldName of commonFieldNames) {
+            const firstFieldType = allFieldSets[0].get(fieldName)!;
+            
+            // Check if all structs have this field with the EXACT same type
+            const allMatch = allFieldSets.every(fieldSet => {
+                const fieldType = fieldSet.get(fieldName);
+                return fieldType && fieldType.toString() === firstFieldType.toString();
+            });
+            
+            if (!allMatch) {
+                return factory.createErrorType(
+                    `Cannot infer common struct type: field '${fieldName}' has different types across branches`,
+                    undefined,
+                    types[0].node
+                );
+            }
+            
+            commonFields.push({
+                name: fieldName,
+                type: firstFieldType
+            });
+        }
+        
+        // Create the common struct type (not anonymous - show 'struct' keyword)
+        return factory.createStructType(commonFields, false, types[0].node);
     }
 
     /**
@@ -773,7 +1156,7 @@ export class TypeCTypeProvider {
 
         // Check if variable is marked as nullable with the `?` suffix
         // Example: let arr? = new Array<u32>(10) → Array<u32>?
-        if ((node as any).isNullable) {
+        if (ast.isVariableDeclSingle(node) && node.isNullable) {
             return factory.createNullableType(inferredType, node);
         }
 
@@ -841,44 +1224,95 @@ export class TypeCTypeProvider {
         return factory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
     }
 
+    /**
+     * Infer the type of an integer literal.
+     * 
+     * Uses contextual typing when available:
+     * - `let x: u32 = 10` → infers 10 as u32
+     * - `n < 2` where n is u32 → infers 2 as u32
+     * - `10u32` → explicit suffix overrides context
+     * - `let x = 10` → defaults to i32
+     * 
+     * This makes compiled language semantics work naturally without explicit suffixes everywhere.
+     */
     private inferIntegerLiteral(node: ast.IntegerLiteral): TypeDescription {
         // Extract type suffix if present
         const value = node.value;
         const suffixMatch = value.match(/([iu])(8|16|32|64)$/);
         
         if (suffixMatch) {
+            // Explicit suffix always takes precedence
             const typeStr = suffixMatch[0];
             return factory.createIntegerTypeFromString(typeStr, node) 
                 ?? factory.createI32Type(node);
+        }
+        
+        // Try to use contextual typing
+        const expectedType = this.getExpectedType(node);
+        if (expectedType && this.isIntegerType(expectedType)) {
+            // Use the expected integer type
+            return expectedType;
         }
         
         // Default to i32 for decimal literals without suffix
         return factory.createI32Type(node);
     }
 
+    /**
+     * Check if a type is an integer type (not float).
+     */
+    private isIntegerType(type: TypeDescription): boolean {
+        const integerKinds = [
+            TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
+            TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64
+        ];
+        return integerKinds.includes(type.kind);
+    }
+
+    /**
+     * Infer the type of a floating-point literal.
+     * 
+     * Uses contextual typing when available:
+     * - `let x: f32 = 3.14` → infers 3.14 as f32
+     * - `let x = 3.14` → defaults to f64
+     * - Explicit suffix overrides context: `3.14f` → always f32
+     */
     private inferFloatLiteral(node: ast.FloatingPointLiteral): TypeDescription {
+        // If there's an explicit 'f' suffix, it's f32
         if (ast.isFloatLiteral(node)) {
             return factory.createF32Type(node);
         }
+        
+        // Try to use contextual typing
+        const expectedType = this.getExpectedType(node);
+        if (expectedType && expectedType.kind === TypeKind.F32) {
+            return factory.createF32Type(node);
+        }
+        
+        // Default to f64 (double precision)
         return factory.createF64Type(node);
     }
 
     private inferQualifiedReference(node: ast.QualifiedReference): TypeDescription {
-        const ref = node.reference as any;
-        if (!ref || !ref.ref) {
+        // Langium cross-references have a .ref property pointing to the target AST node
+        const ref = node.reference;
+        if (!ref || !('ref' in ref) || !ref.ref) {
             return factory.createErrorType('Unresolved reference', undefined, node);
         }
 
-        return this.getType(ref.ref);
+        // Type assertion needed because Langium references are dynamically typed
+        return this.getType(ref.ref as AstNode);
     }
 
     private inferGenericReferenceExpr(node: ast.GenericReferenceExpr): TypeDescription {
-        const ref = node.reference as any;  // Grammar uses cross-references which are dynamic
-        if (!ref || !ref.ref) {
+        // Langium cross-references have a .ref property pointing to the target AST node
+        const ref = node.reference;
+        if (!ref || !('ref' in ref) || !ref.ref) {
             return factory.createErrorType('Unresolved reference', undefined, node);
         }
 
-        const baseType = this.getType(ref.ref);
+        // Type assertion needed because Langium references are dynamically typed
+        const baseType = this.getType(ref.ref as AstNode);
         
         // If base type is a generic function or class, substitute generic args
         if (isFunctionType(baseType) && baseType.genericParameters.length > 0) {
@@ -899,6 +1333,10 @@ export class TypeCTypeProvider {
     private inferBinaryExpression(node: ast.BinaryExpression): TypeDescription {
         const left = this.inferExpression(node.left);
         const right = this.inferExpression(node.right);
+        
+        // If either operand is an error type, propagate it
+        if (left.kind === TypeKind.Error) return left;
+        if (right.kind === TypeKind.Error) return right;
         
         // Assignment operators return the type of the right operand
         if (node.op === '=' || node.op?.endsWith('=')) {
@@ -998,20 +1436,14 @@ export class TypeCTypeProvider {
         const memberName = node.element?.$refText || '';
         
         // Check if this is nullable member access (e.g., arr?.clone())
-        const isNullableAccess = (node as any).isNullable === true;
+        // MemberAccess nodes have an isNullable property for the ?. operator
+        const isNullableAccess = node.isNullable === true;
         
-        // If using nullable member access, unwrap the base type
-        let wasNullable = false;
+        // If base type is nullable, unwrap it for member lookup
         if (isNullableType(baseType)) {
-            if (isNullableAccess) {
-                // arr?: Array<u32> with arr?.member → unwrap to Array<u32>
-                wasNullable = true;
-                baseType = baseType.baseType;
-            } else {
-                // arr?: Array<u32> with arr.member → error (accessing nullable without ?.)
-                // For now, we'll auto-unwrap and continue, but this should ideally be a validation error
-                baseType = baseType.baseType;
-            }
+            // arr?: Array<u32> with arr?.member → unwrap to Array<u32>
+            // arr?: Array<u32> with arr.member → auto-unwrap (should be validation error)
+            baseType = baseType.baseType;
         }
         
         // Keep track of generic substitutions if we have a reference type with concrete args
@@ -1089,7 +1521,7 @@ export class TypeCTypeProvider {
             } else {
                 const method = baseType.methods.find(m => m.names.includes(memberName));
                 if (method) {
-                    let functionType = factory.createFunctionType(
+                    let functionType: TypeDescription = factory.createFunctionType(
                         method.parameters,
                         method.returnType,
                         'fn',
@@ -1098,7 +1530,7 @@ export class TypeCTypeProvider {
                     
                     // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
                     if (genericSubstitutions) {
-                        functionType = substituteGenerics(functionType, genericSubstitutions) as any;
+                        functionType = substituteGenerics(functionType, genericSubstitutions);
                     }
                     
                     memberType = functionType;
@@ -1111,9 +1543,14 @@ export class TypeCTypeProvider {
             return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
         
-        // If using nullable member access (?.),  wrap the result in nullable
-        // Example: arr?.clone() where arr: Array<u32>? → result is Array<u32>?
-        if (isNullableAccess && wasNullable) {
+        // If using nullable member access (?.),  ALWAYS wrap the result in nullable
+        // The ?. operator means "if base is null, return null, else access member"
+        // So the result is always nullable, even if base type isn't nullable
+        // 
+        // Examples:
+        // - arr?: Array<u32> with arr?.data → Array<u32>[]?
+        // - arr: Array<u32> with arr?.data  → Array<u32>[]? (redundant but valid)
+        if (isNullableAccess) {
             return factory.createNullableType(memberType, node);
         }
         
@@ -1197,10 +1634,33 @@ export class TypeCTypeProvider {
         return this.inferExpression(node.value);
     }
 
+    /**
+     * Infer the type of an array construction expression (e.g., `[1, 2, 3]` or `[]`).
+     * 
+     * For non-empty arrays, infers element type from the first element.
+     * For empty arrays, uses contextual typing from the expected type (if available).
+     * 
+     * Examples:
+     * - `[1, 2, 3]` → `i32[]` (inferred from elements)
+     * - `let x: u32[] = []` → `u32[]` (from context)
+     * - `let x = []` → ERROR (cannot infer type)
+     */
     private inferArrayConstruction(node: ast.ArrayConstructionExpression): TypeDescription {
         if (!node.values || node.values.length === 0) {
-            // Empty array - type is T[] where T is unknown
-            return factory.createArrayType(factory.createAnyType(node), node);
+            // Empty array - try to get type from context
+            const expectedType = this.getExpectedType(node);
+            
+            if (expectedType && isArrayType(expectedType)) {
+                // Use the expected element type
+                return expectedType;
+            }
+            
+            // No context available - cannot infer type
+            return factory.createErrorType(
+                'Cannot infer type of empty array literal. Provide a type annotation (e.g., let x: T[] = [])',
+                undefined,
+                node
+            );
         }
         
         // Infer element type from first element
@@ -1246,8 +1706,18 @@ export class TypeCTypeProvider {
         return factory.createFunctionType(params, returnType, node.fnType, [], node);
     }
 
+    /**
+     * Infer the type of a conditional expression (if-then-else).
+     * 
+     * In a compiled language, all branches must return the SAME type (or compatible types).
+     * Uses `getCommonType` to find the common type of all branches.
+     * 
+     * Example:
+     * ```
+     * if n < 2 => n else fib(n-1) + fib(n-2)  // all u32
+     * ```
+     */
     private inferConditionalExpression(node: ast.ConditionalExpression): TypeDescription {
-        // Type is the union of all branch types
         const thenTypes = node.thens?.map(t => this.inferExpression(t)) ?? [];
         const elseType = node.elseExpr ? this.inferExpression(node.elseExpr) : undefined;
         
@@ -1257,25 +1727,60 @@ export class TypeCTypeProvider {
             return factory.createVoidType(node);
         }
         
-        if (allTypes.length === 1) {
-            return allTypes[0];
-        }
+        // Filter out recursion placeholders
+        const nonPlaceholders = allTypes.filter(type => {
+            if (type.kind === TypeKind.Error) {
+                const errorType = type as ErrorTypeDescription;
+                return errorType.message !== '__recursion_placeholder__';
+            }
+            return true;
+        });
         
-        return simplifyType(factory.createUnionType(allTypes, node));
+        const typesToUse = nonPlaceholders.length > 0 ? nonPlaceholders : allTypes;
+        
+        // Find the common type (not a union!)
+        return this.getCommonType(typesToUse);
     }
 
+    /**
+     * Infer the type of a match expression.
+     * 
+     * In a compiled language, all arms must return the SAME type (or compatible types).
+     * Uses `getCommonType` to find the common type of all arms.
+     * 
+     * Example:
+     * ```
+     * match n {
+     *     0 => 0u32,        // u32
+     *     1 => 1u32,        // u32
+     *     _ => fib(n-1),    // u32 (from base cases)
+     * }  // → u32
+     * ```
+     */
     private inferMatchExpression(node: ast.MatchExpression): TypeDescription {
-        // Type is the union of all case body types plus default
+        // Get types from all match arms
         const caseTypes = node.cases?.map(c => this.inferExpression(c.body)) ?? [];
-        const defaultType = node.defaultExpr ? this.inferExpression(node.defaultExpr) : factory.createNeverType(node);
+        const defaultType = node.defaultExpr ? this.inferExpression(node.defaultExpr) : undefined;
         
-        const allTypes = [...caseTypes, defaultType];
+        const allTypes = defaultType ? [...caseTypes, defaultType] : caseTypes;
         
-        if (allTypes.length === 1) {
-            return allTypes[0];
+        if (allTypes.length === 0) {
+            return factory.createVoidType(node);
         }
         
-        return simplifyType(factory.createUnionType(allTypes, node));
+        // Filter out recursion placeholders - use non-placeholder types for inference
+        const nonPlaceholders = allTypes.filter(type => {
+            if (type.kind === TypeKind.Error) {
+                const errorType = type as ErrorTypeDescription;
+                return errorType.message !== '__recursion_placeholder__';
+            }
+            return true;
+        });
+        
+        const typesToUse = nonPlaceholders.length > 0 ? nonPlaceholders : allTypes;
+        
+        // Find the common type (not a union!)
+        return this.getCommonType(typesToUse);
     }
 
     private inferLetInExpression(node: ast.LetInExpression): TypeDescription {

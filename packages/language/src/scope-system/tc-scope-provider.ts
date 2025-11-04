@@ -67,6 +67,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
      */
     override getScope(context: ReferenceInfo): Scope {
         const container = context.container;
+        
         // Check if we're resolving a member access expression
         if (scopeUtils.isMemberResolution(context.container, context)) {
             if (ast.isMemberAccess(container) && container.expr) {
@@ -150,6 +151,11 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                 for (const name of node.names) {
                     descriptions.push(this.descriptions.createDescription(node, name));
                 }
+            }
+            // Handle StructFieldKeyValuePair (duck-typed struct fields)
+            else if (ast.isStructFieldKeyValuePair(node)) {
+                // For duck-typed structs, the field name is stored directly in the node
+                descriptions.push(this.descriptions.createDescription(node, node.name));
             }
             // Handle other nodes normally (attributes, struct fields, etc.)
             else {

@@ -1,0 +1,16 @@
+/**
+ * Used by the following tests:
+ * - typing
+ */
+
+fn fib(n: u32) -> u32 = 
+	match n {
+		0u32 => 0u32,
+		1u32 => 1u32,
+		_ => fib(n - 1u32) + fib(n - 2u32),
+	}
+
+
+fn main () -> void {
+	let x = fib(10u32)
+}

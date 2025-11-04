@@ -656,8 +656,8 @@ type IdentifiableReference =
     EnumCase |
     GenericType |
     ExternFFIDecl |
-    StructField |
-    VariantConstructor |
+    StructField |         // For named struct type fields
+    StructFieldKeyValuePair |  // For duck-typed struct literal fields
     BuiltinSymbolID |
     BuiltinSymbolFn;
 

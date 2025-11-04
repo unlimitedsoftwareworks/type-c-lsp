@@ -1,0 +1,45 @@
+/**
+ * Tests for return type inference
+ * - Expression-body functions
+ * - Block-body functions with return statements
+ * - Recursive functions with base cases
+ * - Nested functions (ensure we don't collect inner returns)
+ */
+
+// Simple expression-body function
+fn f3() = 3u32
+
+// Recursive expression-body with match (has base cases)
+fn anotherFib(n: u32) = 
+	match n {
+		0 => 0u32,
+		1 => 1u32,
+		_ => anotherFib(n - 1) + anotherFib(n - 2),
+	}
+
+// Recursive block-body with return statements
+fn fiiib(n: u32) {
+	if n < 2 {
+		return 0u32
+	}
+	return fiiib(n - 1) + fiiib(n - 2)
+}
+
+// Nested function test - ensure we don't collect inner function's returns
+fn outerFunc(x: u32) {
+	// Inner function with its own return
+	fn innerFunc(y: u32) {
+		return y + 1u32
+	}
+	
+	// Outer function's return
+	return x + innerFunc(5)
+}
+
+fn main() -> void {
+	let a = f3()
+	let b = anotherFib(10)
+	let c = fiiib(10)
+	let d = outerFunc(5)
+}
+

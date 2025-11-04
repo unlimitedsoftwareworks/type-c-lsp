@@ -1,21 +1,19 @@
 import { inject, type Module } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
-import { TypeCGeneratedModule, TypeCGeneratedSharedModule } from './generated/module.js';
-import { TypeCScopeComputation } from './scope-system/tc-scope-computation.js';
-import { registerValidationChecks, TypeCValidator } from './type-c-validator.js';
-import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
-import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
-import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCDocumentationProvider } from './documentation/tc-documentation-provider.js';
 import { TypeCHoverProvider } from './documentation/tc-hover-provider.js';
+import { TypeCGeneratedModule, TypeCGeneratedSharedModule } from './generated/module.js';
+import { TypeCScopeComputation } from './scope-system/tc-scope-computation.js';
+import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
+import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
+import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
+import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
+import { registerValidationChecks } from './type-c-validator.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
  */
 export type TypeCAddedServices = {
-    validation: {
-        TypeCValidator: TypeCValidator
-    },
     references: {
         ScopeComputation: TypeCScopeComputation,
         ScopeProvider: TypeCScopeProvider
@@ -23,6 +21,9 @@ export type TypeCAddedServices = {
     typing: {
         TypeProvider: TypeCTypeProvider
     },
+    validation: {
+        TypeSystemValidator: TypeCTypeSystemValidator
+    }
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
     }
@@ -41,7 +42,7 @@ export type TypeCServices = LangiumServices & TypeCAddedServices
  */
 export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAddedServices> = {
     validation: {
-        TypeCValidator: () => new TypeCValidator()
+        TypeSystemValidator: (services: TypeCServices) => new TypeCTypeSystemValidator(services)
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),

@@ -11,7 +11,8 @@ type ReferencableSymbol =
     ast.GenericType |
     ast.ExternFFIDecl |
     ast.SubModule |
-    ast.BuiltinDefinition;
+    ast.BuiltinDefinition |
+    ast.VariantConstructor;  // TODO: Make this context-sensitive later
 
 export class TypeCScopeComputation extends DefaultScopeComputation {
     override collectExportedSymbols(document: LangiumDocument, cancelToken?: CancellationToken): Promise<AstNodeDescription[]> {
@@ -93,7 +94,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         //console.log('Processing container type:', container.$type);
 
         if (ast.isFunctionDeclaration(container)) {
-            console.log('Found function declaration:', (container as any).name);
             // Add generic parameters
             declarations.push(...container.genericParameters ?? []);
             // Add parameters
@@ -168,6 +168,13 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 declarations.push(def);
             } else if (ast.isFunctionDeclaration(def)) {
                 declarations.push(def);
+            } else if (ast.isTypeDeclaration(def)) {
+                declarations.push(def);
+                // TODO: Make this context-sensitive - only add constructors when expected type is known
+                // If it's a variant type, also expose its constructors
+                if (def.definition && ast.isVariantType(def.definition)) {
+                    declarations.push(...def.definition.constructors);
+                }
             } else if (ast.isExternFFIDecl(def)) {
                 declarations.push(def);
             }
@@ -190,6 +197,11 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 declarations.push(def);
             } else if (ast.isTypeDeclaration(def)) {
                 declarations.push(def);
+                // TODO: Make this context-sensitive - only add constructors when expected type is known
+                // If it's a variant type, also expose its constructors
+                if (def.definition && ast.isVariantType(def.definition)) {
+                    declarations.push(...def.definition.constructors);
+                }
             } else if (ast.isExternFFIDecl(def)) {
                 declarations.push(def);
             } else if (ast.isVariableDeclarationStatement(def)) {

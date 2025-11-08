@@ -701,25 +701,65 @@ export class TypeCTypeProvider {
         }
 
         const declaration: AstNode = node.qname.ref;
-        
+
         // Handle references to generic type parameters (e.g., T in Array<T>)
         if (ast.isGenericType(declaration)) {
             // This is a reference to a generic type parameter
             // We already have the type computed for it, just return it
             return this.getType(declaration);
         }
-        
+
         // Handle references to type declarations (e.g., Array, MyClass, etc.)
         if (ast.isTypeDeclaration(declaration)) {
-            const genericArgs = node.genericArgs?.map(arg => this.getType(arg)) ?? [];
+            let genericArgs = node.genericArgs?.map(arg => this.getType(arg)) ?? [];
+
+            // Check if this is a reference to a variant constructor (e.g., Option.None)
+            if (node.constructor && node.constructor.ref) {
+                const constructorRef = node.constructor.ref;
+
+                // Verify it's a variant constructor
+                if (!ast.isVariantConstructor(constructorRef)) {
+                    return factory.createErrorType(
+                        `Expected variant constructor`,
+                        undefined,
+                        node
+                    );
+                }
+
+                // Get the resolved variant type
+                const resolvedVariant = this.getType(declaration.definition);
+                if (!isVariantType(resolvedVariant)) {
+                    return factory.createErrorType(
+                        `Type ${declaration.name} is not a variant, cannot access constructor ${constructorRef.name}`,
+                        undefined,
+                        node
+                    );
+                }
+
+                // Fill in missing generic arguments with 'never' if none were provided
+                if (genericArgs.length === 0 && declaration.genericParameters && declaration.genericParameters.length > 0) {
+                    genericArgs = declaration.genericParameters.map(() => factory.createNeverType());
+                }
+
+                // Create a variant constructor type
+                return factory.createVariantConstructorType(
+                    resolvedVariant,
+                    constructorRef.name,
+                    genericArgs,
+                    node,
+                    declaration
+                );
+            }
+
+            // Regular type reference (e.g., Option, Array<T>)
             return factory.createReferenceType(declaration, genericArgs, node);
         }
 
         // Handle any other identifiable references that might be types
         const declType = declaration.$type || 'unknown';
         return factory.createErrorType(
-            `Reference does not point to a type declaration or generic parameter (found: ${declType})`, 
-            undefined, 
+            `Reference does not point to a type declaration or generic parameter (found: ${declType})`,
+            undefined,
             node
         );
     }

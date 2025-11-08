@@ -55,7 +55,7 @@ describe('Type Provider', async () => {
 
     describe('Fibonacci Example', () => {
         test('should infer types in recursive function', async () => {
-            await assertType('test001.tc', {
+            await assertType('functions/correct/test001.tc', {
                 'n': 'u32',
                 'x': 'u32',
                 'fib': 'fn(n: u32) -> u32',
@@ -63,7 +63,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer types in recursive functions with contextual literals', async () => {
-            await assertType('function-inference.tc', {
+            await assertType('functions/correct/function-inference.tc', {
                 'fib': 'fn(n: u32) -> u32',
                 'f1': 'fn(x: u32) -> u32',
                 'f2': 'fn(x: u32) -> u32',
@@ -74,7 +74,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer return types from non-recursive base cases', async () => {
-            await assertType('return-inference.tc', {
+            await assertType('functions/correct/return-inference.tc', {
                 'f3': 'fn() -> u32',
                 'anotherFib': 'fn(n: u32) -> u32',
                 'fiiib': 'fn(n: u32) -> u32',
@@ -87,7 +87,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer common struct types with structural subtyping', async () => {
-            await assertType('struct-common-types.tc', {
+            await assertType('structs/correct/struct-common-types.tc', {
                 'getPoint': 'fn(n: u32) -> struct { x: u32, y: u32 }',
                 'getAllFields': 'fn(n: u32) -> struct { a: u32, b: u32 }',
                 'getSingleField': 'fn(n: u32) -> struct { value: u32 }',
@@ -101,7 +101,7 @@ describe('Type Provider', async () => {
 
     describe('Validation Errors', () => {
         test('return-type-errors.tc should have expected validation errors', async () => {
-            const content = await readFile(path.join(testFilesDir, 'return-type-errors.tc'), 'utf-8');
+            const content = await readFile(path.join(testFilesDir, 'functions/incorrect/return-type-errors.tc'), 'utf-8');
             const document = await parseAndValidate(content);
             
             // Expect exactly 3 validation errors
@@ -144,7 +144,7 @@ describe('Type Provider', async () => {
 
     describe('Primitive Types', () => {
         test('should infer unsigned integer types', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'a': 'u8',
                 'b': 'u16',
                 'c': 'u32',
@@ -153,7 +153,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer signed integer types', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'e': 'i8',
                 'f': 'i16',
                 'g': 'i32',
@@ -162,14 +162,14 @@ describe('Type Provider', async () => {
         });
 
         test('should infer float types', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'floatX': 'f32',      // Explicit f32 type annotation
                 'floatY': 'f64',      // Explicit f64 type annotation
             });
         });
 
         test('should infer bool and string types', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'flag': 'bool',
                 'message': 'string',
             });
@@ -178,7 +178,7 @@ describe('Type Provider', async () => {
 
     describe('Struct Types', () => {
         test('should infer struct type with explicit annotation', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'Point': 'Point',   // Type reference shows alias name (last occurrence is usage site)
                 'origin': 'Point',  // Explicit annotation preserves type alias name
                 'px': 'f64',
@@ -186,14 +186,14 @@ describe('Type Provider', async () => {
         });
 
         test('should infer struct type via duck typing', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'point': 'struct { x: f64, y: f64 }',  // Duck typing infers structural type
                 'xCoord': 'f64',
             });
         });
 
         test('should handle comprehensive struct scenarios', async () => {
-            await assertType('struct-tests.tc', {
+            await assertType('structs/correct/struct-tests.tc', {
                 // Anonymous struct literals
                 'createPoint': 'fn() -> struct { x: f64, y: f64 }',
                 'createPoint3D': 'fn() -> struct { x: f64, y: f64, z: f64 }',
@@ -246,7 +246,7 @@ describe('Type Provider', async () => {
 
     describe('Type Inference', () => {
         test('should infer primitive types from literals', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'inferredU32': 'i32',       // Integer literals default to i32
                 'inferredF64': 'f64',       // Float literals default to f64
                 'inferredBool': 'bool',
@@ -255,7 +255,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer types from binary operations', async () => {
-            await assertType('basic-types.tc', {
+            await assertType('primitives/correct/basic-types.tc', {
                 'sum': 'u32',
                 'product': 'i32',
                 'quotient': 'f64',
@@ -265,7 +265,7 @@ describe('Type Provider', async () => {
 
     describe('Classes', () => {
         test('should infer simple class types', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 'Person': 'Person',
                 'person': 'Person',
                 'personName': 'string',
@@ -276,7 +276,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer generic class types', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 // Note: 'Box' resolves to last usage which is 'Box<i32>' in container test
                 'intBox': 'Box<i32>',
                 'boxValue': 'i32',
@@ -288,7 +288,7 @@ describe('Type Provider', async () => {
         });
 
         test('should handle operator overloading', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 'Counter': 'Counter',
                 'counter1': 'Counter',
                 'counter2': 'Counter',
@@ -298,7 +298,7 @@ describe('Type Provider', async () => {
         });
 
         test('should infer nested generic types', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 // Type system normalizes spacing in generic types
                 'container': 'Container<Box<i32>>',
                 'box1': 'Box<i32>',
@@ -308,7 +308,7 @@ describe('Type Provider', async () => {
         });
 
         test('should handle multiple type parameters', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 'pair': 'Pair<string, i32>',
                 'firstVal': 'string',
                 'secondVal': 'i32',
@@ -321,7 +321,7 @@ describe('Type Provider', async () => {
 
     describe('Interfaces', () => {
         test('should infer interface types', async () => {
-            await assertType('classes-interfaces.tc', {
+            await assertType('classes/correct/classes-interfaces.tc', {
                 'Drawable': 'Drawable',
                 'Circle': 'Circle',
                 'circle': 'Circle',
@@ -333,7 +333,7 @@ describe('Type Provider', async () => {
 
     describe('Type Coercion', () => {
         test('should allow implicit numeric type coercion', async () => {
-            await assertType('type-coercion.tc', {
+            await assertType('coercion/correct/type-coercion.tc', {
                 'takesF32': 'fn(x: f32) -> f32',
                 'takesF64': 'fn(x: f64) -> f64',
                 'takesI32': 'fn(x: i32) -> i32',
@@ -349,7 +349,7 @@ describe('Type Provider', async () => {
     describe('Advanced Types', () => {
         describe('Variant Types', () => {
             test('should infer Option variant types', async () => {
-                await assertType('advanced-types.tc', {
+                await assertType('mixed/correct/advanced-types.tc', {
                     'Option': 'variant { Some(value: T), None }',  // Last occurrence is Option.None on line 9, type is the variant definition itself
                     'someValue': 'Option<i32>',
                     'noneValue': 'Option<string>',
@@ -359,7 +359,7 @@ describe('Type Provider', async () => {
 
         describe('Array Operations', () => {
             test('should infer array operation types', async () => {
-                await assertType('advanced-types.tc', {
+                await assertType('mixed/correct/advanced-types.tc', {
                     'numbers': 'i32[]',
                     'len': 'u64',
                     'first': 'i32',
@@ -369,7 +369,7 @@ describe('Type Provider', async () => {
 
         describe('Nullable Chains', () => {
             test('should infer nullable linked list types', async () => {
-                await assertType('advanced-types.tc', {
+                await assertType('mixed/correct/advanced-types.tc', {
                     'LinkedNode': 'LinkedNode<i32>',  // Last occurrence is the annotation on line 31
                     'node1': 'LinkedNode<i32>',
                     'nextNode': 'LinkedNode<i32>?',
@@ -380,7 +380,7 @@ describe('Type Provider', async () => {
 
         describe('Type Casting', () => {
             test('should infer type cast expressions', async () => {
-                await assertType('advanced-types.tc', {
+                await assertType('mixed/correct/advanced-types.tc', {
                     'num': 'i32',
                     'bigNum': 'i64',
                 });
@@ -391,7 +391,7 @@ describe('Type Provider', async () => {
     describe('Variant Generics', () => {
         describe('Full Generic Inference', () => {
             test('should infer fully annotated variant types', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'okValue': 'Result<i32, string>',
                     'errValue': 'Result<i32, string>',
                 });
@@ -400,7 +400,7 @@ describe('Type Provider', async () => {
 
         describe('Partial Generic Inference with never', () => {
             test('should infer Ok variant with never for uninferrable E', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     // okResponse should be Result<i32, never>.Ok
                     // When only T is inferrable, E becomes never
                     'okResponse': 'Result<i32, never>.Ok',
@@ -408,7 +408,7 @@ describe('Type Provider', async () => {
             });
 
             test('should infer Err variant with never for uninferrable T', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     // errResponse should be Result<never, string>.Err
                     // When only E is inferrable, T becomes never
                     'errResponse': 'Result<never, string>.Err',
@@ -418,13 +418,13 @@ describe('Type Provider', async () => {
 
         describe('Variant Constructors as Subtypes', () => {
             test('should allow Result.Ok<T, never> as subtype of Result<T, E>', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'testPartialInferenceOk': 'fn() -> Result<i32, string>',
                 });
             });
 
             test('should allow Result.Err<never, E> as subtype of Result<T, E>', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'testPartialInferenceErr': 'fn() -> Result<i32, string>',
                 });
             });
@@ -432,7 +432,7 @@ describe('Type Provider', async () => {
 
         describe('Return Type Unification', () => {
             test('should unify variant types from conditional expressions', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'ok': 'Result<i32, never>.Ok',
                     'err': 'Result<never, string>.Err',
                     'testReturnUnification': 'fn() -> Result<i32, string>',
@@ -442,7 +442,7 @@ describe('Type Provider', async () => {
 
         describe('Different Generic Instantiations', () => {
             test('should handle different variant instantiations', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'intResult': 'Result<i32, string>',
                     'strResult': 'Result<string, i32>',
                     'boolResult': 'Result<bool, string>',
@@ -452,7 +452,7 @@ describe('Type Provider', async () => {
 
         describe('Nested Variants', () => {
             test('should handle nested variant types', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'nested': 'Result<Option<i32>, never>.Ok',
                     'testNestedVariants': 'fn() -> Result<Option<i32>, string>',
                 });
@@ -461,7 +461,7 @@ describe('Type Provider', async () => {
 
         describe('Single Type Parameter Variants', () => {
             test('should infer Option with single type parameter', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'someVal': 'Option<i32>.Some',
                     'noneVal': 'Option<never>.None',  // No params to infer, all become never
                     'testSingleParamVariant': 'fn() -> Option<i32>',
@@ -471,7 +471,7 @@ describe('Type Provider', async () => {
 
         describe('Function Call Inference', () => {
             test('should infer from function parameter types', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'processResult': 'fn(r: Result<i32, string>) -> i32',
                     'result': 'Result<i32, never>.Ok',
                 });
@@ -480,7 +480,7 @@ describe('Type Provider', async () => {
 
         describe('Multiple Partial Inferences', () => {
             test('should handle multiple partial inferences in same scope', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'ok1': 'Result<i32, never>.Ok',
                     'ok2': 'Result<i32, never>.Ok',
                     'ok3': 'Result<i32, never>.Ok',
@@ -492,7 +492,7 @@ describe('Type Provider', async () => {
 
         describe('Variants in Struct Fields', () => {
             test('should handle variants as struct field types', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'response': 'Response<i32>',
                     'errorResponse': 'Response<i32>',
                 });
@@ -501,7 +501,7 @@ describe('Type Provider', async () => {
 
         describe('Arrays of Variants', () => {
             test('should handle arrays of variant types', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'results': 'Result<i32, string>[]',
                 });
             });
@@ -509,7 +509,7 @@ describe('Type Provider', async () => {
 
         describe('Chained Variant Operations', () => {
             test('should handle variant return types in function calls', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'divide': 'fn(a: f64, b: f64) -> Result<f64, string>',
                     'result1': 'Result<f64, string>',
                     'result2': 'Result<f64, string>',
@@ -519,7 +519,7 @@ describe('Type Provider', async () => {
 
         describe('Complex Variant Constructors', () => {
             test('should handle variants with multiple parameters in constructors', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'simple': 'Value<f64>.Primitive',
                     'complex': 'Value<f64>.Complex',
                     'testComplexVariant': 'fn() -> Value<f64>',
@@ -529,7 +529,7 @@ describe('Type Provider', async () => {
 
         describe('Three Type Parameters', () => {
             test('should handle variants with three type parameters', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'first': 'Triple<i32, never, never>.First',
                     'second': 'Triple<never, string, never>.Second',
                     'third': 'Triple<never, never, bool>.Third',
@@ -540,7 +540,7 @@ describe('Type Provider', async () => {
 
         describe('Integration Test', () => {
             test('should infer all types correctly in main function', async () => {
-                await assertType('variant-generics.tc', {
+                await assertType('variants/correct/variant-generics.tc', {
                     'r1': 'Result<i32, string>',
                     'r2': 'Result<i32, string>',
                     'r3': 'Result<i32, string>',
@@ -550,6 +550,60 @@ describe('Type Provider', async () => {
                     'r9': 'Result<i32, string>',
                     'r13': 'Value<f64>',
                     'r14': 'Triple<i32, string, bool>',
+                });
+            });
+        });
+    });
+
+    describe('Variant Constructor Types', () => {
+        describe('Simple Constructor Type Annotations', () => {
+            test('should allow variant constructor types without generics', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    'noneVal': 'Option<never>.None',
+                });
+            });
+        });
+
+        describe('Constructor Types with Generics', () => {
+            test('should allow variant constructor types with generic parameters', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    'someVal': 'Option<u32>.Some',
+                    'okVal': 'Result<i32, string>.Ok',
+                    'errVal': 'Result<i32, string>.Err',
+                });
+            });
+        });
+
+        describe('More Constructor Types', () => {
+            test('should allow constructor types with different type parameters', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    'successVal': 'Status<i32>.Success',
+                    'failureVal': 'Status<i32>.Failure',
+                });
+            });
+        });
+
+        describe('Constructor Types in Function Signatures', () => {
+            test('should allow constructor types in function parameters', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    'processSome': 'fn(val: Option<string>.Some) -> string',
+                    'processOk': 'fn(result: Result<u32, string>.Ok) -> u32',
+                });
+            });
+
+            test('should allow constructor types in function return types', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    'createSome': 'fn() -> Option<i32>.Some',
+                    'createOk': 'fn() -> Result<string, i32>.Ok',
+                });
+            });
+        });
+
+        describe('Constructor Types with Type Inference', () => {
+            test('should properly infer types with constructor type annotations', async () => {
+                await assertType('variants/correct/variant-constructor-types.tc', {
+                    's': 'Option<u32>.Some',
+                    'n': 'Option<bool>.None',
                 });
             });
         });

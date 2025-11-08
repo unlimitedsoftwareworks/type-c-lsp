@@ -719,10 +719,13 @@ export function createPrimitiveTypeFromAST(astType: ast.PrimitiveType): TypeDesc
     if (astType.stringType) {
         return createStringType(astType);
     }
+    if (astType.neverType) {
+        return createNeverType(astType);
+    }
     if (astType.nullType) {
         return createNullType(astType);
     }
-    
+
     return createErrorType('Unknown primitive type', undefined, astType);
 }
 

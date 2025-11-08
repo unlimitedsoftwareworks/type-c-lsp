@@ -470,7 +470,7 @@ PrimeType infers DataType:
     StringEnumType {infer StringEnumType};
 
 RefType:
-    qname=[TypeDeclaration:ID] GenericArgs?;
+    qname=[TypeDeclaration:ID] GenericArgs? ('.' constructor=[VariantConstructor:ID])?;
 
 StructType:
     name= 'struct'? '{' fields+=StructField (',' fields+=StructField)* ','? '}';

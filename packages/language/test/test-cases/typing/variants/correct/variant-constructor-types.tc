@@ -1,0 +1,59 @@
+// Test variant constructor type annotations
+// Testing: Using variant constructor types (e.g., Option.Some) in type annotations
+
+type Option<T> = variant {
+    Some(value: T),
+    None()
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Status<T> = variant {
+    Success(data: T),
+    Failure(message: string)
+}
+
+// Test 1: Simple variant constructor type without generics
+fn testSimpleConstructorType() -> void {
+    let noneVal: Option<never>.None = Option.None()
+}
+
+// Test 2: Variant constructor type with generics
+fn testConstructorTypeWithGenerics() -> void {
+    let someVal: Option<u32>.Some = Option.Some(42u32)
+    let okVal: Result<i32, string>.Ok = Result.Ok(100i32)
+    let errVal: Result<i32, string>.Err = Result.Err("error")
+}
+
+// Test 3: More constructor types with different generics
+fn testMoreConstructorTypes() -> void {
+    let successVal: Status<i32>.Success = Status.Success(200i32)
+    let failureVal: Status<i32>.Failure = Status.Failure("failed")
+}
+
+// Test 4: Constructor types in function parameters
+fn processSome(val: Option<string>.Some) -> string {
+    return "processed"
+}
+
+fn processOk(result: Result<u32, string>.Ok) -> u32 {
+    return 0u32
+}
+
+// Test 5: Constructor types in function return types
+fn createSome() -> Option<i32>.Some {
+    return Option.Some(42)
+}
+
+fn createOk() -> Result<string, i32>.Ok {
+    return Result.Ok("success")
+}
+
+// Test 6: Using constructor types with inference
+fn testInference() -> void {
+    let s: Option<u32>.Some = Option.Some(10u32)
+    let n: Option<bool>.None = Option.None()
+}

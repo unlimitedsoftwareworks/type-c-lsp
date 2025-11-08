@@ -1,12 +1,12 @@
 // Variant types
 type Option<T> = variant {
     Some(value: T),
-    None,
+    None
 }
 
 fn testVariants() -> void {
     let someValue: Option<i32> = Option.Some(42)
-    let noneValue: Option<string> = Option.None
+    let noneValue: Option<string> = Option.None()
 }
 
 // Array operations

@@ -14,6 +14,9 @@ type ReferencableSymbol =
     ast.BuiltinDefinition |
     ast.VariantConstructor;  // TODO: Make this context-sensitive later
 
+/**
+ * In langium, scope computation is equivalent to static (default) lexical scope.
+ */
 export class TypeCScopeComputation extends DefaultScopeComputation {
     override collectExportedSymbols(document: LangiumDocument, cancelToken?: CancellationToken): Promise<AstNodeDescription[]> {
         const model = document.parseResult.value as ast.Module;
@@ -170,11 +173,6 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 declarations.push(def);
             } else if (ast.isTypeDeclaration(def)) {
                 declarations.push(def);
-                // TODO: Make this context-sensitive - only add constructors when expected type is known
-                // If it's a variant type, also expose its constructors
-                if (def.definition && ast.isVariantType(def.definition)) {
-                    declarations.push(...def.definition.constructors);
-                }
             } else if (ast.isExternFFIDecl(def)) {
                 declarations.push(def);
             }

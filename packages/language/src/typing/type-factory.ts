@@ -25,6 +25,7 @@ import {
     StructFieldType,
     VariantTypeDescription,
     VariantConstructorType,
+    VariantConstructorTypeDescription,
     EnumTypeDescription,
     EnumCaseType,
     StringEnumTypeDescription,
@@ -283,6 +284,52 @@ export function createVariantConstructor(
     parameters: readonly StructFieldType[]
 ): VariantConstructorType {
     return { name, parameters };
+}
+
+/**
+ * Creates a variant constructor type.
+ *
+ * This represents a specific variant constructor with concrete generic arguments.
+ * Example: Result.Ok<i32, never> is a subtype of Result<i32, E> for any E
+ *
+ * @param baseVariant The resolved variant type (must be VariantTypeDescription, not a reference)
+ * @param constructorName The specific constructor name (e.g., "Ok" or "Err")
+ * @param genericArgs Generic arguments for this constructor (may include never for uninferrable params)
+ * @param node Optional AST node for source tracking
+ * @param variantDeclaration Optional type declaration (for displaying the name, e.g., "Result")
+ * @returns A VariantConstructorTypeDescription
+ */
+export function createVariantConstructorType(
+    baseVariant: VariantTypeDescription,
+    constructorName: string,
+    genericArgs: readonly TypeDescription[] = [],
+    node?: AstNode,
+    variantDeclaration?: ast.TypeDeclaration
+): VariantConstructorTypeDescription {
+    return {
+        kind: TypeKind.VariantConstructor,
+        baseVariant,
+        variantDeclaration,
+        constructorName,
+        genericArgs,
+        node,
+        toString: () => {
+            // Use variantDeclaration if available for clean display names
+            if (variantDeclaration) {
+                const name = variantDeclaration.name;
+                const genericStr = genericArgs.length > 0
+                    ? `<${genericArgs.map(t => t.toString()).join(', ')}>`
+                    : '';
+                return `${name}${genericStr}.${constructorName}`;
+            }
+            // Fallback to baseVariant (shows full structure) for anonymous variants
+            const base = baseVariant.toString();
+            const genericStr = genericArgs.length > 0
+                ? `<${genericArgs.map(t => t.toString()).join(', ')}>`
+                : '';
+            return `${base}${genericStr}.${constructorName}`;
+        }
+    };
 }
 
 export function createEnumType(

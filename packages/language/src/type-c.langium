@@ -539,6 +539,7 @@ PrimitiveType:
     boolType='bool' |
     voidType='void' |
     stringType='string' |
+    neverType='never' |
     nullType=NULL;
 
 interface MethodHeader {

@@ -14,10 +14,10 @@
 import type { TypeCServices } from '../type-c-module.js';
 import * as ast from '../generated/ast.js';
 import { AstNode, AstUtils } from 'langium';
-import { 
-    TypeDescription, 
-    TypeKind, 
-    GenericTypeDescription, 
+import {
+    TypeDescription,
+    TypeKind,
+    GenericTypeDescription,
     MethodType,
     PrototypeMethodType,
     StructFieldType,
@@ -33,7 +33,9 @@ import {
     isTupleType,
     isReferenceType,
     isPrototypeType,
-    isVariantType
+    isVariantType,
+    isVariantConstructorType,
+    VariantConstructorTypeDescription
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
@@ -390,7 +392,45 @@ export class TypeCTypeProvider {
         }
         if (ast.isVariantConstructor(node)) {
             const variantType = AstUtils.getContainerOfType(node, ast.isVariantType);
-            return variantType ? this.getType(variantType) : factory.createErrorType('Variant constructor outside variant', undefined, node);
+            if (!variantType) {
+                return factory.createErrorType('Variant constructor outside variant', undefined, node);
+            }
+
+            // Get the variant's type declaration to create a proper reference
+            const variantDecl = AstUtils.getContainerOfType(variantType, ast.isTypeDeclaration);
+            if (!variantDecl) {
+                return factory.createErrorType('Variant type without declaration', undefined, node);
+            }
+
+            // Get the resolved variant type
+            // We need VariantTypeDescription, not ReferenceType
+            const resolvedVariant = this.getType(variantDecl.definition);
+            if (!isVariantType(resolvedVariant)) {
+                return factory.createErrorType('Expected variant type', undefined, node);
+            }
+
+            // Create a VariantConstructorType as the return type
+            const constructorReturnType = factory.createVariantConstructorType(
+                resolvedVariant,
+                node.name,
+                [], // Generic args will be inferred during function call
+                node,
+                variantDecl  // Pass the declaration for display purposes
+            );
+
+            // Create a function type for the constructor
+            // The parameters come from the constructor definition (node.params)
+            const params = node.params.map((p: ast.VariantConstructorField) =>
+                factory.createFunctionParameterType(p.name, this.getType(p.type))
+            );
+
+            return factory.createFunctionType(
+                params,
+                constructorReturnType,
+                'fn',
+                [], // Generic parameters handled specially for variant constructors
+                node
+            );
         }
 
         // Built-in prototypes
@@ -894,21 +934,6 @@ export class TypeCTypeProvider {
             const returnType = node.header?.returnType 
                 ? this.getType(node.header.returnType)
                 : this.inferReturnTypeFromBody(node.body, node.expr);
-            
-            // Check if inference failed (still have an error type)
-            if (returnType.kind === TypeKind.Error && !node.header?.returnType) {
-                return factory.createFunctionType(
-                    params,
-                    factory.createErrorType(
-                        'Cannot infer return type for recursive function. Add explicit return type annotation.',
-                        undefined,
-                        node
-                    ),
-                    node.fnType,
-                    genericParams,
-                    node
-                );
-            }
 
             return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
         } finally {
@@ -1034,7 +1059,28 @@ export class TypeCTypeProvider {
         if (allStructs) {
             return this.getCommonStructType(types);
         }
-        
+
+        // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
+        // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
+        const allReferences = types.every(t => isReferenceType(t));
+        if (allReferences) {
+            const referenceTypes = types as any[]; // All verified to be ReferenceType
+            const firstDecl = referenceTypes[0].declaration;
+
+            // Check if all references point to the same declaration
+            const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
+            if (allSameDecl) {
+                // Unify generic arguments across all references
+                return this.getCommonReferenceType(referenceTypes);
+            }
+        }
+
+        // Check if all are variant constructors - unify generic arguments
+        const allVariantConstructors = types.every(t => isVariantConstructorType(t));
+        if (allVariantConstructors) {
+            return this.getCommonVariantConstructorType(types as VariantConstructorTypeDescription[]);
+        }
+
         // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
         // For now, if types differ, it's an error
         return factory.createErrorType(
@@ -1042,6 +1088,67 @@ export class TypeCTypeProvider {
             undefined,
             firstType.node
         );
+    }
+
+    /**
+     * Find the common type for references to the same declaration with different generic arguments.
+     *
+     * This handles arrays like:
+     * ```
+     * [Result.Ok(1), Result.Err("error")]
+     * → [Result<i32, never>, Result<never, string>]
+     * → Result<i32, string>[]
+     * ```
+     *
+     * Strategy:
+     * - For each generic parameter position, collect all types
+     * - Replace `never` with concrete types from other elements
+     * - All concrete types in a position must be identical
+     */
+    private getCommonReferenceType(types: any[]): TypeDescription {
+        const firstRef = types[0];
+        const declaration = firstRef.declaration;
+        const numGenericParams = firstRef.genericArgs.length;
+
+        // If no generic parameters, all types are identical
+        if (numGenericParams === 0) {
+            return firstRef;
+        }
+
+        // Unify generic arguments across all references
+        const unifiedGenericArgs: TypeDescription[] = [];
+
+        for (let i = 0; i < numGenericParams; i++) {
+            // Collect all types at this position
+            const typesAtPosition = types.map(ref => ref.genericArgs[i]);
+
+            // Filter out never types
+            const concreteTypes = typesAtPosition.filter(t => t.kind !== TypeKind.Never);
+
+            if (concreteTypes.length === 0) {
+                // All are never - keep never
+                unifiedGenericArgs.push(factory.createNeverType());
+            } else {
+                // Check if all concrete types are identical
+                const firstConcreteType = concreteTypes[0];
+                const allIdentical = concreteTypes.every(t => t.toString() === firstConcreteType.toString());
+
+                if (allIdentical) {
+                    // All concrete types match - use that type
+                    unifiedGenericArgs.push(firstConcreteType);
+                } else {
+                    // Multiple different concrete types - error
+                    return factory.createErrorType(
+                        `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        firstRef.node
+                    );
+                }
+            }
+        }
+
+        // Create a reference to the same declaration with unified generic arguments
+        return factory.createReferenceType(declaration, unifiedGenericArgs, firstRef.node);
     }
 
     /**
@@ -1119,6 +1226,108 @@ export class TypeCTypeProvider {
         
         // Create the common struct type (not anonymous - show 'struct' keyword)
         return factory.createStructType(commonFields, false, types[0].node);
+    }
+
+    /**
+     * Find the common type for variant constructors by unifying their generic arguments.
+     *
+     * Type-C allows variant constructors to be subtypes of their base variant:
+     * - `Result.Ok<i32, never>` is a subtype of `Result<i32, E>` for any E
+     * - `Result.Err<never, string>` is a subtype of `Result<T, string>` for any T
+     *
+     * When constructors are in an array, we unify their generic arguments:
+     * - `never` is replaced by concrete types from other constructors
+     * - All concrete types in a position must be identical or one must be never
+     *
+     * Example:
+     * ```
+     * [Result.Ok(1), Result.Err("error")]
+     * → [Result<i32, never>.Ok, Result<never, string>.Err]
+     * → Result<i32, string>[]
+     * ```
+     */
+    private getCommonVariantConstructorType(types: VariantConstructorTypeDescription[]): TypeDescription {
+        const firstConstructor = types[0];
+
+        // Extract base variant declaration (prefer variantDeclaration field)
+        let baseVariantDecl: ast.TypeDeclaration | undefined = firstConstructor.variantDeclaration;
+
+        // Fallback to extracting from baseVariant.node if declaration not available
+        if (!baseVariantDecl) {
+            const variantAstNode = firstConstructor.baseVariant.node;
+            if (variantAstNode && ast.isVariantType(variantAstNode)) {
+                baseVariantDecl = AstUtils.getContainerOfType(variantAstNode, ast.isTypeDeclaration);
+            }
+        }
+
+        if (!baseVariantDecl) {
+            return factory.createErrorType(
+                'Cannot infer common type: variant constructor has no base variant declaration',
+                undefined,
+                firstConstructor.node
+            );
+        }
+
+        // Check that all constructors belong to the same base variant
+        const allSameBase = types.every(constructor => {
+            // Prefer variantDeclaration field for comparison
+            const constructorDecl = constructor.variantDeclaration;
+            if (constructorDecl) {
+                return constructorDecl === baseVariantDecl;
+            }
+            // Fallback to node comparison
+            const constructorVariantNode = constructor.baseVariant.node;
+            if (constructorVariantNode && ast.isVariantType(constructorVariantNode)) {
+                const decl = AstUtils.getContainerOfType(constructorVariantNode, ast.isTypeDeclaration);
+                return decl === baseVariantDecl;
+            }
+            return false;
+        });
+
+        if (!allSameBase) {
+            return factory.createErrorType(
+                `Cannot infer common type: variant constructors from different variants: ${types.map(t => t.toString()).join(', ')}`,
+                undefined,
+                firstConstructor.node
+            );
+        }
+
+        // Unify generic arguments across all constructors
+        // For each generic parameter position, collect all types and merge
+        const numGenericParams = firstConstructor.genericArgs.length;
+        const unifiedGenericArgs: TypeDescription[] = [];
+
+        for (let i = 0; i < numGenericParams; i++) {
+            // Collect all types at this position
+            const typesAtPosition = types.map(constructor => constructor.genericArgs[i]);
+
+            // Filter out never types
+            const concreteTypes = typesAtPosition.filter(t => t.kind !== TypeKind.Never);
+
+            if (concreteTypes.length === 0) {
+                // All are never - keep never
+                unifiedGenericArgs.push(factory.createNeverType());
+            } else {
+                // Check if all concrete types are identical
+                const firstConcreteType = concreteTypes[0];
+                const allIdentical = concreteTypes.every(t => t.toString() === firstConcreteType.toString());
+
+                if (allIdentical) {
+                    // All concrete types match - use that type
+                    unifiedGenericArgs.push(firstConcreteType);
+                } else {
+                    // Multiple different concrete types - error
+                    return factory.createErrorType(
+                        `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        firstConstructor.node
+                    );
+                }
+            }
+        }
+
+        // Create a reference to the base variant with unified generic arguments
+        return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, firstConstructor.node);
     }
 
     /**
@@ -1301,7 +1510,18 @@ export class TypeCTypeProvider {
         }
 
         // Type assertion needed because Langium references are dynamically typed
-        return this.getType(ref.ref as AstNode);
+        const type = this.getType(ref.ref as AstNode);
+
+        // Auto-call parameterless variant constructors
+        // Example: Option.None should return Option<never> instead of fn() -> Option<never>.None
+        if (isFunctionType(type) &&
+            type.parameters.length === 0 &&
+            isVariantConstructorType(type.returnType)) {
+            // Create a synthetic function call node for inference
+            return this.inferVariantConstructorCall(type.returnType, node as any);
+        }
+
+        return type;
     }
 
     private inferGenericReferenceExpr(node: ast.GenericReferenceExpr): TypeDescription {
@@ -1434,24 +1654,27 @@ export class TypeCTypeProvider {
     private inferMemberAccess(node: ast.MemberAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
         const memberName = node.element?.$refText || '';
-        
+
         // Check if this is nullable member access (e.g., arr?.clone())
         // MemberAccess nodes have an isNullable property for the ?. operator
         const isNullableAccess = node.isNullable === true;
-        
+
         // If base type is nullable, unwrap it for member lookup
         if (isNullableType(baseType)) {
             // arr?: Array<u32> with arr?.member → unwrap to Array<u32>
             // arr?: Array<u32> with arr.member → auto-unwrap (should be validation error)
             baseType = baseType.baseType;
         }
-        
+
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
-        
+        // Keep the original declaration for display purposes (e.g., for variant constructors)
+        let originalDeclaration: ast.TypeDeclaration | undefined;
+
         // If base type is a reference type (e.g., Array<u32>), resolve it but keep the generic args
         if (isReferenceType(baseType)) {
             const refType = baseType;
+            originalDeclaration = refType.declaration; // Store the original declaration
             // Build substitution map from generic parameters to concrete arguments
             // Example: Array<u32> → { T: u32 }
             if (refType.genericArgs.length > 0 && refType.declaration.genericParameters) {
@@ -1515,7 +1738,7 @@ export class TypeCTypeProvider {
             const attr = baseType.attributes.find(a => a.name === memberName);
             if (attr) {
                 // Apply generic substitutions if we have them
-                memberType = genericSubstitutions 
+                memberType = genericSubstitutions
                     ? substituteGenerics(attr.type, genericSubstitutions)
                     : attr.type;
             } else {
@@ -1527,17 +1750,53 @@ export class TypeCTypeProvider {
                         'fn',
                         method.genericParameters
                     );
-                    
+
                     // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
                     if (genericSubstitutions) {
                         functionType = substituteGenerics(functionType, genericSubstitutions);
                     }
-                    
+
                     memberType = functionType;
                 }
             }
         }
-        
+
+        // Handle variant constructors (e.g., Result.Ok, Option.Some)
+        // When accessing a variant constructor like Result.Ok, we return a function type
+        // The function's return type is a VariantConstructorType (a subtype of the variant)
+        if (!memberType && isVariantType(baseType)) {
+            const constructor = baseType.constructors.find(c => c.name === memberName);
+            if (constructor) {
+                // Get the variant declaration for display purposes
+                // Prefer originalDeclaration (from ReferenceType), but extract from baseType if needed
+                let variantDecl = originalDeclaration;
+                if (!variantDecl && baseType.node && ast.isVariantType(baseType.node)) {
+                    variantDecl = AstUtils.getContainerOfType(baseType.node, ast.isTypeDeclaration);
+                }
+
+                // Create a VariantConstructorType as the return type
+                // baseType is already a resolved VariantTypeDescription - perfect!
+                // Generic args will be empty initially and filled during function call
+                const constructorReturnType = factory.createVariantConstructorType(
+                    baseType, // baseType is VariantTypeDescription
+                    memberName,
+                    [], // Empty - will be inferred during call
+                    node,
+                    variantDecl // Pass the declaration for display purposes
+                );
+
+                // Create a function type for the constructor
+                // Parameters come from the constructor definition
+                memberType = factory.createFunctionType(
+                    constructor.parameters.map(p => factory.createFunctionParameterType(p.name, p.type)),
+                    constructorReturnType,
+                    'fn',
+                    [], // Generic parameters are handled specially for variant constructors
+                    node
+                );
+            }
+        }
+
         // If member not found, return error
         if (!memberType) {
             return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
@@ -1559,23 +1818,35 @@ export class TypeCTypeProvider {
 
     private inferFunctionCall(node: ast.FunctionCall): TypeDescription {
         let fnType = this.inferExpression(node.expr);
-        
+
         // Resolve reference types first
         if (isReferenceType(fnType)) {
             fnType = this.resolveReference(fnType);
         }
-        
+
         // Handle regular function types
         if (isFunctionType(fnType)) {
+            // Check if the return type is a VariantConstructorType
+            // If so, we need to infer generics from the call arguments
+            if (isVariantConstructorType(fnType.returnType)) {
+                return this.inferVariantConstructorCall(fnType.returnType, node);
+            }
+
             // TODO: Handle generic argument substitution if node.genericArgs is present
             return fnType.returnType;
         }
-        
-        // Handle variant constructor calls
+
+        // Handle variant constructor calls (e.g., Result.Ok(42))
+        // This is the key feature: infer generics from arguments and create a properly typed constructor
+        if (isVariantConstructorType(fnType)) {
+            return this.inferVariantConstructorCall(fnType, node);
+        }
+
+        // Handle old-style variant constructor calls (backward compatibility)
         if (fnType.kind === TypeKind.Variant) {
             return fnType;
         }
-        
+
         // Handle callable classes (classes with () operator overload)
         if (isClassType(fnType)) {
             // Look for the () operator method
@@ -1591,7 +1862,7 @@ export class TypeCTypeProvider {
                 node
             );
         }
-        
+
         // Handle callable interfaces (interfaces with () operator overload)
         if (isInterfaceType(fnType)) {
             const callOperator = fnType.methods.find(m => m.names.includes('()'));
@@ -1605,12 +1876,193 @@ export class TypeCTypeProvider {
                 node
             );
         }
-        
+
         return factory.createErrorType(
             `Cannot call value of type '${fnType.toString()}'. Only functions, callable classes/interfaces, and variant constructors can be called.`,
             undefined,
             node
         );
+    }
+
+    /**
+     * Infers the type when calling a variant constructor.
+     *
+     * Key responsibilities:
+     * 1. Infer generic parameters from the constructor's argument types
+     * 2. Fill uninferrable generics with `never` type
+     * 3. Return a VariantConstructorTypeDescription with inferred generics
+     *
+     * Example:
+     * - Result.Ok(42) → Result<i32, never>.Ok
+     * - Result.Err("error") → Result<never, string>.Err
+     *
+     * @param constructorType The variant constructor type (e.g., Result.Ok)
+     * @param callNode The function call AST node
+     * @returns A VariantConstructorTypeDescription with inferred generic args
+     */
+    private inferVariantConstructorCall(
+        constructorType: VariantConstructorTypeDescription,
+        callNode: ast.FunctionCall
+    ): TypeDescription {
+        // Get the base variant (always a VariantTypeDescription now)
+        const baseVariant = constructorType.baseVariant;
+
+        // Get the variant declaration to extract generic parameter names
+        const variantAstNode = baseVariant.node;
+        let genericParamNames: string[] = [];
+        let variantDecl: ast.TypeDeclaration | undefined;
+
+        if (variantAstNode && ast.isVariantType(variantAstNode)) {
+            variantDecl = AstUtils.getContainerOfType(variantAstNode, ast.isTypeDeclaration);
+            if (variantDecl) {
+                genericParamNames = variantDecl.genericParameters?.map(p => p.name) ?? [];
+            }
+        }
+
+        if (!variantDecl) {
+            return factory.createErrorType(
+                `Could not find variant declaration for constructor ${constructorType.constructorName}`,
+                undefined,
+                callNode
+            );
+        }
+
+        // Find the specific constructor definition
+        const constructorDef = baseVariant.constructors.find(
+            c => c.name === constructorType.constructorName
+        );
+
+        if (!constructorDef) {
+            return factory.createErrorType(
+                `Constructor '${constructorType.constructorName}' not found in variant`,
+                undefined,
+                callNode
+            );
+        }
+
+        // Build a map of generic parameters to their inferred types
+        // Start with all generics as `never` (uninferrable)
+        const inferredGenerics = new Map<string, TypeDescription>();
+        for (const paramName of genericParamNames) {
+            inferredGenerics.set(paramName, factory.createNeverType());
+        }
+
+        // Infer generic types from the constructor arguments
+        const callArgs = callNode.args ?? [];
+        const constructorParams = constructorDef.parameters;
+
+        for (let i = 0; i < Math.min(callArgs.length, constructorParams.length); i++) {
+            const argType = this.inferExpression(callArgs[i]);
+            const paramType = constructorParams[i].type;
+
+            // Try to match the parameter type with the argument type to infer generics
+            // For example, if parameter is T and argument is i32, then T = i32
+            this.inferGenericsFromTypes(paramType, argType, inferredGenerics);
+        }
+
+        // Create the final generic args array in the correct order
+        const finalGenericArgs = genericParamNames.map(
+            name => inferredGenerics.get(name) ?? factory.createNeverType()
+        );
+
+        // Create a ReferenceType with the inferred generic arguments
+        const variantRefWithGenerics = factory.createReferenceType(
+            variantDecl,
+            finalGenericArgs,
+            callNode
+        );
+
+        // Resolve the reference to get the actual VariantType with substituted generics
+        const resolvedVariant = this.resolveReference(variantRefWithGenerics);
+        if (!isVariantType(resolvedVariant)) {
+            return factory.createErrorType(
+                `Failed to resolve variant type for ${constructorType.constructorName}`,
+                undefined,
+                callNode
+            );
+        }
+
+        // Return a VariantConstructorType (subtype of the variant)
+        // Example: Result.Ok(42) returns Result<i32, never>.Ok
+        // This represents that the value is specifically an Ok constructor,
+        // which is a subtype of Result<i32, never>
+        return factory.createVariantConstructorType(
+            resolvedVariant,
+            constructorType.constructorName,
+            finalGenericArgs,
+            callNode,
+            variantDecl  // Pass the declaration for display purposes
+        );
+    }
+
+    /**
+     * Helper method to infer generic type parameters by matching a pattern type with a concrete type.
+     *
+     * For example:
+     * - Pattern: T, Concrete: i32 → infers T = i32
+     * - Pattern: Array<T>, Concrete: Array<string> → infers T = string
+     * - Pattern: Result<T, E>, Concrete: Result<i32, string> → infers T = i32, E = string
+     *
+     * @param patternType The type pattern with generic parameters (e.g., T, Array<T>)
+     * @param concreteType The concrete type to match against (e.g., i32, Array<string>)
+     * @param inferredGenerics Map to store inferred generic parameters
+     */
+    private inferGenericsFromTypes(
+        patternType: TypeDescription,
+        concreteType: TypeDescription,
+        inferredGenerics: Map<string, TypeDescription>
+    ): void {
+        // If concrete type is a VariantConstructorType, extract its base variant
+        // Example: Result.Ok(Option.Some(42)) should infer T = Option<i32>, not Option<i32>.Some
+        // Use the declaration if available to preserve the type name for better display
+        if (isVariantConstructorType(concreteType)) {
+            if (concreteType.variantDeclaration) {
+                // Reconstruct a reference from the declaration and genericArgs
+                concreteType = factory.createReferenceType(
+                    concreteType.variantDeclaration,
+                    concreteType.genericArgs,
+                    concreteType.node
+                );
+            } else {
+                // Fallback to baseVariant for anonymous variants
+                concreteType = concreteType.baseVariant;
+            }
+        }
+
+        // If pattern is a generic parameter, infer its type from the concrete type
+        if (patternType.kind === TypeKind.Generic) {
+            const genericName = (patternType as any).name;
+            if (genericName && !inferredGenerics.has(genericName)) {
+                inferredGenerics.set(genericName, concreteType);
+            } else if (genericName && inferredGenerics.get(genericName)?.kind === TypeKind.Never) {
+                // Replace never with the concrete type
+                inferredGenerics.set(genericName, concreteType);
+            }
+            return;
+        }
+
+        // If pattern is an array, try to infer element type
+        if (isArrayType(patternType) && isArrayType(concreteType)) {
+            this.inferGenericsFromTypes(
+                patternType.elementType,
+                concreteType.elementType,
+                inferredGenerics
+            );
+            return;
+        }
+
+        // If pattern is a reference type, recurse into generic args
+        if (isReferenceType(patternType) && isReferenceType(concreteType)) {
+            const patternArgs = patternType.genericArgs;
+            const concreteArgs = concreteType.genericArgs;
+
+            for (let i = 0; i < Math.min(patternArgs.length, concreteArgs.length); i++) {
+                this.inferGenericsFromTypes(patternArgs[i], concreteArgs[i], inferredGenerics);
+            }
+            return;
+        }
+
+        // Add more cases as needed (struct, tuple, etc.)
     }
 
     private inferIndexAccess(node: ast.IndexAccess): TypeDescription {
@@ -1636,12 +2088,13 @@ export class TypeCTypeProvider {
 
     /**
      * Infer the type of an array construction expression (e.g., `[1, 2, 3]` or `[]`).
-     * 
-     * For non-empty arrays, infers element type from the first element.
+     *
+     * For non-empty arrays, infers element type by computing common type across all elements.
      * For empty arrays, uses contextual typing from the expected type (if available).
-     * 
+     *
      * Examples:
      * - `[1, 2, 3]` → `i32[]` (inferred from elements)
+     * - `[Result.Ok(1), Result.Err("error")]` → `Result<i32, string>[]` (unified variant)
      * - `let x: u32[] = []` → `u32[]` (from context)
      * - `let x = []` → ERROR (cannot infer type)
      */
@@ -1649,12 +2102,12 @@ export class TypeCTypeProvider {
         if (!node.values || node.values.length === 0) {
             // Empty array - try to get type from context
             const expectedType = this.getExpectedType(node);
-            
+
             if (expectedType && isArrayType(expectedType)) {
                 // Use the expected element type
                 return expectedType;
             }
-            
+
             // No context available - cannot infer type
             return factory.createErrorType(
                 'Cannot infer type of empty array literal. Provide a type annotation (e.g., let x: T[] = [])',
@@ -1662,10 +2115,11 @@ export class TypeCTypeProvider {
                 node
             );
         }
-        
-        // Infer element type from first element
-        const firstElemType = this.inferExpression(node.values[0].expr);
-        return factory.createArrayType(firstElemType, node);
+
+        // Infer element types from all elements and find common type
+        const elementTypes = node.values.map(v => this.inferExpression(v.expr));
+        const commonType = this.getCommonType(elementTypes);
+        return factory.createArrayType(commonType, node);
     }
 
     private inferNamedStructConstruction(node: ast.NamedStructConstructionExpression): TypeDescription {

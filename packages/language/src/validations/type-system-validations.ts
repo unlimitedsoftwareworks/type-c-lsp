@@ -1,21 +1,22 @@
 import { AstNode, ValidationAcceptor, ValidationChecks } from "langium";
 import * as ast from "../generated/ast.js";
-import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import { TypeCServices } from "../type-c-module.js";
-import { TypeCBaseValidation } from "./base-validation.js";
-import { 
-    TypeDescription, 
-    TypeKind, 
-    isFunctionType, 
-    isClassType, 
-    isStructType, 
-    isReferenceType, 
-    isInterfaceType,
-    InterfaceTypeDescription,
+import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
+import {
     ClassTypeDescription,
+    ErrorTypeDescription,
+    InterfaceTypeDescription,
     MethodType,
-    ErrorTypeDescription
+    TypeDescription,
+    TypeKind,
+    isClassType,
+    isFunctionType,
+    isInterfaceType,
+    isReferenceType,
+    isVariantConstructorType
 } from "../typing/type-c-types.js";
+import { isAssignable } from "../typing/type-utils.js";
+import { TypeCBaseValidation } from "./base-validation.js";
 
 /**
  * Type system validator for Type-C.
@@ -128,8 +129,16 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             if (leftType.kind === TypeKind.Error || rightType.kind === TypeKind.Error) {
                 return;
             }
-            
-            if (!this.isNumericType(leftType) || !this.isNumericType(rightType)) {
+
+            const numericKinds = [
+                TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
+                TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64,
+                TypeKind.F32, TypeKind.F64
+            ];
+            const leftIsNumeric = numericKinds.includes(leftType.kind);
+            const rightIsNumeric = numericKinds.includes(rightType.kind);
+
+            if (!leftIsNumeric || !rightIsNumeric) {
                 accept('error', `Operator '${node.op}' requires numeric operands`, {
                     node,
                 });
@@ -153,12 +162,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Check function call arguments against parameter types.
+     *
+     * Note: Skip validation for variant constructor calls, as they perform
+     * generic inference from arguments. The type provider handles this correctly.
      */
     checkFunctionCall = (node: ast.FunctionCall, accept: ValidationAcceptor): void => {
         const fnType = this.typeProvider.getType(node.expr);
-        
+
         if (!isFunctionType(fnType)) {
             // Not a function - let another validation handle this
+            return;
+        }
+
+        // Skip validation for variant constructor calls
+        // Variant constructors have generic parameters that are inferred from arguments
+        // The type provider handles this inference correctly
+        if (isVariantConstructorType(fnType.returnType)) {
             return;
         }
 
@@ -385,159 +404,29 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Check if a type is compatible with an expected type.
-     * 
-     * Handles:
-     * - Simple type equality
-     * - null assignable to nullable types
-     * - Duck typing for structs (structural compatibility)
-     * - Type aliases (references)
-     * - **Implicit numeric type coercion** (safe conversions)
+     *
+     * Delegates to the type-utils isAssignable function for consistent type checking.
      */
     private isTypeCompatible(actual: TypeDescription, expected: TypeDescription): boolean {
-        // Error types are always compatible (already reported)
-        if (actual.kind === TypeKind.Error || expected.kind === TypeKind.Error) {
-            return true;
-        }
-
-        // null is assignable to nullable types
-        if (actual.kind === TypeKind.Null && expected.kind === TypeKind.Nullable) {
-            return true;
-        }
-
-        // Resolve type references
-        let actualResolved = actual;
-        let expectedResolved = expected;
-        
-        if (isReferenceType(actual)) {
-            const resolved = this.typeProvider.resolveReference(actual);
-            if (resolved) actualResolved = resolved;
-        }
-        if (isReferenceType(expected)) {
+        // Special case: struct literal to named struct reference (duck typing)
+        // Example: {x: 5.0, y: 10.0} assigned to Point
+        if (actual.kind === TypeKind.Struct && isReferenceType(expected)) {
             const resolved = this.typeProvider.resolveReference(expected);
-            if (resolved) expectedResolved = resolved;
+            if (resolved && resolved.kind === TypeKind.Struct) {
+                // Both are structs, check structural compatibility via isAssignable
+                return isAssignable(actual, resolved);
+            }
         }
 
-        // Duck typing for structs: structural compatibility
-        // A struct literal is compatible with a named struct if all fields match
-        if (isStructType(actualResolved) && isStructType(expectedResolved)) {
-            return this.areStructsCompatible(actualResolved, expectedResolved);
-        }
-
-        // Check for implicit numeric type coercion
-        if (this.isNumericType(actualResolved) && this.isNumericType(expectedResolved)) {
-            return this.canCoerceNumericType(actualResolved.kind, expectedResolved.kind);
-        }
-
-        // Simple equality check
-        return actualResolved.toString() === expectedResolved.toString();
+        // Use the centralized assignability check from type-utils
+        // This handles:
+        // - Never type (bottom type, assignable to everything)
+        // - Generic arguments with never
+        // - Numeric coercion
+        // - Struct compatibility
+        // - Variant constructor assignability
+        // - And more...
+        return isAssignable(actual, expected);
     }
 
-    /**
-     * Check if two struct types are structurally compatible (duck typing).
-     * 
-     * For now, uses simple string comparison of their structure.
-     * TODO: Implement proper field-by-field comparison
-     */
-    private areStructsCompatible(actual: TypeDescription, expected: TypeDescription): boolean {
-        // For now, compare string representations
-        // This handles both named structs and anonymous struct literals
-        return actual.toString() === expected.toString();
-    }
-
-    /**
-     * Check if a type is numeric (integer or float).
-     */
-    private isNumericType(type: TypeDescription): boolean {
-        const numericKinds = [
-            TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
-            TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64,
-            TypeKind.F32, TypeKind.F64
-        ];
-        return numericKinds.includes(type.kind);
-    }
-
-    /**
-     * Check if a numeric type can be implicitly coerced to another numeric type.
-     * 
-     * Safe conversions allowed:
-     * 1. **Exact match** - always safe
-     * 2. **Widening integer conversions** - no precision loss
-     *    - u8 → u16 → u32 → u64
-     *    - i8 → i16 → i32 → i64
-     *    - u8 → i16, u16 → i32, u32 → i64 (unsigned to larger signed)
-     * 3. **Integer to float** - safe for reasonable values
-     *    - Any integer → f32, f64
-     * 4. **Float widening** - no precision loss
-     *    - f32 → f64
-     * 
-     * Examples:
-     * - i32 → f32 ✅ (safe)
-     * - f64 → f32 ❌ (narrowing, potential precision loss)
-     * - i64 → i32 ❌ (narrowing, potential overflow)
-     * - u32 → i32 ❌ (signed/unsigned mismatch without widening)
-     */
-    private canCoerceNumericType(from: TypeKind, to: TypeKind): boolean {
-        // Exact match
-        if (from === to) {
-            return true;
-        }
-
-        // Any integer → any float (safe, common use case)
-        const integerTypes = [
-            TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
-            TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64
-        ];
-        const floatTypes = [TypeKind.F32, TypeKind.F64];
-        
-        if (integerTypes.includes(from) && floatTypes.includes(to)) {
-            return true; // int → float always allowed
-        }
-
-        // Float widening: f32 → f64
-        if (from === TypeKind.F32 && to === TypeKind.F64) {
-            return true;
-        }
-
-        // Unsigned integer widening
-        const unsignedHierarchy = [TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64];
-        const fromUnsignedIdx = unsignedHierarchy.indexOf(from);
-        const toUnsignedIdx = unsignedHierarchy.indexOf(to);
-        if (fromUnsignedIdx !== -1 && toUnsignedIdx !== -1 && fromUnsignedIdx < toUnsignedIdx) {
-            return true; // u8 → u16 → u32 → u64
-        }
-
-        // Signed integer widening
-        const signedHierarchy = [TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64];
-        const fromSignedIdx = signedHierarchy.indexOf(from);
-        const toSignedIdx = signedHierarchy.indexOf(to);
-        if (fromSignedIdx !== -1 && toSignedIdx !== -1 && fromSignedIdx < toSignedIdx) {
-            return true; // i8 → i16 → i32 → i64
-        }
-
-        // Unsigned to larger signed (safe: value always fits)
-        if (from === TypeKind.U8 && (to === TypeKind.I16 || to === TypeKind.I32 || to === TypeKind.I64)) {
-            return true;
-        }
-        if (from === TypeKind.U16 && (to === TypeKind.I32 || to === TypeKind.I64)) {
-            return true;
-        }
-        if (from === TypeKind.U32 && to === TypeKind.I64) {
-            return true;
-        }
-
-        // Signed to larger unsigned (widening with wraparound for negatives)
-        // This is pragmatic - literals like 0, 255 are common and safe
-        if (from === TypeKind.I8 && (to === TypeKind.U16 || to === TypeKind.U32 || to === TypeKind.U64)) {
-            return true;
-        }
-        if (from === TypeKind.I16 && (to === TypeKind.U32 || to === TypeKind.U64)) {
-            return true;
-        }
-        if (from === TypeKind.I32 && to === TypeKind.U64) {
-            return true;
-        }
-
-        // No other conversions are safe
-        return false;
-    }
 }

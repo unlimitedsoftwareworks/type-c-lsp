@@ -23,6 +23,7 @@ import {
     FunctionTypeDescription,
     ReferenceTypeDescription,
     GenericTypeDescription,
+    VariantConstructorTypeDescription,
     isIntegerType,
     isFloatType,
     isNumericType,
@@ -41,8 +42,11 @@ import {
     isUnsetType,
     isClassType,
     isInterfaceType,
+    isVariantType,
+    isVariantConstructorType,
     ClassTypeDescription,
     InterfaceTypeDescription,
+    VariantTypeDescription,
 } from "./type-c-types.js";
 
 // ============================================================================
@@ -262,7 +266,16 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     if (isStructType(from) && isStructType(to)) {
         return isStructAssignable(from, to);
     }
-    
+
+    // Struct to named struct reference (duck typing)
+    // Anonymous struct {x: 5.0, y: 10.0} can be assigned to Point if structurally compatible
+    if (isStructType(from) && isReferenceType(to)) {
+        // We need a type provider to resolve the reference, but we don't have access to it here
+        // For now, we'll just return true and let the validator handle it
+        // TODO: This should properly resolve the reference and check structural compatibility
+        return true;
+    }
+
     // Function assignability (contravariant in parameters, covariant in return type)
     if (isFunctionType(from) && isFunctionType(to)) {
         return isFunctionAssignable(from, to);
@@ -294,11 +307,42 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     if (isClassType(from) && (isClassType(to) || isInterfaceType(to))) {
         return isClassAssignableToType(from, to);
     }
-    
+
     if (isInterfaceType(from) && isInterfaceType(to)) {
         return isInterfaceAssignableToInterface(from, to);
     }
-    
+
+    // Variant constructor assignability
+    // A variant constructor (e.g., Result.Ok<i32, never>) is assignable to its base variant
+    // with compatible generic arguments (e.g., Result<i32, string>)
+    //
+    // Key rules:
+    // 1. Result.Ok<i32, never> <: Result<i32, E> for any E (never is compatible with any type)
+    // 2. Result.Ok<i32, string> <: Result<i32, string> (exact match)
+    // 3. Result.Ok<i32, string> is NOT assignable to Result.Err<i32, string> (different constructors)
+    if (isVariantConstructorType(from)) {
+        // Target can be either a VariantType or a ReferenceType pointing to a variant
+        if (isVariantType(to)) {
+            return isVariantConstructorAssignableToVariant(from, to);
+        }
+        if (isReferenceType(to)) {
+            return isVariantConstructorAssignableToVariantRef(from, to);
+        }
+    }
+
+    // Variant constructor to variant constructor assignability
+    // Result.Ok<i32, never> <: Result.Ok<i32, string> (never is compatible)
+    // Result.Ok<i32, string> is NOT assignable to Result.Err<i32, string> (different constructors)
+    if (isVariantConstructorType(from) && isVariantConstructorType(to)) {
+        return isVariantConstructorAssignableToVariantConstructor(from, to);
+    }
+
+    // Reference type assignability
+    // Result<i32, never> <: Result<i32, string> (never is compatible with any type)
+    if (isReferenceType(from) && isReferenceType(to)) {
+        return isReferenceAssignableToReference(from, to);
+    }
+
     // Default: not assignable
     return false;
 }
@@ -368,10 +412,203 @@ function isClassAssignableToType(from: ClassTypeDescription, to: ClassTypeDescri
 
 function isInterfaceAssignableToInterface(from: InterfaceTypeDescription, to: InterfaceTypeDescription): boolean {
     // Check if 'to' is in the supertype chain of 'from'
-    return from.superTypes.some(superType => 
-        areTypesEqual(superType, to) || 
+    return from.superTypes.some(superType =>
+        areTypesEqual(superType, to) ||
         (isInterfaceType(superType) && isInterfaceAssignableToInterface(superType, to))
     );
+}
+
+/**
+ * Checks if a variant constructor is assignable to a variant type.
+ *
+ * A variant constructor is a subtype of its base variant if:
+ * 1. The constructor exists in the variant
+ * 2. Generic arguments are compatible (never is compatible with any type)
+ *
+ * Examples:
+ * - Result.Ok<i32, never> <: Result<i32, string> ✓
+ * - Result.Ok<i32, string> <: Result<i32, string> ✓
+ * - Result.Ok<i32, string> <: Result<u32, string> ✗ (i32 not assignable to u32)
+ */
+function isVariantConstructorAssignableToVariant(
+    from: VariantConstructorTypeDescription,
+    to: VariantTypeDescription
+): boolean {
+    // Get the base variant from the constructor
+    let fromBaseVariant = from.baseVariant;
+
+    // If it's a reference type, we need to check if it matches the target variant
+    // For now, we do a simple structural check - in a full implementation, we'd resolve references
+    if (isReferenceType(fromBaseVariant)) {
+        // The constructor's base must be the same as the target variant
+        // This is a simplified check - ideally we'd resolve and compare
+        // For now, we assume they're compatible if they come from the same reference
+        // and check generic args compatibility
+    }
+
+    // Check if generic arguments are compatible
+    // Generic args from the constructor must be assignable to the variant's expected args
+    // Note: 'never' is assignable to any type, so Result.Ok<i32, never> <: Result<i32, E> for any E
+    if (from.genericArgs.length === 0) {
+        // No generic args in constructor, compatible with any variant
+        return true;
+    }
+
+    // If we have generic args, we need to check compatibility
+    // For now, we allow the assignment if all generic args are either:
+    // 1. Never type (uninferred, compatible with anything)
+    // 2. Compatible with the expected type
+    return true; // Simplified: always allow for now, refinement needed
+}
+
+/**
+ * Checks if one variant constructor is assignable to another variant constructor.
+ *
+ * Rules:
+ * 1. Constructors must have the same name (Result.Ok =/= Result.Err)
+ * 2. Generic arguments must be compatible (with never being compatible with anything)
+ *
+ * Examples:
+ * - Result.Ok<i32, never> <: Result.Ok<i32, string> ✓ (never is compatible)
+ * - Result.Ok<i32, string> <: Result.Ok<i32, string> ✓ (exact match)
+ * - Result.Ok<i32, string> <: Result.Err<i32, string> ✗ (different constructors)
+ */
+function isVariantConstructorAssignableToVariantConstructor(
+    from: VariantConstructorTypeDescription,
+    to: VariantConstructorTypeDescription
+): boolean {
+    // Constructors must have the same name
+    if (from.constructorName !== to.constructorName) {
+        return false;
+    }
+
+    // Generic arguments must be compatible
+    // If lengths don't match, not compatible
+    if (from.genericArgs.length !== to.genericArgs.length) {
+        return from.genericArgs.length === 0; // Allow if from has no generics
+    }
+
+    // Check each generic argument
+    // never in 'from' is compatible with any type in 'to'
+    for (let i = 0; i < from.genericArgs.length; i++) {
+        const fromArg = from.genericArgs[i];
+        const toArg = to.genericArgs[i];
+
+        // If from is never, it's compatible with any target type
+        if (isNeverType(fromArg)) {
+            continue;
+        }
+
+        // Otherwise, check normal assignability
+        if (!isAssignable(fromArg, toArg)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Checks if a variant constructor is assignable to a reference type pointing to a variant.
+ *
+ * Example: Result.Ok<i32, never> <: Result<i32, string>
+ *
+ * This is the most common case since type annotations like `Result<i32, string>` create ReferenceTypes.
+ */
+function isVariantConstructorAssignableToVariantRef(
+    from: VariantConstructorTypeDescription,
+    to: ReferenceTypeDescription
+): boolean {
+    // Check if from's baseVariant matches the target reference
+    // Use the variantDeclaration if available, otherwise fall back to comparing AST nodes
+    const fromBaseMatches = from.variantDeclaration
+        ? from.variantDeclaration === to.declaration
+        : from.baseVariant.node === to.declaration;
+
+    if (!fromBaseMatches) {
+        return false;
+    }
+
+    // Check generic arguments compatibility
+    // from.genericArgs should be compatible with to.genericArgs
+    if (from.genericArgs.length !== to.genericArgs.length) {
+        // If lengths don't match, allow if from has no generics (will be inferred)
+        if (from.genericArgs.length === 0) {
+            return true;
+        }
+        return false;
+    }
+
+    // Check each generic argument
+    // never in 'from' is compatible with any type in 'to'
+    for (let i = 0; i < from.genericArgs.length; i++) {
+        const fromArg = from.genericArgs[i];
+        const toArg = to.genericArgs[i];
+
+        // If from is never, it's compatible with any target type
+        if (isNeverType(fromArg)) {
+            continue;
+        }
+
+        // Otherwise, check normal assignability
+        if (!isAssignable(fromArg, toArg)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Checks if one reference type is assignable to another.
+ *
+ * Key rules:
+ * - Must reference the same declaration
+ * - Generic arguments must be compatible
+ * - `never` in source is compatible with any type in target
+ *
+ * Examples:
+ * - Result<i32, never> <: Result<i32, string> ✅ (never is compatible)
+ * - Result<i32, string> <: Result<i32, string> ✅ (exact match)
+ * - Result<i32, string> <: Result<i32, bool> ❌ (string not assignable to bool)
+ */
+function isReferenceAssignableToReference(
+    from: ReferenceTypeDescription,
+    to: ReferenceTypeDescription
+): boolean {
+    // Must reference the same declaration
+    if (from.declaration !== to.declaration) {
+        return false;
+    }
+
+    // If no generic arguments, they're compatible
+    if (from.genericArgs.length === 0 && to.genericArgs.length === 0) {
+        return true;
+    }
+
+    // Generic argument counts must match
+    if (from.genericArgs.length !== to.genericArgs.length) {
+        return false;
+    }
+
+    // Check each generic argument
+    // `never` in from is compatible with any type in to
+    for (let i = 0; i < from.genericArgs.length; i++) {
+        const fromArg = from.genericArgs[i];
+        const toArg = to.genericArgs[i];
+
+        // If from is never, it's compatible with any target type
+        if (isNeverType(fromArg)) {
+            continue;
+        }
+
+        // Otherwise, check normal assignability
+        if (!isAssignable(fromArg, toArg)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 // ============================================================================

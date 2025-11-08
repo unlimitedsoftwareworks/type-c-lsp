@@ -59,6 +59,7 @@ export enum TypeKind {
     // Structural types
     Struct = 'struct',
     Variant = 'variant',
+    VariantConstructor = 'variant-constructor',
     Enum = 'enum',
     StringEnum = 'string-enum',
     
@@ -178,6 +179,38 @@ export interface VariantConstructorType {
 export interface VariantTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Variant;
     readonly constructors: readonly VariantConstructorType[];
+}
+
+/**
+ * Represents a specific variant constructor with generic arguments.
+ *
+ * Example: Result.Ok<i32, never> is a subtype of Result<i32, E> for any E
+ *
+ * Key properties:
+ * - baseVariant: The resolved variant type (always a VariantType, never a reference)
+ * - variantDeclaration: The type declaration (for displaying the name, e.g., "Result")
+ * - constructorName: The specific constructor (e.g., "Ok" or "Err")
+ * - genericArgs: Concrete type arguments (may include `never` for uninferrable params)
+ *
+ * Type relationship:
+ * - Result.Ok<i32, never> <: Result<i32, string>
+ * - Result.Err<never, string> <: Result<i32, string>
+ * - Result.Ok<i32, never> is NOT assignable to Result.Err<i32, never>
+ *
+ * Note: baseVariant must be resolved before creating a VariantConstructorTypeDescription.
+ * References should be resolved using TypeProvider.resolveReference() first.
+ * variantDeclaration may be undefined for anonymous variants.
+ */
+export interface VariantConstructorTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.VariantConstructor;
+    /** The resolved variant type - always VariantTypeDescription, never ReferenceType */
+    readonly baseVariant: VariantTypeDescription;
+    /** The variant's type declaration (for display purposes, may be undefined for anonymous variants) */
+    readonly variantDeclaration?: ast.TypeDeclaration;
+    /** The specific constructor name (e.g., "Ok" or "Err") */
+    readonly constructorName: string;
+    /** Generic arguments for this constructor (may include never) */
+    readonly genericArgs: readonly TypeDescription[];
 }
 
 export interface EnumCaseType {
@@ -391,6 +424,10 @@ export function isStructType(type: TypeDescription): type is StructTypeDescripti
 
 export function isVariantType(type: TypeDescription): type is VariantTypeDescription {
     return type.kind === TypeKind.Variant;
+}
+
+export function isVariantConstructorType(type: TypeDescription): type is VariantConstructorTypeDescription {
+    return type.kind === TypeKind.VariantConstructor;
 }
 
 export function isEnumType(type: TypeDescription): type is EnumTypeDescription {

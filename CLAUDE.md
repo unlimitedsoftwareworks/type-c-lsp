@@ -1,113 +1,458 @@
-# Type-C Type System Implementation Summary
+# Type-C Language - Claude Development Guide
 
-## Overview
+## ⚠️ CRITICAL: Read This First
 
-This document summarizes the comprehensive type system implementation for Type-C, a statically-typed programming language built with Langium.
+### Past Issues to Avoid
+- **Type system compatibility was broken** due to not understanding Type-C's specific type semantics
+- **Tight coupling was not recognized** - changes cascaded without updating dependent code
+- **Tests were not monitored** during changes - breaking changes went unnoticed
+- **Assumptions were made** without understanding the language's design philosophy
 
-## What Was Built
+### Core Development Rules
 
-### 1. Core Type System Architecture
+#### DO NOT:
+- ❌ Break existing type system functionality without explicit approval
+- ❌ Refactor or restructure code without being asked
+- ❌ Make assumptions about type compatibility (Type-C has unique rules!)
+- ❌ Modify code without reading and understanding existing implementation first
+- ❌ Ignore test failures - they indicate broken compatibility
+- ❌ Add type coercion for nested/composite types (only depth-0 primitives!)
+- ❌ Treat unions like TypeScript unions (they're only for generic constraints!)
+- ❌ Assume classes use structural typing (they're nominal!)
 
-Created a complete type system from scratch with the following components:
+#### ALWAYS:
+- ✅ Read existing code thoroughly before making changes
+- ✅ Understand how components are coupled before modifying
+- ✅ Run and monitor tests after changes
+- ✅ Ask before making architectural changes
+- ✅ Test changes incrementally
+- ✅ Check if changes break existing patterns
+- ✅ Understand Type-C's specific type rules (below)
 
-#### File Structure
+---
+
+## Type-C Language Semantics (MUST READ!)
+
+### 1. Duck Typing (Structural) - Default for Everything EXCEPT Classes
+
+Type-C uses **structural typing** for interfaces, structs, and most types. Types are compatible if their structure matches.
+
+#### Interfaces are Structural
+```typescript
+type Movable = interface {
+    move(x: u32, y: u32) -> void
+}
+
+type Drawable = interface {
+    draw() -> void
+}
+
+type Draggable = interface {
+    drag(x: u32, y: u32) -> void
+}
 ```
-packages/language/src/typing/
-├── type-c-types.ts           # Type definitions (600+ lines)
-├── type-factory.ts            # Factory functions (700+ lines)
-├── type-utils.ts              # Type operations (600+ lines)
-├── type-c-type-provider.ts    # Type inference engine (900+ lines)
-├── type-c-type-system.ts      # High-level facade (100+ lines)
-├── builtin-type-utils.ts      # Built-in prototypes (60+ lines)
-└── TYPE_SYSTEM.md             # Documentation (500+ lines)
+
+#### Classes Implement Interfaces Structurally
+```typescript
+type Square = class Movable, Drawable {
+    move(x: u32, y: u32) -> void {
+        // move the square
+    }
+
+    draw() {
+        // draw the square
+    }
+}
+
+let x: Square = new Square()
+
+// ✅ OK! Square structurally satisfies both interfaces
+let y: Movable & Drawable = x
+let z: Drawable & Movable = x
+
+// ❌ Error! Square does not implement Draggable
+let a: Draggable & Drawable = x
 ```
 
-### 2. Type Hierarchy
+**Key Point**: Intersection types (`&`) require the value to satisfy ALL intersected interfaces.
 
-Implemented **34 distinct type kinds** organized into 7 categories:
+---
 
-#### Primitive Types (14 types)
-- Integer types: `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`
-- Float types: `f32`, `f64`
-- Other primitives: `bool`, `void`, `string`, `null`
+### 2. Classes are Nominal (Name-Based)
 
-#### Composite Types (5 types)
-- `Array<T>` - Array types with element type
+**IMPORTANT**: Classes use **nominal typing**, NOT structural typing!
+
+```typescript
+type ClassA = class {
+    x: u32
+}
+
+type ClassB = class {
+    x: u32
+}
+
+let a: ClassA = new ClassA()
+let b: ClassB = a  // ❌ ERROR! Even though structures match, classes are nominal
+```
+
+---
+
+### 3. Unions - ONLY for Generic Constraints
+
+**CRITICAL**: Unions (`|`) are NOT like TypeScript unions! They are **ONLY used for adding constraints to generics**.
+
+```typescript
+// ✅ VALID: Union in generic constraint
+fn process<T: Movable | Drawable>(obj: T) -> void {
+    // ...
+}
+
+// ❌ INVALID: Union in regular type annotation
+let x: Movable | Drawable = something  // NOT ALLOWED!
+```
+
+**Do not implement general union types** - they have a specific, limited purpose.
+
+---
+
+### 4. Tuples - ONLY for Returns and Unpacking
+
+Tuples are **only allowed** in two contexts:
+1. Function return types
+2. Unpacking function return values
+
+**Reason**: The VM passes arguments via registers, so tuples are a low-level construct.
+
+```typescript
+// ✅ VALID: Tuple as return type
+fn getCoords() -> (u32, u32) {
+    return (10, 20)
+}
+
+// ✅ VALID: Unpacking tuple return
+let (x, y) = getCoords()
+
+// ❌ INVALID: Tuple as parameter or variable type
+fn process(coords: (u32, u32)) -> void { }  // NOT ALLOWED
+let coords: (u32, u32) = (1, 2)             // NOT ALLOWED
+```
+
+---
+
+### 5. Anonymous Structs and Structural Compatibility
+
+Anonymous struct literals are structurally compatible with named struct types.
+
+```typescript
+type P = struct {
+    x: u32,
+    y: u32
+}
+
+// Anonymous struct literal
+let z = {x: 1u32, y: 2u32}
+
+// ✅ OK! z is structurally compatible with P
+let p: P = z
+```
+
+#### Struct Subtyping - Fields Must Align Exactly
+
+**Small struct = Large struct** is valid ONLY if:
+- Common fields exist in both
+- Common fields have **exactly matching types** at depth 0
+- **NO type coercion for nested types!**
+
+```typescript
+type Small = struct {
+    x: u32
+}
+
+type Large = struct {
+    x: u32,
+    y: u32,
+    z: string
+}
+
+let large: Large = {x: 1u32, y: 2u32, z: "test"}
+let small: Small = large  // ✅ OK! x field matches exactly
+
+// Type coercion at depth 0 (primitive level)
+let a: u32 = 10u32
+let b: i32 = a  // ✅ OK! Primitive coercion allowed
+
+// NO coercion for nested types!
+type S1 = struct { x: i32 }
+type S2 = struct { x: u32 }
+
+let s1: S1 = {x: 10i32}
+let s2: S2 = s1  // ❌ ERROR! Nested field types must match exactly
+```
+
+**Critical Rule**: Type coercion **only applies at depth 0** (direct primitive assignments), not for struct fields or nested types.
+
+---
+
+### 6. Variant Constructors are Subtypes
+
+**IMPORTANT**: Variant constructors (e.g., `Result.Ok`, `Result.Err`) are **subtypes of the variant itself**.
+
+```typescript
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn test() -> Result<i32, string> {
+    let ok = Result.Ok(42)     // Type: Result<i32, ?>.Ok
+    let err = Result.Err("no") // Type: Result<?, string>.Err
+
+    // ✅ Both are subtypes of Result<i32, string>
+    return if someCondition => ok else err
+}
+```
+
+---
+
+### 7. Incomplete Generic Inference with `never` Type
+
+Type-C allows **partial generic inference** for variants. Uninferrable generics are filled with the `never` type.
+
+```typescript
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn pingServer() -> Result<i32, string> {
+    // T is inferred as i32, but E cannot be inferred
+    let okResponse = Result.Ok(200)
+
+    /**
+     * okResponse has type: Result<i32, never>.Ok
+     *
+     * Why `never`?
+     * - E is impossible to infer from this context
+     * - `never` represents a type that is statically unreachable
+     * - `never` is NOT written by users - it's internal only
+     * - Result.Ok is still a subtype of Result<i32, E> for any E
+     */
+
+    let badResponse = Result.Err("Unreachable")
+    // Type: Result<never, string>.Err
+
+    let someCondition = true
+    return if someCondition => okResponse else badResponse
+    // Return type unifies to Result<i32, string>
+}
+```
+
+**Key Points**:
+- ✅ Partial inference is allowed for variants
+- ✅ Uninferrable type parameters become `never`
+- ✅ `never` is for internal use only (users never write it)
+- ✅ Variant constructors are subtypes of the variant
+- ✅ Types unify at return based on declared return type
+
+---
+
+## Project Structure
+
+```
+type-c-langium/
+├── packages/
+│   ├── language/
+│   │   └── src/
+│   │       ├── typing/
+│   │       │   ├── type-c-types.ts           # Type definitions (~600 lines)
+│   │       │   ├── type-factory.ts           # Factory functions (~700 lines)
+│   │       │   ├── type-utils.ts             # Type operations (~600 lines)
+│   │       │   ├── type-c-type-provider.ts   # Type inference engine (~900 lines)
+│   │       │   ├── type-c-type-system.ts     # High-level facade (~100 lines)
+│   │       │   ├── builtin-type-utils.ts     # Built-in prototypes (~60 lines)
+│   │       │   └── TYPE_SYSTEM.md            # Type system docs (~500 lines)
+│   │       ├── type-c.langium                # Grammar definition
+│   │       ├── type-c-scope-provider.ts      # Scope and completions
+│   │       ├── type-c-validator.ts           # Validation rules
+│   │       └── ...
+│   └── ...
+└── ...
+```
+
+---
+
+## Type System Architecture
+
+### Core Components
+
+1. **type-c-types.ts**: Type definitions (34 type kinds in 7 categories)
+2. **type-factory.ts**: Factory functions for creating types
+3. **type-utils.ts**: Type comparison, assignability, subtyping
+4. **type-c-type-provider.ts**: Main type inference engine
+5. **type-c-type-system.ts**: High-level public API
+6. **builtin-type-utils.ts**: Built-in prototype methods
+
+### Type Kinds (34 types)
+
+#### Primitive Types (14)
+- Integers: `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`
+- Floats: `f32`, `f64`
+- Others: `bool`, `void`, `string`, `null`
+
+#### Composite Types (5)
+- `Array<T>` - Arrays with element type
 - `Nullable<T?>` - Nullable types
-- `Union (T | U)` - Union types
-- `Join (T & U)` - Intersection types
-- `Tuple (T, U, V)` - Tuple types
+- `Union (T | U)` - **Only for generic constraints!**
+- `Join (T & U)` - Intersection types (must satisfy all)
+- `Tuple (T, U, V)` - **Only for returns and unpacking!**
 
-#### Structural Types (4 types)
-- `Struct` - Structural records with named fields
-- `Variant` - Algebraic data types with constructors
-- `Enum` - Enumerated types with optional encoding
+#### Structural Types (4)
+- `Struct` - Records with named fields (structural typing)
+- `Variant` - Algebraic data types with constructors (constructors are subtypes!)
+- `Enum` - Enumerated types
 - `StringEnum` - String literal types
 
-#### Object-Oriented Types (3 types)
-- `Interface` - Interface types with methods
-- `Class` - Class types with attributes, methods, and inheritance
-- `Implementation` - Implementation types for code reuse
+#### Object-Oriented Types (3)
+- `Interface` - Interfaces (structural typing)
+- `Class` - Classes (**nominal typing!**)
+- `Implementation` - Implementation types
 
-#### Functional Types (3 types)
+#### Functional Types (3)
 - `Function` - Function types (fn/cfn)
-- `Coroutine` - Coroutine types with yield
+- `Coroutine` - Coroutine types
 - `ReturnType<T>` - Return type wrapper
 
-#### Special Types (5 types)
-- `Reference` - Named type references with generics
-- `Generic` - Generic type parameters with constraints
-- `Prototype` - Built-in prototype methods
-- `Namespace` - Namespace types
-- `FFI` - External function interface types
+#### Special Types (5)
+- `Reference` - Named type references
+- `Generic` - Generic parameters
+- `Prototype` - Built-in prototypes
+- `Namespace` - Namespaces
+- `FFI` - Foreign function interface
 
-#### Meta Types (4 types)
+#### Meta Types (4)
 - `Error` - Type error sentinel
-- `Never` - Bottom type (unreachable)
-- `Any` - Top type (gradual typing)
+- `Never` - Bottom type (unreachable, used for uninferrable generics)
+- `Any` - Top type
 - `Unset` - Not yet computed
 
-### 3. Key Features Implemented
+---
 
-#### Lazy Evaluation with Caching
+## Key Implementation Details
+
+### 1. Lazy Evaluation with Caching
 - Types computed on-demand
-- `WeakMap`-based caching for automatic memory management
+- `WeakMap`-based caching for memory management
 - Handles recursive types naturally
 - Cache invalidation support
 
-#### Comprehensive Type Inference
-- Expression type inference (literals, operators, calls, etc.)
-- Declaration type inference (functions, variables, classes)
-- Generic type instantiation and substitution
-- Return type inference from function bodies
+### 2. Type Inference Engine
+- Expression type inference
+- Declaration type inference
+- Generic instantiation and substitution
+- Return type inference from bodies
 
-#### Type Comparison and Compatibility
-- Structural equality checking
-- Subtyping and assignability rules
-- Numeric promotions (u8 → u16 → u32 → u64, etc.)
-- Contravariant parameters, covariant returns
-- Structural subtyping for interfaces and structs
+### 3. Type Compatibility Rules
 
-#### Generic Types
-- Generic classes, interfaces, and functions
-- Type parameter constraints
-- Generic type substitution
-- Recursive generic types support
+**Remember these are Type-C specific!**
 
-#### Built-in Prototypes
-- Array prototypes (`length`, `push`, `pop`, `slice`, etc.)
-- Coroutine prototypes (`next`, `resume`, etc.)
-- Type-safe prototype method resolution
+#### Assignability Rules
+1. **Primitives**: Numeric promotion (u8 → u16 → u32 → u64, etc.)
+2. **Structs**: Structural compatibility with exact field type matching
+3. **Interfaces**: Structural compatibility
+4. **Classes**: Nominal compatibility (name must match!)
+5. **Intersections**: Must satisfy ALL intersected types
+6. **Variants**: Constructors are subtypes of the variant
+7. **Generics**: Partial inference with `never` for uninferrable types
 
-#### Advanced Type Operations
-- Type narrowing (for control flow analysis)
-- Type simplification (union/intersection flattening)
-- Type substitution (generic instantiation)
-- Reference type resolution
+#### Type Coercion (CRITICAL!)
+- ✅ **Allowed at depth 0**: `u32` → `i32`, `i8` → `i32`, etc.
+- ❌ **NOT allowed for nested types**: struct fields, array elements, etc.
 
-### 4. Integration with Langium
+```typescript
+// ✅ OK
+let x: u32 = 10u32
+let y: i32 = x
 
-#### Service Architecture
+// ❌ ERROR
+type S1 = struct { x: u32 }
+type S2 = struct { x: i32 }
+let s1: S1 = {x: 10u32}
+let s2: S2 = s1  // Fields don't match exactly!
+```
+
+---
+
+## Testing Guidelines
+
+### ALWAYS Monitor Tests
+When making changes to the type system:
+
+1. ✅ Run tests immediately after changes
+2. ✅ Check for breaking test failures
+3. ✅ Fix broken tests before continuing
+4. ✅ Add new tests for new functionality
+5. ✅ Ensure type compatibility rules are preserved
+
+### Test Commands
+```bash
+# Run all tests
+npm test
+
+# Run specific test suite
+npm test -- --grep "type system"
+
+# Watch mode
+npm test -- --watch
+```
+
+---
+
+## Common Patterns to Preserve
+
+### 1. Type Factory Pattern
+Always use factory functions from `type-factory.ts`:
+
+```typescript
+// ✅ Good
+const intType = createPrimitiveType('i32')
+const arrayType = createArrayType(elementType)
+
+// ❌ Bad - Don't construct types manually
+const intType = { kind: 'primitive', primitive: 'i32', ... }
+```
+
+### 2. Type Guards
+Always use type guards from `type-utils.ts`:
+
+```typescript
+// ✅ Good
+if (isClassType(type)) {
+    // TypeScript knows type is ClassType here
+}
+
+// ❌ Bad
+if (type.kind === 'class') {
+    // No type narrowing
+}
+```
+
+### 3. Type Comparison
+Use utility functions:
+
+```typescript
+// ✅ Good
+if (areTypesEqual(type1, type2)) { ... }
+if (isAssignable(fromType, toType)) { ... }
+
+// ❌ Bad
+if (type1 === type2) { ... }  // Reference equality, won't work!
+```
+
+---
+
+## Integration Points
+
+### Langium Service Architecture
 ```typescript
 export type TypeCAddedServices = {
     typing: {
@@ -116,222 +461,108 @@ export type TypeCAddedServices = {
 }
 ```
 
-#### Scope Provider Integration
-- Auto-completion for class members
-- Type-aware member access
-- Prototype method suggestions
-
-#### Documentation Provider
-- Hover information showing inferred types
-- Type signatures in tooltips
-
-### 5. API Design
-
-#### Public API
-```typescript
-// Get type of any AST node
-getType(node: AstNode): TypeDescription
-
-// Resolve reference types
-resolveReference(refType: TypeDescription): TypeDescription
-
-// Get expression type (for scope provider)
-getExpressionType(expr: Expression): TypeDescription
-
-// Get identifiable fields (for completions)
-getIdentifiableFields(type: TypeDescription): AstNode[]
-
-// Cache management
-invalidateCache(node: AstNode): void
-```
-
-#### Type Utilities
-```typescript
-// Type comparison
-areTypesEqual(a: TypeDescription, b: TypeDescription): boolean
-isAssignable(from: TypeDescription, to: TypeDescription): boolean
-
-// Type manipulation
-simplifyType(type: TypeDescription): TypeDescription
-narrowType(type: TypeDescription, target: TypeDescription): TypeDescription
-substituteGenerics(type: TypeDescription, subs: Map<string, TypeDescription>): TypeDescription
-```
-
-#### Factory Functions
-- 60+ factory functions for creating types
-- Consistent type creation interface
-- Automatic `toString()` implementation
-
-#### Type Guards
-- 25+ type guard functions (`isArrayType`, `isClassType`, etc.)
-- Type-safe type discrimination
-- Used throughout the codebase
-
-## Technical Highlights
-
-### 1. Recursive Type Support
-
-The type system naturally handles recursive types through lazy evaluation:
-
-```typescript
-type LinkedList<T> = variant {
-    Cons(value: T, next: LinkedList<T>),
-    Nil
-}
-
-class Node<T> {
-    let value: T;
-    let next: Node<T>?;
-    fn clone(): Node<T> { /* ... */ }
-}
-```
-
-### 2. Performance Optimization
-
-- **Lazy evaluation**: Types computed only when needed
-- **Caching**: WeakMap prevents recomputation
-- **Early returns**: Quick checks for common cases
-- **Efficient algorithms**: O(1) type kind discrimination
-
-### 3. Error Handling
-
-- Graceful error propagation with `ErrorType`
-- Error types assignable to everything (prevents cascading errors)
-- Detailed error messages with source location
-
-### 4. Type Safety
-
-- Immutable type descriptions
-- Type guards for safe type discrimination
-- Structural typing prevents nominal type issues
-
-## Code Quality
-
-### Metrics
-- **Total Lines**: ~3,500+ lines of TypeScript
-- **Test Coverage**: Ready for comprehensive testing
-- **Documentation**: 500+ lines of detailed documentation
-- **Type Safety**: Fully typed with TypeScript
-
-### Best Practices
-- ✅ Single Responsibility Principle
-- ✅ Open/Closed Principle (extensible type system)
-- ✅ Dependency Inversion (Langium services)
-- ✅ Comprehensive documentation
-- ✅ Consistent naming conventions
-- ✅ Clean separation of concerns
-
-## Integration Status
-
-### ✅ Completed
-- [x] Core type system architecture
-- [x] All 34 type kinds implemented
-- [x] Type inference engine
-- [x] Type comparison and compatibility
-- [x] Generic type support
-- [x] Built-in prototypes
-- [x] Langium service integration
-- [x] Scope provider integration
-- [x] Documentation provider integration
-- [x] Comprehensive documentation
-- [x] Build system integration
-- [x] No compiler errors or warnings
-
-### 🎯 Ready For
-- [ ] Comprehensive unit tests
-- [ ] Integration tests with sample programs
-- [ ] Performance benchmarking
-- [ ] Advanced type inference (bidirectional, flow-sensitive)
-- [ ] Effect system (optional future enhancement)
-
-## Usage Examples
-
-### Example 1: Basic Type Inference
-
-```typescript
-let x = 42;                    // Type: i32
-let y = 3.14;                  // Type: f64
-let z = [1, 2, 3];             // Type: i32[]
-let w = { x: 1.0, y: 2.0 };    // Type: struct { x: f64, y: f64 }
-```
-
-### Example 2: Generic Functions
-
-```typescript
-fn identity<T>(x: T) -> T = x;
-
-let num = identity<i32>(42);       // Type: i32
-let str = identity<string>("hi");  // Type: string
-```
-
-### Example 3: Variant Types
-
-```typescript
-type Result<T, E> = variant {
-    Ok(value: T),
-    Err(error: E)
-};
-
-fn divide(a: f64, b: f64) -> Result<f64, string> {
-    if b == 0.0 {
-        return Err("Division by zero");
-    }
-    return Ok(a / b);
-}
-```
-
-### Example 4: Built-in Prototypes
-
-```typescript
-let arr = [1, 2, 3, 4, 5];
-let len = arr.length;           // Type: u32
-let sliced = arr.slice(0, 3);   // Type: i32[]
-arr.push(6);                    // Type: void
-```
-
-## Future Enhancements
-
-### Short Term
-1. **Testing Suite**: Comprehensive unit and integration tests
-2. **Error Messages**: Improved error reporting with suggestions
-3. **Type Hints**: Better type inference diagnostics
-
-### Medium Term
-1. **Flow Analysis**: More sophisticated control flow type narrowing
-2. **Type Inference**: Bidirectional type checking for better inference
-3. **Performance**: Incremental type checking for large files
-
-### Long Term
-1. **Effect System**: Track side effects and purity
-2. **Dependent Types**: Limited dependent types for array sizes
-3. **Refinement Types**: Predicates for more precise types
-4. **REPL Integration**: Interactive type exploration
-
-## Acknowledgments
-
-This type system implementation draws inspiration from:
-- **TypeScript**: Structural typing, union types, type inference
-- **Rust**: Algebraic data types, pattern matching, trait system
-- **Haskell**: Type classes, kind system, higher-kinded types
-- **Langium**: Service architecture, LSP integration, caching
-
-## Conclusion
-
-The Type-C type system is now a production-ready, feature-rich type system that supports:
-- ✅ All major type constructs from modern languages
-- ✅ Sophisticated type inference
-- ✅ Generic programming with constraints
-- ✅ Structural and nominal typing
-- ✅ Built-in prototype system
-- ✅ Full integration with Langium LSP
-
-The implementation is well-architected, performant, and ready for extensive use and further enhancement.
+### Key Integrations
+1. **Scope Provider**: Auto-completion, member access
+2. **Validator**: Type checking, error reporting
+3. **Documentation Provider**: Hover tooltips with types
 
 ---
 
-**Build Status**: ✅ Successful  
-**Total Implementation Time**: Single session  
-**Lines of Code**: ~3,500+  
-**Files Created/Modified**: 7  
-**Compiler Errors**: 0  
-**Warnings**: 0
+## Known Issues & Gotchas
+
+### 1. Type Caching
+- Types are cached in WeakMaps
+- If you modify AST nodes, invalidate cache: `typeProvider.invalidateCache(node)`
+
+### 2. Recursive Types
+- The system handles recursive types through lazy evaluation
+- Don't try to compute recursive types eagerly
+
+### 3. Generic Substitution
+- When substituting generics, use `substituteGenerics()` from type-utils
+- Don't manually replace type parameters
+
+### 4. Variant Constructors
+- Remember: constructors are subtypes of variants
+- `Result.Ok<T, never>` is assignable to `Result<T, E>` for any E
+
+---
+
+## When Making Changes
+
+### Before You Start
+1. 📖 Read this entire document
+2. 🔍 Understand the specific type rules above
+3. 📝 Read existing implementation
+4. 🧪 Check existing tests
+5. 🤔 Understand coupling and dependencies
+
+### During Development
+1. ✅ Make incremental changes
+2. ✅ Test after each change
+3. ✅ Monitor for breaking changes
+4. ✅ Update related code
+5. ✅ Ask questions if unsure
+
+### After Changes
+1. ✅ Run full test suite
+2. ✅ Verify no regressions
+3. ✅ Update documentation if needed
+4. ✅ Check for cascading effects
+
+---
+
+## Questions to Ask Yourself
+
+Before making a change, ask:
+
+- ❓ Do I understand Type-C's specific semantics for this type?
+- ❓ Is this change compatible with existing code?
+- ❓ What other code depends on this?
+- ❓ Are there tests that will break?
+- ❓ Am I following Type-C's rules (not TypeScript's rules)?
+- ❓ Do I need to ask the user first?
+
+**When in doubt, ASK!**
+
+---
+
+## Current Status
+
+### ✅ Implemented
+- [x] Core type system (34 type kinds)
+- [x] Type inference engine
+- [x] Generic type support
+- [x] Structural and nominal typing
+- [x] Built-in prototypes
+- [x] Langium LSP integration
+
+### 🎯 Current Priorities
+- [ ] Fix type compatibility issues
+- [ ] Ensure tests pass
+- [ ] Maintain backward compatibility
+- [ ] Improve error messages
+
+### ⚠️ Known Issues
+- Type system had breaking changes in the past
+- Need better handling of partial generic inference
+- Test coverage needs improvement
+
+---
+
+## Summary: The Most Important Rules
+
+1. 🦆 **Duck typing everywhere EXCEPT classes** (classes are nominal!)
+2. 🚫 **Unions only for generic constraints** (not like TypeScript!)
+3. 📦 **Tuples only for returns/unpacking** (VM limitation)
+4. 🎯 **Type coercion only at depth 0** (no nested coercion!)
+5. 🏗️ **Structs are structural** (compatible by shape)
+6. 🏷️ **Classes are nominal** (compatible by name)
+7. ⚡ **Variant constructors are subtypes** (Result.Ok is subtype of Result)
+8. 🔮 **Partial inference uses `never`** (uninferrable generics)
+9. 🧪 **Always monitor tests** (catch breaking changes early!)
+10. 🤔 **When in doubt, ask!** (don't assume)
+
+---
+
+**Remember**: Type-C is NOT TypeScript, NOT Rust, NOT any other language. It has its own unique semantics. Always refer to these rules when working with types!

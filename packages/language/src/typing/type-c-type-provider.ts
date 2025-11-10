@@ -35,7 +35,8 @@ import {
     isPrototypeType,
     isVariantType,
     isVariantConstructorType,
-    VariantConstructorTypeDescription
+    VariantConstructorTypeDescription,
+    isNamespaceType
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
@@ -276,6 +277,10 @@ export class TypeCTypeProvider {
             const resolvedType = this.resolveReference(type);
             // Recursively get fields from the resolved type
             return this.getIdentifiableFields(resolvedType);
+        }
+
+        if(isNamespaceType(type)) {
+            return type.declaration.definitions;
         }
         
         // Nullable types - unwrap and get fields from base type
@@ -696,11 +701,13 @@ export class TypeCTypeProvider {
     }
 
     private inferReferenceType(node: ast.ReferenceType): TypeDescription {
-        if (!node.qname || !node.qname.ref) {
+        const declaration: AstNode | undefined = node?.qname?.ref;
+        if (!declaration) {
             return factory.createErrorType('Unresolved type reference', undefined, node);
         }
 
-        const declaration: AstNode = node.qname.ref;
+
+        /** Resolve */
 
         // Handle references to generic type parameters (e.g., T in Array<T>)
         if (ast.isGenericType(declaration)) {
@@ -1834,6 +1841,13 @@ export class TypeCTypeProvider {
                     [], // Generic parameters are handled specially for variant constructors
                     node
                 );
+            }
+        }
+
+        if(!memberType && isNamespaceType(baseType)) {
+            const member = baseType.declaration.definitions.find(m => 'name' in m && m.name === memberName);
+            if (member) {
+                memberType = this.getType(member);
             }
         }
 

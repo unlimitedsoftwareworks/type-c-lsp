@@ -1,0 +1,15 @@
+from fib import fib
+from mathlib.math import math
+
+namespace Zelda {
+    type Triangle = u32
+}
+
+type Square = u32
+
+fn main() {
+    let z = fib(10)
+    let a = math.abs(10)
+    let b: enum as u32 {Red = 1, Green = 2} = 2 as enum as u32 {Red = 1, Green = 2}
+    let c: Zelda.triangle = 10
+}

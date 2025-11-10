@@ -4,16 +4,19 @@ import {
     AstUtils,
     DefaultScopeProvider,
     DocumentCache,
+    EMPTY_SCOPE,
     MapScope,
     ReferenceInfo,
     Scope,
     Stream,
-    stream,
+    stream
 } from "langium";
+import * as path from "node:path";
 import { prototypeURI } from "../builtins/index.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
+import { TCWorkspaceManager } from "../workspace/tc-workspace-manager.js";
 import * as scopeUtils from "./tc-scope-utils.js";
 
 /**
@@ -41,12 +44,14 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     
     /** Type provider for inferring expression types */
     private readonly typeProvider: TypeCTypeProvider;
+    private readonly workspaceManager: TCWorkspaceManager;
 
     constructor(services: TypeCServices) {
         super(services);
 
         this.globalCache = new DocumentCache(services.shared);
         this.typeProvider = services.typing.TypeProvider;
+        this.workspaceManager = services.shared.workspace.WorkspaceManager as TCWorkspaceManager;
     }
 
     /**
@@ -75,8 +80,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                 return this.getScopeFromBaseExpressionType(container.expr);
             }
         }
+
+        if(ast.isSubModule(container)) {
+            return this.getExportedRefFromSubModule(context);
+        }
         // Default: local + global scope
-        return this.getLocalScope(context);
+        return this.getCustomLocalScope(context);
     }
 
     /**
@@ -169,25 +178,72 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         return new MapScope(stream(descriptions));
     }
 
+    getScopeFromReferenceType(container: ast.ReferenceType): Scope {
+        return EMPTY_SCOPE;
+    }
+
+    private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
+        const document = AstUtils.getDocument(context.container);
+        const model = document.parseResult.value as ast.Program;
+        const uris = new Set<string>();
+
+        for (const fileImport of model.imports) {
+            const baseName = path.join(...fileImport.sourcePackage.segments!)+ '.tc';
+            console.log(`Importing library: ${baseName}`);
+
+            const library = this.workspaceManager.findLibrary(baseName);
+            console.log(`Library found: ${library?.fsPath}`);
+            if(library) {
+                const fullPath = library.toString();
+                uris.add(fullPath);
+                console.log(`Imported library: ${fullPath}`);
+            }
+        }
+
+        // Use indexManager to find all elements in the imported URIs
+        const astNodeDescriptions = this.indexManager.allElements(ast.IdentifiableReference.$type, uris).toArray();
+        console.log("Resolved AST Node Descriptions:", astNodeDescriptions.map(d => d.name));
+
+        // Create a scope from the imported elements
+        return this.createScope(stream(astNodeDescriptions));
+    }
+
     /**
      * This is a reimplementation of the default getScope, minus the reflection check
      * Should scope provider care about the reflection check?
      * @param context
      * @returns local scope
      */
-    protected getLocalScope(context: ReferenceInfo): Scope {
+    protected getCustomLocalScope(context: ReferenceInfo): Scope {
         const scopes: Array<Stream<AstNodeDescription>> = [];
         const referenceType = this.reflection.getReferenceType(context);
 
         const localSymbols = AstUtils.getDocument(context.container).localSymbols;
         if (localSymbols) {
             let currentNode: AstNode | undefined = context.container;
+            let lastContainer: AstNode | undefined = currentNode;
             do {
                 if (localSymbols.has(currentNode)) {
                     scopes.push(localSymbols.getStream(currentNode));
                 }
+                lastContainer = currentNode;
                 currentNode = currentNode.$container;
             } while (currentNode);
+
+            // TODO: cache this?
+            if(ast.isModule(lastContainer)) {
+                const importedModules: AstNode[] = []
+                for (const importEntry of lastContainer.imports) {
+                    for (const subModule of importEntry.modules) {
+                        if(subModule.reference.ref) {
+                            importedModules.push(subModule.reference.ref);
+                        }
+                    }
+                }
+                const scope = this.createScopeForNodes(importedModules);
+                scopes.push(scope.getAllElements());
+            }
+            
         }
 
         let result: Scope = this.getGlobalScope(referenceType, context);

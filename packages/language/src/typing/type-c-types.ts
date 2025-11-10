@@ -290,6 +290,10 @@ export interface FunctionTypeDescription extends TypeDescription {
     readonly genericParameters: readonly GenericTypeDescription[];
 }
 
+/** 
+ * TODO: Fix this. fn -> FunctionTypeDescription
+ * WE do not need returnType for coroutine, because they yield.
+ */
 export interface CoroutineTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Coroutine;
     readonly fnType: 'fn' | 'cfn';

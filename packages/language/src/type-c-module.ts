@@ -23,7 +23,7 @@ export type TypeCAddedServices = {
     },
     validation: {
         TypeSystemValidator: TypeCTypeSystemValidator
-    }
+    },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
     }
@@ -59,9 +59,6 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     }
 };
 
-/**
- * Question: Where do these come from?
- */
 export const TypeCSharedModule = {
     workspace: {
         WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)

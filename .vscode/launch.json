@@ -19,6 +19,20 @@
             ]
         },
         {
+            "name": "Run Extension (HALT)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+                "--inspect-brk=9229"  // This will pause execution at start
+            ],
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/language/out/**/*.js",
+                "${workspaceFolder}/packages/extension/out/**/*.js"
+            ]
+        },
+        {
             "name": "Attach to Language Server",
             "type": "node",
             "port": 6009,

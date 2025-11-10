@@ -33,8 +33,9 @@ export class TypeCDocumentationProvider extends JSDocDocumentationProvider {
             }
         }
         
+        const docs = super.getDocumentation(node);
         // Default: get type of the node itself
         let type = this.typeProvider.getType(node);
-        return `${type.toString()}`;
+        return `${docs}\n\n${type.toString()}`;
     }
 }

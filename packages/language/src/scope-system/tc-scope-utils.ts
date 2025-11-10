@@ -8,7 +8,7 @@ export function isMemberResolution(container: AstNode, context: ReferenceInfo): 
     }
 
     // Check if we're in a QualifiedReference and resolving a member/method
-    if (container.$type === 'QualifiedReference') {
+    if (container.$type === ast.QualifiedReference.$type) {
         // If we're resolving methods or members arrays
         if (context.property === 'methods' || context.property === 'members') {
             return true;

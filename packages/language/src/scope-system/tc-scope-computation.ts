@@ -71,7 +71,9 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
             const declarations = this.getDeclarationsFromContainer(container);
             for (const declaration of declarations) {
                 const name = this.nameProvider.getName(declaration);
-                symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                if (name) {
+                    symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                }
             }
         }
     }
@@ -119,14 +121,14 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         }
         else if (ast.isVariableDeclarationStatement(container)) {
             //console.log('Found variable declaration statement');
-            declarations.push(...container.declarations.variables);
+            declarations.push(...container?.declarations?.variables ?? []);
         }
         else if (ast.isTypeDeclaration(container)) {
             // Add generic parameters
-            declarations.push(...container.genericParameters);
+            declarations.push(...container?.genericParameters ?? []);
         }
         else if (ast.isLetInExpression(container)) {
-            declarations.push(...container.vars);
+            declarations.push(...container?.vars ?? []);
         }
         /*
         if(isGenericType(container)) {
@@ -135,9 +137,9 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         */
         else if(ast.isClassMethod(container)) {
             // Add parameters
-            declarations.push(...container.method.header.args);
+            declarations.push(...container?.method?.header.args ?? []);
             // Add generic parameters
-            declarations.push(...container.method.genericParameters);
+            declarations.push(...container?.method?.genericParameters ?? []);
         }
         else if (ast.isForStatement(container)) {
             if (container.init) {

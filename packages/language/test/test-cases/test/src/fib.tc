@@ -1,0 +1,12 @@
+/**
+ * Fibonacci sequence
+ * @param n - the nth number in the sequence
+ * @return the nth number in the sequence
+ */
+fn fib(n: i32) {
+    if n <= 1 {
+        return n
+    }
+    return fib(n - 1) + fib(n - 2)
+}
+

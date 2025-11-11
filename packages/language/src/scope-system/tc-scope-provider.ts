@@ -80,6 +80,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                 return this.getScopeFromBaseExpressionType(container.expr);
             }
         }
+        else if (scopeUtils.isRefTypeQualifiedReference(container, context)) {
+            // Another check to keep typing happy
+            if(ast.isReferenceType(container) && container.parent){
+                return this.getScopeFromReferenceType(container);
+            }
+        }
 
         if(ast.isSubModule(container)) {
             return this.getExportedRefFromSubModule(context);
@@ -179,6 +185,14 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     }
 
     getScopeFromReferenceType(container: ast.ReferenceType): Scope {
+        const parent = container.parent;
+        if(parent?.field?.ref) {
+            if(ast.isTypeDeclaration(parent.field.ref) && ast.isVariantType(parent.field.ref.definition)) {
+                return this.createScopeForNodes(parent.field.ref.definition.constructors ?? []);
+            }
+            return this.createScopeForNodes(scopeUtils.getDeclarationsFromContainer(parent.field.ref));
+        }
+           
         return EMPTY_SCOPE;
     }
 

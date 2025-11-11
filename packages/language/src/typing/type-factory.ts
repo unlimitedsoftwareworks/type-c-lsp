@@ -320,14 +320,14 @@ export function createVariantConstructorType(
                 const genericStr = genericArgs.length > 0
                     ? `<${genericArgs.map(t => t.toString()).join(', ')}>`
                     : '';
-                return `${name}${genericStr}.${constructorName}`;
+                return `${name}.${constructorName}${genericStr}`;
             }
             // Fallback to baseVariant (shows full structure) for anonymous variants
             const base = baseVariant.toString();
             const genericStr = genericArgs.length > 0
                 ? `<${genericArgs.map(t => t.toString()).join(', ')}>`
                 : '';
-            return `${base}${genericStr}.${constructorName}`;
+            return `${base}.${constructorName}${genericStr}`;
         }
     };
 }

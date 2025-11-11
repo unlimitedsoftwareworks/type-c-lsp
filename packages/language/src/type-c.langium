@@ -456,7 +456,7 @@ GroupType infers DataType:
     PrimeType;
 
 PrimeType infers DataType:
-    RefType {infer ReferenceType} |
+    ReferenceType {infer ReferenceType} |
     PrimitiveType {infer PrimitiveType} |
     StructType {infer StructType} |
     VariantType {infer VariantType} |
@@ -469,8 +469,12 @@ PrimeType infers DataType:
     ReturnType {infer ReturnType} |
     StringEnumType {infer StringEnumType};
 
-RefType:
-    qname=[TypeDeclaration:ID] GenericArgs? ('.' constructor=[VariantConstructor:ID])?;
+ReferenceType:
+    field=[IdentifiableReference:ID] (
+        {infer ReferenceType.parent = current} '.' field=[IdentifiableReference:ID]
+    )* 
+    GenericArgs?
+;
 
 StructType:
     name= 'struct'? '{' fields+=StructField (',' fields+=StructField)* ','? '}';

@@ -7,4 +7,9 @@ namespace math
     	
         return x as u32
     }
+
+    type Animal<U, V> = variant {
+        Kiisu(name: U),
+        Neutsu(name: V),
+    }
 }

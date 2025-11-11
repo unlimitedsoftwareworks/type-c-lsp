@@ -336,7 +336,7 @@ export interface PrototypeMethodType {
 
 export interface PrototypeTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Prototype;
-    readonly targetKind: 'array' | 'coroutine';
+    readonly targetKind: 'array' | 'coroutine' | 'string';
     readonly methods: readonly PrototypeMethodType[];
     readonly properties: readonly StructFieldType[];
 }
@@ -502,3 +502,6 @@ export function isUnsetType(type: TypeDescription): type is UnsetTypeDescription
     return type.kind === TypeKind.Unset;
 }
 
+export function isStringType(type: TypeDescription): type is StringTypeDescription {
+    return type.kind === TypeKind.String;
+}

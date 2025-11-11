@@ -12,7 +12,7 @@ import {
     stream
 } from "langium";
 import * as path from "node:path";
-import { prototypeURI } from "../builtins/index.js";
+import * as builtins from "../builtins/index.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
@@ -287,7 +287,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         ownFile: boolean = false
     ): Stream<AstNodeDescription> {
         // The builtin language definition is implicitly imported by every file
-        const uris = new Set<string>([prototypeURI]);
+        const uris = new Set<string>([builtins.ArrayPrototypeBuiltin, builtins.CoroutinePrototypeBuiltin, builtins.StringPrototypeBuiltin]);
         // @TODO: circulate over all imports and add them to the URIs array!
 
         if (ownFile) {

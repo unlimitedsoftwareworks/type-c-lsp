@@ -576,7 +576,7 @@ export function createGenericType(
 }
 
 export function createPrototypeType(
-    targetKind: 'array' | 'coroutine',
+    targetKind: 'array' | 'coroutine' | 'string',
     methods: readonly PrototypeMethodType[],
     properties: readonly StructFieldType[] = [],
     node?: AstNode

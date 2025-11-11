@@ -738,12 +738,12 @@ WildCardPattern:
  * Currently applicable to coroutines and arrays.
  */
 BuiltinDefinition:
-    'prototype' 'for' name=('array' | 'coroutine') '{' symbols+=BuiltinSymbol (symbols+=BuiltinSymbol)* '}'
-    ;
+    'prototype' 'for' name=('array' | 'coroutine' | 'string') '{' symbols+=BuiltinSymbol (symbols+=BuiltinSymbol)* '}'
+;
 
 BuiltinSymbol:
     {infer BuiltinSymbolID} name=ID ':' type=DataType<false> |
-    {infer BuiltinSymbolFn} 'fn' name=ID GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
+    {infer BuiltinSymbolFn} 'fn' MethodNames GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
 
 
  

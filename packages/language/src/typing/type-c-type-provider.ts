@@ -13,7 +13,7 @@
 
 import type { TypeCServices } from '../type-c-module.js';
 import * as ast from '../generated/ast.js';
-import { AstNode, AstUtils } from 'langium';
+import { AstNode, AstUtils, URI } from 'langium';
 import {
     TypeDescription,
     TypeKind,
@@ -36,10 +36,12 @@ import {
     isVariantType,
     isVariantConstructorType,
     VariantConstructorTypeDescription,
-    isNamespaceType
+    isNamespaceType,
+    isStringType
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
+import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 
 /**
  * Main type provider service.
@@ -290,11 +292,19 @@ export class TypeCTypeProvider {
         }
         
         // Array types - get prototype methods (length, push, pop, etc.)
-        if (isArrayType(type)) {
-            const prototypeType = this.getArrayPrototype();
+        if (isArrayType(type) || isStringType(type)) {
+            const prototypeType = isArrayType(type) ? this.getArrayPrototype() : this.getStringPrototype();
             if (prototypeType.node && ast.isBuiltinDefinition(prototypeType.node)) {
-                // Return the builtin symbols (methods/properties) as identifiable nodes
-                nodes.push(...prototypeType.node.symbols);
+                // check if attribute or method
+                for (const symbol of prototypeType.node.symbols) {
+                    if (ast.isBuiltinSymbolID(symbol)) {
+                        nodes.push(symbol);
+                    } else if (ast.isBuiltinSymbolFn(symbol)) {
+                        for(const name of symbol.names) {
+                            nodes.push({name, ...symbol} as AstNode);
+                        }
+                    }
+                }
             }
         }
         
@@ -884,10 +894,11 @@ export class TypeCTypeProvider {
                 
                 // Create function type WITH generic parameters from the AST
                 const functionType = factory.createFunctionType(params, returnType, 'fn', genericParams, symbol);
-                
-                methods.push({
-                    name: symbol.name,
-                    functionType
+                symbol.names.forEach(name => {
+                    methods.push({
+                        name,
+                        functionType
+                    });
                 });
             } else if (ast.isBuiltinSymbolID(symbol)) {
                 // Property symbol (e.g., array.length)
@@ -1742,6 +1753,21 @@ export class TypeCTypeProvider {
                 }
             }
         }
+
+        if(isStringType(baseType)) {
+            const prototypeType = this.getStringPrototype();
+            if (isPrototypeType(prototypeType)) {
+                const member = [...prototypeType.methods, ...prototypeType.properties]
+                    .find(m => 'name' in m && m.name === memberName);
+                if (member) {
+                    if ('functionType' in member) {
+                        memberType = member.functionType;
+                    } else {
+                        memberType = member.type;
+                    }
+                }
+            }
+        }
         
         // Handle struct fields
         if (!memberType && isStructType(baseType)) {
@@ -2339,16 +2365,29 @@ export class TypeCTypeProvider {
         }
         
         // Find array prototype definition in builtins
-        const documents = this.services.shared.workspace.LangiumDocuments.all.toArray();
-        for (const doc of documents) {
-            const module = doc.parseResult.value as ast.Module;
-            for (const def of module.definitions) {
-                if (ast.isBuiltinDefinition(def) && def.name === 'array') {
-                    const prototype = this.getType(def);
-                    this.builtinPrototypes.set('array', prototype);
-                    return prototype;
-                }
-            }
+        const document = this.services.shared.workspace.LangiumDocuments.getDocument(URI.parse(ArrayPrototypeBuiltin));
+        if (document) {
+            // There should be only one definition in the document
+            const prototype = (document.parseResult.value as ast.Module).definitions[0] as ast.BuiltinDefinition;
+            this.builtinPrototypes.set('array', this.getType(prototype));
+            return this.builtinPrototypes.get('array')!;
+        }
+        
+        // Return empty prototype if not found
+        return factory.createPrototypeType('array', [], []);
+    }
+
+    private getStringPrototype(): TypeDescription {
+        if (this.builtinPrototypes.has('string')) {
+            return this.builtinPrototypes.get('string')!;
+        }
+        
+        // Find array prototype definition in builtins
+        const document = this.services.shared.workspace.LangiumDocuments.getDocument(URI.parse(StringPrototypeBuiltin));
+        if (document) {
+            const prototype = (document.parseResult.value as ast.Module).definitions[0] as ast.BuiltinDefinition;
+            this.builtinPrototypes.set('string', this.getType(prototype));
+            return this.builtinPrototypes.get('string')!;
         }
         
         // Return empty prototype if not found

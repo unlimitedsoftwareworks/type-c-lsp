@@ -2,9 +2,9 @@ import { AstNode, EmptyFileSystem, isAstNode, LangiumCoreServices, LangiumShared
 import { expandToString as s } from "langium/generate";
 import { clearDocuments, parseHelper } from "langium/test";
 import { createTypeCServices, isModule, Module } from "type-c-language";
-import { builtins } from "../src/builtins/index.js";
 import { expect } from "vitest";
 import type { Diagnostic } from "vscode-languageserver-types";
+import { LibraryScheme } from "../src/builtins/index.js";
 
 export function setupLanguageServices() {
     let services: ReturnType<typeof createTypeCServices> = createTypeCServices(EmptyFileSystem);
@@ -93,7 +93,7 @@ export function checkDocumentValid(document: LangiumDocument): string | undefine
 
 export async function clearFileDocuments(services: LangiumSharedCoreServices | LangiumCoreServices): Promise<void> {
     const shared = 'shared' in services ? services.shared : services;
-    const docs = shared.workspace.LangiumDocuments.all.filter(e => e.uri.scheme !== builtins.libraryScheme).toArray();
+    const docs = shared.workspace.LangiumDocuments.all.filter(e => e.uri.scheme !== LibraryScheme).toArray();
     await clearDocuments(services, docs);
 }
 

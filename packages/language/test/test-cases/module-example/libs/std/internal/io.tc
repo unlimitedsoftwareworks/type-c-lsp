@@ -1,0 +1,18 @@
+extern io from "stdio" = { 
+    fn getStdOut() -> u64
+    fn getStdErr() -> u64
+
+    // stdout
+    fn print(s: u8[]) -> void
+    fn println(s: u8[]) -> void
+    fn print_string(s: u8[], length: u64) -> void
+    fn println_string(s: u8[], length: u64) -> void
+
+    // stdout
+    fn print_stderr(s: u8[]) -> void
+    fn println_stderr(s: u8[]) -> void
+    fn print_string_stderr(s: u8[], length: u64) -> void
+    fn println_string_stderr(s: u8[], length: u64) -> void
+
+    fn flush(out: u64) -> void
+}

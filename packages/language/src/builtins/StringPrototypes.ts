@@ -805,5 +805,12 @@ prototype for string {
 	 * @example: "  line1\n  line2".dedent() -> "line1\nline2"
 	 */
 	fn dedent() -> string
+
+	/**
+	 * Returns a C compatible string literal.
+	 * @return A C compatible string literal
+	 * @example: "hello".cstr() -> "hello\\0"
+	 */
+	fn cstr() -> u8[]
 }
 `;

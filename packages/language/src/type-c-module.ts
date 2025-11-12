@@ -9,6 +9,7 @@ import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
+import { TypeCLinker } from './scope-system/type-c-linker.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -47,6 +48,7 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),
         ScopeProvider: (services: TypeCServices) => new TypeCScopeProvider(services),
+        Linker: (services: TypeCServices) => new TypeCLinker(services)
     },
     typing: {
         TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services)

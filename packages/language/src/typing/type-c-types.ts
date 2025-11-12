@@ -59,8 +59,11 @@ export enum TypeKind {
     // Structural types
     Struct = 'struct',
     Variant = 'variant',
+    MetaVariant = 'meta-variant',
     VariantConstructor = 'variant-constructor',
+    MetaVariantConstructor = 'meta-variant-constructor',
     Enum = 'enum',
+    MetaEnum = 'meta-enum',
     StringEnum = 'string-enum',
     
     // Object-oriented types
@@ -176,9 +179,21 @@ export interface VariantConstructorType {
     readonly parameters: readonly StructFieldType[];
 }
 
+export interface MetaVariantTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.MetaVariant;
+    readonly baseVariant: VariantTypeDescription;
+    readonly genericArgs: readonly TypeDescription[];
+}
+
 export interface VariantTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Variant;
     readonly constructors: readonly VariantConstructorType[];
+}
+
+export interface MetaVariantConstructorTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.MetaVariantConstructor;
+    readonly baseVariantConstructor: VariantConstructorTypeDescription;
+    readonly genericArgs: readonly TypeDescription[];
 }
 
 /**
@@ -222,6 +237,11 @@ export interface EnumTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Enum;
     readonly cases: readonly EnumCaseType[];
     readonly encoding?: IntegerTypeDescription;
+}
+
+export interface MetaEnumTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.MetaEnum;
+    readonly baseEnum: EnumTypeDescription;
 }
 
 export interface StringEnumTypeDescription extends TypeDescription {
@@ -430,12 +450,24 @@ export function isVariantType(type: TypeDescription): type is VariantTypeDescrip
     return type.kind === TypeKind.Variant;
 }
 
+export function isMetaEnumType(type: TypeDescription): type is MetaEnumTypeDescription {
+    return type.kind === TypeKind.MetaEnum;
+}
+
 export function isVariantConstructorType(type: TypeDescription): type is VariantConstructorTypeDescription {
     return type.kind === TypeKind.VariantConstructor;
 }
 
+export function isMetaVariantConstructorType(type: TypeDescription): type is MetaVariantConstructorTypeDescription {
+    return type.kind === TypeKind.MetaVariantConstructor;
+}
+
 export function isEnumType(type: TypeDescription): type is EnumTypeDescription {
     return type.kind === TypeKind.Enum;
+}
+
+export function isMetaVariantType(type: TypeDescription): type is MetaVariantTypeDescription {
+    return type.kind === TypeKind.MetaVariant;
 }
 
 export function isStringEnumType(type: TypeDescription): type is StringEnumTypeDescription {

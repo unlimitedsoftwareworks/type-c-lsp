@@ -1,0 +1,483 @@
+from std.internal.fs import fs as fs_api
+from std.io import println
+from std.Stream import *
+from std.String import String
+
+type FileOpenMode = enum as u8{
+    Read = 0x1,
+    Write = 0x2,
+    Append = 0x4,
+    Binary = 0x8,
+    Create = 0x10,
+    Truncate = 0x20,
+    Exclusive = 0x40
+}
+
+type FSError = enum {
+    Ok = 0,
+    
+    // Generic errors
+    InvalidArgument,   // Invalid parameter passed
+    OutOfMemory,       // Memory allocation failed
+    BufferTooSmall,    // Provided buffer is too small
+    
+    // Permission/access errors
+    PermissionDenied,  // No permission to access file/dir
+    AccessDenied,      // System denied access (locks etc)
+    
+    // File/path errors
+    NotFound,          // File/directory not found
+    AlreadyExists,     // File/directory already exists
+    PathTooLong,       // Path exceeds system limits
+    NameTooLong,       // Filename exceeds system limits
+    NotDirectory,      // Path is not a directory
+    IsDirectory,       // Path is a directory when file expected
+    DirectoryNotEmpty, // Directory not empty on removal
+    
+    // I/O errors
+    EndOfFile,         // End of file reached
+    DiskFull,          // No space left on device
+    IOError,           // Generic I/O error
+    BrokenPipe,        // Broken pipe
+    Interrupted,       // Operation interrupted
+    WouldBlock,        // Operation would block
+    
+    // System errors
+    TooManyOpenFiles,  // System limit on open files reached
+    NotSupported,      // Operation not supported
+    InvalidHandle,     // Invalid file handle
+    FileTooLarge,      // File is too large
+    
+    // Network filesystem errors
+    NetworkUnreachable,// Network unreachable
+    HostUnreachable,   // Host unreachable
+    ConnectionRefused, // Connection refused
+    
+    // Other errors
+    UnknownError       // Unknown error occurred
+}
+
+type FileAttributes = {
+    // ID of the device containing the file.	
+    deviceId: u64,
+    // File's unique inode number on the filesystem.	
+    inodeNumber: u64,
+    // Number of hard links to the file. Indicates how many directory entries point to this file.	
+    hardLinkCount: u32,
+    // ID of the device, if the file is a special device file (e.g., character or block device).	
+    specialDeviceId: u32,
+    // Preferred block size for filesystem I/O operations for this file.	
+    blockSize: u64,
+    // Number of 512-byte blocks allocated to the file.	
+    blockCount: u64,
+    // Time of the last modification of the file content (in seconds since the epoch).	
+    lastModifiedTime: u64,
+    // Time of the last access to the file (in seconds since the epoch).	
+    lastAccessTime: u64,
+    // Time of the last status change (metadata modification, not content; in seconds since the epoch).	
+    creationOrMetadataChangeTime: u64,
+    // Total size of the file in bytes.	
+    fileSize: u64,
+    // File mode, indicating permissions and file type (e.g., regular file, directory, symbolic link).	
+    fileMode: u32,
+    // User ID of the file owner.	
+    ownerUserId: u32,
+    // Group ID of the file owner.	
+    ownerGroupId: u32
+}
+
+type InputFileStream = class SeekableStream, InputStream {
+    let const handler: u64
+    let const path: string
+    let const open: bool
+
+    fn init(path: string) {
+        let (handler, error) = fs_api.fs_open(
+            path.cstr(), FileOpenMode.Read
+        )
+
+        if error {
+            throw "Error opening file `"+path+"`, error code "+error
+        }
+
+        this += {handler: handler, path: path, open: true}
+    }
+
+    /**
+     * Makes sure the file is readable
+     */
+    fn ready() -> bool = this.open
+
+    fn seek(offset: i64) -> bool {
+        let err = fs_api.fs_seek(this.handler, offset, SeekOrigin.Absolute)
+        return err == FSError.Ok
+    }
+
+    fn seek(offset: i64, origin: SeekOrigin) {
+        let err = fs_api.fs_seek(this.handler, offset, origin)
+        return err == FSError.Ok
+    }
+
+    fn tell() -> i64 {
+        let (pos, err) = fs_api.fs_tell(this.handler)
+        if err {
+            throw "Couldn't tell file `"+this.path+"` error code: "+err
+        }
+        return pos
+    }
+
+    fn read() -> u8 {
+        let const (data, err) = fs_api.fs_read_one(this.handler, 1)
+        if err != FSError.Ok {
+            throw "Failed to read 1 byte from file `"+this.path+"`, error code: "+err
+        }
+
+        return data
+    }
+
+    fn readAll() -> u8[] {
+        let const (data, err) = fs_api.fs_readall(this.handler)
+        if err {
+            throw "Failed to read data from `"+this.path+"`, error code: "+err
+        }
+
+        return data
+    }
+
+    fn readN(n: u64) -> u8[] {
+        let const (data, err) = fs_api.fs_read(this.handler, n)
+
+        if err {
+            throw "Failed to read data from `"+this.path+"`, error code: "+err
+        }
+
+        return data
+    }
+
+    fn readLine() -> string? {
+        let const (data, err) = fs_api.fs_readline(this.handler)
+        if err {
+            throw "Failed to read data from `"+this.path+"`, error code: "+err
+        }
+
+        return String.fromBytes(data)
+    }
+
+    fn close() {
+        if !this.open {
+            return
+        }
+
+        let err = fs_api.fs_close(this.handler)
+
+        if err {
+            throw "Failed to close file `"+this.path+"`, error code: "+err
+        }
+
+        this.open = false
+    }
+}
+
+type File = class {
+    let const fileHandler: u64
+    let const path: string
+
+    fn init(path: string, mode: u8) {
+        let (handler, error) = fs_api.fs_open(path.cstr(), mode)
+        if(error) {
+            println("Error opening file: " +path)
+        }
+        this.fileHandler = handler
+        this.path = path
+    }
+
+    /**
+     * Used to create a file from existing attributes
+     */
+    fn init(path: string, fileHandler: u64){
+        this += {path, fileHandler}
+    }
+
+    static fn fromTemp() {
+        let (filepath, handler, error) = fs_api.fs_create_temp()
+        
+        if(error) {
+            throw "Couldn't create temporary file"
+        }
+
+        return new File(String.fromBytes(filepath), handler)
+    }
+
+    fn write(data: string) -> void {
+        fs_api.fs_write(this.fileHandler, data.buffer(), data.bytesLength())
+    }
+
+    fn write(data: u8[]) -> void {
+        fs_api.fs_write(this.fileHandler, data, data.length)
+    }
+
+    fn writeln(data: string) -> void {
+        this.write(data)
+        this.write(b"\n")
+    }
+
+    fn read(n: u64) -> string {
+        let (buffer, error) = fs_api.fs_read(this.fileHandler, n)
+        if(error) {
+            return new string()
+        }
+        else {
+            return new string(buffer)
+        }
+    }
+
+    fn readLine() -> string {
+        let (buffer, error) = fs_api.fs_readline(this.fileHandler)
+        if(error) {
+            println("Error reading line: "+ error)
+            return new string()
+        }
+        else {
+            return new string(buffer)
+        }
+    }
+
+    fn readAll() -> string {
+        let (buffer, error) = fs_api.fs_readall(this.fileHandler)
+        if(error) {
+            println("Error reading all")
+            return new string()
+        }
+        else {
+            return new string(buffer)
+        }
+    }
+
+    fn close() -> void {
+        fs_api.fs_close(this.fileHandler)
+    }
+}
+
+namespace fs {
+    /**
+     * @brief Open the File and writes the given string into it
+     * Does not return an error but throws an exception on failure.
+     * @param filepath: File to create and write into (will be overwritten if exists)
+     * @param content: Content to write in the file
+     */
+    fn writeFile(filepath: string, content: string) {
+        let (handle, err) = fs_api.fs_open(
+            filepath.cstr(), FileOpenMode.Create | FileOpenMode.Write
+        )
+
+        if err {
+            throw "Failed to create file `"+filepath +"` error code: "+err
+        }
+
+        let (_, writeErr) = fs_api.fs_write(handle, content.cstr(), content.bytesLength())
+
+        if writeErr {
+            throw "Failed to write content into file `"+filepath+"` error code: "+writeErr
+        }
+
+        let closeErr = fs_api.fs_close(handle)
+
+        if closeErr {
+            throw "Failed to close file `"+filepath+"` error code: "+closeErr
+        }
+    }
+
+    fn readFile(filepath: string) -> string {
+        let (handle, err) = fs_api.fs_open(
+            filepath.cstr(), FileOpenMode.Read
+        )
+
+        if err {
+            throw "Failed to open file "+filepath
+        }
+
+        let (buffer, readErr) = fs_api.fs_readall(handle)
+
+        if readErr {
+            throw "Failed to read content from file"
+        }
+
+        let closeErr = fs_api.fs_close(handle)
+
+        if closeErr {
+            throw "Failed to close file "+filepath
+        }
+
+        return String.fromBytes(buffer)
+    }
+
+    
+    /**
+     * @brief: Deletes a file.
+     * @return: Error to be verified.
+     */
+    fn deleteFile(filepath: string) -> FSError {
+        let error = fs_api.fs_delete(filepath.cstr())
+        return error
+    }
+
+    /**
+     * @brief: Creates a directory
+     * @return: Error
+     */
+    fn mkdir(dir: string) -> FSError {
+        let error = fs_api.fs_mkdir(dir.cstr())
+        return error
+    }
+
+    fn rmdir(dir: string) -> FSError {
+        let error = fs_api.fs_rmdir(dir.cstr())
+        return error
+    }
+
+
+    fn listDir(dir: string) -> string[] {
+        let (files, error) = fs_api.fs_listdir(dir.cstr())
+        if(error) {
+            // throw "Error"
+            return []
+        }
+
+        let filesList: string[] = []
+        filesList.resize(files.length)
+        for let i: u64 = 0; i < files.length; i = i + 1 {
+            let file = new string(files[i])
+            filesList[i] = file
+        }
+
+        let (dir_, error_) = fs_api.fs_get_user_directory()
+        return filesList
+    }
+
+    fn getCurrentDirectory() -> string? {
+        let (dir, error) = fs_api.fs_get_current_directory()
+        
+        if(error) {
+            return null
+        }
+
+        return new string(dir)
+    }
+
+    fn getUserDirectory() -> string? {
+        let (dir, error) = fs_api.fs_get_user_directory()
+        
+        if(error) {
+            return null
+        }
+
+        return new string(dir)
+    }
+
+    fn getFileAttributes(filepath: string) -> FileAttributes? {
+        let (
+            gid,
+            uid,
+            mode,
+            size,
+            ctime,
+            atime,
+            mtime,
+            blocks,
+            blksize,
+            rdev,
+            nlink,
+            ino,
+            dev,
+            error
+        ) = fs_api.fs_get_file_attributes(filepath.cstr())
+
+        if (error) {
+            println("Error getting file attributes: " + error)
+            return null
+        }
+
+        return {
+            deviceId: dev,
+            inodeNumber: ino,
+            hardLinkCount: nlink,
+            specialDeviceId: rdev,
+            blockSize: blksize,
+            blockCount: blocks,
+            lastModifiedTime: mtime,
+            lastAccessTime: atime,
+            creationOrMetadataChangeTime: ctime,
+            fileSize: size,
+            fileMode: mode,
+            ownerUserId: uid,
+            ownerGroupId: gid
+        }
+    }
+
+    fn chmod(filepath: string, mode: u8) -> FSError {
+        let error = fs_api.fs_chmod(filepath.cstr(), mode)
+        return error
+    }
+
+    fn exists(filepath: string) -> bool {
+        let (exists_, error) = fs_api.fs_exists(filepath.cstr())
+        return exists_ != 0
+    }
+
+    fn copy(src: string, dest: string) -> FSError {
+        let error = fs_api.fs_copy(src.cstr(), dest.cstr())
+        return error
+    }
+
+    fn move(src: string, dest: string) -> FSError {
+        let error = fs_api.fs_move(src.cstr(), dest.cstr())
+        return error
+    }
+
+    fn symlink(src: string, dest: string) -> FSError {
+        let error = fs_api.fs_symlink(src.cstr(), dest.cstr())
+        return error
+    }
+
+    fn readlink(path: string) -> string? {
+        let (link, error) = fs_api.fs_readlink(path.cstr())
+        if (error) {
+            return null
+        }
+
+        return new string(link)
+    }
+
+    fn realpath(path: string) -> string? {
+        let (real, error) = fs_api.fs_realpath(path.cstr())
+        if (error) {
+            return null
+        }
+
+        return new string(real)
+    }
+
+    fn getenv(path: string) -> string? {
+        let (value, error) = fs_api.fs_getenv(path.cstr())
+        if (error) {
+            return null
+        }
+
+        return new string(value)
+    }
+
+    fn setenv(path: string, value: string, overwrite: bool) -> FSError {
+        let error = fs_api.fs_setenv(path.cstr(), value.cstr(), overwrite)
+        return error
+    }
+
+    fn unsetenv(path: string) -> FSError {
+        let error = fs_api.fs_unsetenv(path.cstr())
+        return error
+    }
+
+    fn getSeparator() -> string {
+        let sep = fs_api.fs_get_separator()
+        return String.fromBytes([sep])
+    }
+}

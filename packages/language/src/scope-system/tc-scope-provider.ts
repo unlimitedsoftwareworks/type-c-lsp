@@ -41,7 +41,7 @@ import * as scopeUtils from "./tc-scope-utils.js";
 export class TypeCScopeProvider extends DefaultScopeProvider {
     /** Cache for global scopes, keyed by document and reference type */
     private readonly globalCache: DocumentCache<string, Scope>;
-    
+
     /** Type provider for inferring expression types */
     private readonly typeProvider: TypeCTypeProvider;
     private readonly workspaceManager: TCWorkspaceManager;
@@ -72,7 +72,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
      */
     override getScope(context: ReferenceInfo): Scope {
         const container = context.container;
-        
+
         // Check if we're resolving a member access expression
         if (scopeUtils.isMemberResolution(context.container, context)) {
             if (ast.isMemberAccess(container) && container.expr) {
@@ -82,12 +82,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         }
         else if (scopeUtils.isRefTypeQualifiedReference(container, context)) {
             // Another check to keep typing happy
-            if(ast.isReferenceType(container) && container.parent){
+            if (ast.isReferenceType(container) && container.parent) {
                 return this.getScopeFromReferenceType(container);
             }
         }
 
-        if(ast.isSubModule(container)) {
+        if (ast.isSubModule(container)) {
             return this.getExportedRefFromSubModule(context);
         }
         // Default: local + global scope
@@ -153,7 +153,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
      */
     private createScopeForNodesWithMultipleNames(nodes: AstNode[]): Scope {
         const descriptions: AstNodeDescription[] = [];
-        
+
         for (const node of nodes) {
             // Handle ClassMethod - methods can have multiple names (operator overloading)
             if (ast.isClassMethod(node) && node.method) {
@@ -180,20 +180,31 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                 }
             }
         }
-        
+
         return new MapScope(stream(descriptions));
     }
 
     getScopeFromReferenceType(container: ast.ReferenceType): Scope {
         const parent = container.parent;
-        if(parent?.field?.ref) {
-            if(ast.isTypeDeclaration(parent.field.ref) && ast.isVariantType(parent.field.ref.definition)) {
+        if (parent?.field?.ref) {
+            if (ast.isTypeDeclaration(parent.field.ref) && ast.isVariantType(parent.field.ref.definition)) {
                 return this.createScopeForNodes(parent.field.ref.definition.constructors ?? []);
             }
             return this.createScopeForNodes(scopeUtils.getDeclarationsFromContainer(parent.field.ref));
         }
-           
+
         return EMPTY_SCOPE;
+    }
+
+    private findURIForImport(fileImport: ast.Import): string | undefined {
+        const baseName = path.join(...fileImport.sourcePackage.segments!) + '.tc';
+
+        const library = this.workspaceManager.findLibrary(baseName);
+        if (library) {
+            const fullPath = library.toString();
+            return fullPath;
+        }
+        return undefined;
     }
 
     private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
@@ -202,24 +213,26 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         const uris = new Set<string>();
 
         for (const fileImport of model.imports) {
-            const baseName = path.join(...fileImport.sourcePackage.segments!)+ '.tc';
-            console.log(`Importing library: ${baseName}`);
-
-            const library = this.workspaceManager.findLibrary(baseName);
-            console.log(`Library found: ${library?.fsPath}`);
-            if(library) {
-                const fullPath = library.toString();
-                uris.add(fullPath);
-                console.log(`Imported library: ${fullPath}`);
+            const uri = this.findURIForImport(fileImport);
+            if (uri) {
+                uris.add(uri);
             }
         }
 
         // Use indexManager to find all elements in the imported URIs
         const astNodeDescriptions = this.indexManager.allElements(ast.IdentifiableReference.$type, uris).toArray();
-        console.log("Resolved AST Node Descriptions:", astNodeDescriptions.map(d => d.name));
 
         // Create a scope from the imported elements
         return this.createScope(stream(astNodeDescriptions));
+    }
+
+    private getAllExportedRefsFromModule(importEntry: ast.Import): AstNodeDescription[] {
+        const uri = this.findURIForImport(importEntry);
+        if (uri) {
+            const nodes = this.indexManager.allElements(ast.IdentifiableReference.$type, new Set([uri])).toArray().map(description => description.node as AstNode).filter(node => node !== undefined);
+            return nodes.map(node => this.descriptions.createDescription(node, this.nameProvider.getName(node)));
+        }
+        return [];
     }
 
     /**
@@ -231,7 +244,6 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     protected getCustomLocalScope(context: ReferenceInfo): Scope {
         const scopes: Array<Stream<AstNodeDescription>> = [];
         const referenceType = this.reflection.getReferenceType(context);
-
         const localSymbols = AstUtils.getDocument(context.container).localSymbols;
         if (localSymbols) {
             let currentNode: AstNode | undefined = context.container;
@@ -245,19 +257,27 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             } while (currentNode);
 
             // TODO: cache this?
-            if(ast.isModule(lastContainer)) {
-                const importedModules: AstNode[] = []
+            if (ast.isModule(lastContainer)) {
+                const importedModules: AstNodeDescription[] = []
                 for (const importEntry of lastContainer.imports) {
-                    for (const subModule of importEntry.modules) {
-                        if(subModule.reference.ref) {
-                            importedModules.push(subModule.reference.ref);
+                    if (importEntry.importAll) {
+                        importedModules.push(...this.getAllExportedRefsFromModule(importEntry));
+                    }
+                    else {
+                        for (const subModule of importEntry.modules) {
+                            if (subModule.reference.ref) {
+                                if (subModule.alias) {
+                                    importedModules.push(this.descriptions.createDescription(subModule.reference.ref, subModule.alias));
+                                }
+                                else {
+                                    importedModules.push(this.descriptions.createDescription(subModule.reference.ref, this.nameProvider.getName(subModule.reference.ref)));
+                                }
+                            }
                         }
                     }
+                    scopes.push(stream(importedModules));
                 }
-                const scope = this.createScopeForNodes(importedModules);
-                scopes.push(scope.getAllElements());
             }
-            
         }
 
         let result: Scope = this.getGlobalScope(referenceType, context);

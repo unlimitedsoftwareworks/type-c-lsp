@@ -29,7 +29,7 @@ fragment SubImports:
     modules+=SubModule (',' modules+=SubModule)*;
 
 SubModule:
-    reference=[IdentifiableReference:ID];
+    reference=[IdentifiableReference:ID] ('as' alias=ID)?;
 
 fragment GlobalDefinition:
     definitions+=(NamespaceDecl | FnDecl<true> | CFnDecl<true> | TypeDecl<true> | VariableDeclarationStatement<true> | ExternFFIDecl | BuiltinDefinition) ;
@@ -134,16 +134,16 @@ VariableDeclSingle:
     (isConst?='const')? name=ID ((':' annotation=DataType<false>) | (isNullable?='?'))? '=' initializer=Expression;
 
 VariableDeclArrayDestructuring:
-    (isConst?='const')? '[' element+=DestructuringElement<true> (',' element+=DestructuringElement<true>)* ']' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '[' elements+=DestructuringElement<true, false> (',' elements+=DestructuringElement<true, false>)* ']' (':' annotation=DataType<false>)? '=' initializer=Expression;
 
 VariableDeclStructDestructuring:
-    (isConst?='const')? '{' element+=DestructuringElement<true> (',' element+=DestructuringElement<true>)* '}' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '{' elements+=DestructuringElement<true, true> (',' elements+=DestructuringElement<true, true>)* '}' (':' annotation=DataType<false>)? '=' initializer=Expression;
 
 VariableDeclTupleDestructuring:
-    (isConst?='const')? '(' element+=DestructuringElement<false> (',' element+=DestructuringElement<false>)* ')' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '(' elements+=DestructuringElement<false, false> (',' elements+=DestructuringElement<false, false>)* ')' (':' annotation=DataType<false>)? '=' initializer=Expression;
 
-DestructuringElement<allowDestructuring>:
-    (<allowDestructuring>(isSpread?='...')?) name=ID isNullable?='?'? |
+DestructuringElement<allowDestructuring, allowNameOverride>:
+    (<allowDestructuring>(isSpread?='...')?) (<allowNameOverride> (originalName=ID ':')?) name=ID isNullable?='?'? |
     WILDCARD;
 
 /**
@@ -437,7 +437,7 @@ DataType<allowTuples>:
 
 // cannot have nested tuples
 TupleType infers DataType:
-    '(' types+=NullableType (',' types+=NullableType)+ ')';
+    {infer TupleType} '(' types+=NullableType (',' types+=NullableType)+ ')';
 
 NullableType infers DataType:
     UnionType ({infer NullableType.baseType = current} '?')?;
@@ -576,8 +576,11 @@ fragment ClassMethodDelegations:
 ClassMethodDelegation:
     'delegate' 'fn' name=ID '=' functions+=[ClassMethod:ID] ('|' functions+=[ClassMethod:ID])*;
 
+/**
+ * TODO: allow keywords as segments
+ */
 QualifiedName:
-    segments+=ID ('.' segments+=ID)*;
+    segments+=(ID|"string"|"array"|"coroutine") ('.' segments+=(ID|"string"|"array"|"coroutine"))*;
 
 fragment ClassStaticBlock:
     'static' staticBlock+=BlockStatement;

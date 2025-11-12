@@ -1,0 +1,28 @@
+
+from std.internal.io import io
+
+namespace stdio {
+    type StdStream = u64
+    let const stdOut = io.getStdOut()
+    let const stdErr = io.getStdErr()
+
+    fn flush(stream: StdStream) -> void {
+        io.flush(stream)
+    }
+}
+
+fn print(s: string) -> void {
+    io.print_string(s.buffer(), s.bytesLength())
+}
+
+fn println(s: string) -> void {
+    io.println_string(s.buffer(), s.bytesLength())
+}
+
+fn printErr(s: string) -> void {
+    io.print_string_stderr(s.buffer(), s.bytesLength())
+}
+
+fn printlnErr(s: string) -> void {
+    io.println_string_stderr(s.buffer(), s.bytesLength())
+}

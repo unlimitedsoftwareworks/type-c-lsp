@@ -37,7 +37,12 @@ import {
     isVariantConstructorType,
     VariantConstructorTypeDescription,
     isNamespaceType,
-    isStringType
+    isStringType,
+    isFFIType,
+    isEnumType,
+    isMetaVariantType,
+    isMetaEnumType,
+    isMetaVariantConstructorType
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
@@ -290,6 +295,15 @@ export class TypeCTypeProvider {
         if (isNullableType(type)) {
             return this.getIdentifiableFields(type.baseType);
         }
+
+        // FFI
+        if (isFFIType(type)) {
+            return (type.node as ast.ExternFFIDecl)?.methods ?? [];
+        }
+
+        if(isMetaEnumType(type)) {
+            return (type.baseEnum.node as ast.EnumType).cases;
+        }
         
         // Array types - get prototype methods (length, push, pop, etc.)
         if (isArrayType(type) || isStringType(type)) {
@@ -333,16 +347,14 @@ export class TypeCTypeProvider {
                 nodes.push(...fieldNodes);
             }
         }
+
+        if(isMetaVariantType(type)) {
+            nodes.push(...(type.baseVariant.node as ast.VariantType).constructors);
+        }
         
         // Interface methods
         if (isInterfaceType(type) && type.node && ast.isInterfaceType(type.node)) {
             nodes.push(...type.node.methods);
-        }
-        
-        // Variant constructors - exposed when accessing a variant type
-        // Example: Option.Some, Option.None
-        if (isVariantType(type) && type.node && ast.isVariantType(type.node)) {
-            nodes.push(...type.node.constructors);
         }
         
         // Prototype methods (for direct prototype access, though usually accessed via array/coroutine)
@@ -366,10 +378,7 @@ export class TypeCTypeProvider {
         if (ast.isUnionType(node)) return this.inferUnionType(node);
         if (ast.isJoinType(node)) return this.inferJoinType(node);
         // Tuple types are represented directly in grammar, not as separate AST nodes
-        if (node.$type === 'TupleType' && 'types' in node && Array.isArray(node.types)) {
-            // TypeScript needs explicit cast here since grammar-generated types aren't complete
-            return this.inferTupleTypeFromDataType(node as AstNode & { types: AstNode[] });
-        }
+        if (ast.isTupleType(node)) return this.inferTupleTypeFromDataType(node);
         if (ast.isPrimitiveType(node)) return factory.createPrimitiveTypeFromAST(node);
         if (ast.isStructType(node)) return this.inferStructType(node);
         if (ast.isVariantType(node)) return this.inferVariantType(node);
@@ -461,6 +470,7 @@ export class TypeCTypeProvider {
             ));
             return factory.createFunctionType(params, this.getType(node.returnType), 'fn', [], node);
         }
+        if(ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
 
         return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
@@ -519,7 +529,7 @@ export class TypeCTypeProvider {
         return simplifyType(factory.createJoinType(types, node));
     }
 
-    private inferTupleTypeFromDataType(node: AstNode & { types: AstNode[] }): TypeDescription {
+    private inferTupleTypeFromDataType(node: ast.TupleType): TypeDescription {
         // Tuple types have a 'types' property with array of DataType
         const elementTypes = node.types.map(t => this.getType(t));
         return factory.createTupleType(elementTypes, node);
@@ -1422,7 +1432,19 @@ export class TypeCTypeProvider {
         if (ast.isNullLiteralExpression(node)) return factory.createNullType(node);
 
         // References
-        if (ast.isQualifiedReference(node)) return this.inferQualifiedReference(node);
+        if (ast.isQualifiedReference(node)) {
+            const res = this.inferQualifiedReference(node);
+            if(isVariantType(res)) {
+                return factory.createMetaVariantType(res, [], node);
+            }
+            else if (isVariantConstructorType(res)) {
+                return factory.createMetaVariantConstructorType(res, [], node);
+            }
+            else if (isEnumType(res)) {
+                return factory.createMetaEnumType(res, node);
+            }
+            return res;
+        }
         if (ast.isGenericReferenceExpr(node)) return this.inferGenericReferenceExpr(node);
 
         // Operations
@@ -1461,6 +1483,7 @@ export class TypeCTypeProvider {
         if (ast.isDenullExpression(node)) return this.inferDenullExpression(node);
         if (ast.isTupleExpression(node)) return this.inferTupleExpression(node);
         if (ast.isWildcardExpression(node)) return factory.createAnyType(node);
+        if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
 
         return factory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
     }
@@ -1811,8 +1834,8 @@ export class TypeCTypeProvider {
         // Handle variant constructors (e.g., Result.Ok, Option.Some)
         // When accessing a variant constructor like Result.Ok, we return a function type
         // The function's return type is a VariantConstructorType (a subtype of the variant)
-        if (!memberType && isVariantType(baseType)) {
-            const constructor = baseType.constructors.find(c => c.name === memberName);
+        if (!memberType && isMetaVariantType(baseType)) {
+            const constructor = (baseType.baseVariant.node as ast.VariantType).constructors.find(c => c.name === memberName);
             if (constructor) {
                 // Get the variant declaration for display purposes
                 // Prefer originalDeclaration (from ReferenceType), but extract from baseType if needed
@@ -1824,23 +1847,21 @@ export class TypeCTypeProvider {
                 // Create a VariantConstructorType as the return type
                 // baseType is already a resolved VariantTypeDescription - perfect!
                 // Generic args will be empty initially and filled during function call
-                const constructorReturnType = factory.createVariantConstructorType(
-                    baseType, // baseType is VariantTypeDescription
-                    memberName,
-                    [], // Empty - will be inferred during call
-                    node,
-                    variantDecl // Pass the declaration for display purposes
+                const constructorReturnType = factory.createMetaVariantConstructorType(
+                    factory.createVariantConstructorType(baseType.baseVariant, memberName, [], node, baseType.baseVariant.node?.$container as ast.TypeDeclaration), // baseType is VariantTypeDescription
+                    [],
+                    constructor
                 );
 
-                // Create a function type for the constructor
-                // Parameters come from the constructor definition
-                memberType = factory.createFunctionType(
-                    constructor.parameters.map(p => factory.createFunctionParameterType(p.name, p.type)),
-                    constructorReturnType,
-                    'fn',
-                    [], // Generic parameters are handled specially for variant constructors
-                    node
-                );
+                memberType = constructorReturnType;
+            }
+        }
+
+        if(!memberType && isVariantConstructorType(baseType)) {
+            // Find a constructor parameter that matches the member name
+            const constructorParam = baseType.baseVariant.constructors.find(c => c.parameters.find(p => p.name === baseType.constructorName))?.parameters.find(p => p.name === memberName);
+            if (constructorParam) {
+                memberType = constructorParam.type;
             }
         }
 
@@ -1848,6 +1869,31 @@ export class TypeCTypeProvider {
             const member = baseType.declaration.definitions.find(m => 'name' in m && m.name === memberName);
             if (member) {
                 memberType = this.getType(member);
+            }
+        }
+
+        // If we have a meta-enum such as Color.[Red] Red = memberName, we need to return the enum type
+        if(!memberType && isMetaEnumType(baseType)) {
+            memberType = baseType.baseEnum;
+        }
+
+        if(!memberType && isMetaVariantType(baseType)) {
+            // The type is that of the constructor
+            memberType = factory.createVariantConstructorType(baseType.baseVariant, memberName, [], node, baseType.baseVariant.node?.$container as ast.TypeDeclaration);
+        }
+
+        if(!memberType && isFFIType(baseType)) {
+            const method = baseType.methods.find(m => m.names.includes(memberName));
+            if (method) {
+                // FFI method has no generic parameters
+                let functionType: TypeDescription = factory.createFunctionType(
+                    method.parameters,
+                    method.returnType,
+                    'fn',
+                    []
+                );
+
+                memberType = functionType;
             }
         }
 
@@ -1929,6 +1975,10 @@ export class TypeCTypeProvider {
                 undefined,
                 node
             );
+        }
+
+        if (isMetaVariantConstructorType(fnType)) {
+            return this.inferVariantConstructorCall(fnType.baseVariantConstructor, node);
         }
 
         return factory.createErrorType(
@@ -2353,6 +2403,79 @@ export class TypeCTypeProvider {
         
         const types = node.expressions.map(e => this.inferExpression(e));
         return factory.createTupleType(types, node);
+    }
+
+    private inferDestructuringElement(node: ast.DestructuringElement): TypeDescription {
+        /**
+         * let (a, b) = (1, 2) 
+         * let (a, _, c) = f() where f() -> (u32, u32, u32)
+         */
+        // Check if underscore -> return never
+        if(node.name === undefined) {
+            return factory.createNeverType();
+        }
+
+        const index = node.$containerIndex;
+        const initializer = node.$container.initializer;
+        // Unreachable, but create an error, you never know these days
+        if(index == undefined || !ast.isVariableDeclaration(node.$container) || !initializer) {
+            return factory.createErrorType('Invalid destructuring element', undefined, node);
+        }
+        
+        /**
+         * Wraps a node with a nullable type if the node is nullable
+         */
+        function wrapNode(node: ast.DestructuringElement, t: TypeDescription) : TypeDescription {
+            return node.isNullable ? factory.createNullableType(t, node) : t;
+        }
+        
+            // Infer the type of the initializer
+        const initializerType = this.inferExpression(initializer);
+        /**
+         * There are are couple of cases, we need to handle:
+         * 1. Initializer is an array
+         * 2. Initializer is a tuple
+         * 3. Initializer is a struct
+         */
+
+        if(isArrayType(initializerType)) {
+            if(node.isSpread) {
+                return wrapNode(node, factory.createArrayType(initializerType.elementType, node));
+            }
+            else {
+                return wrapNode(node, initializerType.elementType);
+            }
+        }
+        else if(isTupleType(initializerType)) {
+            return wrapNode(node, initializerType.elementTypes[index]);
+        }
+        else if (isStructType(initializerType)) {
+            /**
+             * We need to base struct + we need to remove the previously 
+             */
+            const structType = initializerType;
+            // check if we have a destructuring
+            
+            if(node.isSpread) {
+                const structFields = structType.fields;
+                // Grab all previous elements, not including the current one
+                const fieldsToRemove = (node.$container.elements??[]).slice(0, index).map(e => e.originalName ?? e.name);
+                const newStructType = factory.createStructType(structFields.filter(f => !fieldsToRemove.includes(f.name)), false, node);
+                return wrapNode(node, newStructType);
+            }
+            else {
+                // find the field by name
+                const field = structType.fields.find(f => f.name === (node.originalName ?? node.name));
+                if(field) {
+                    return wrapNode(node, field.type);
+                }
+                else {
+                    return factory.createErrorType(`Field '${node.name}' not found`, undefined, node);
+                }
+            }
+        }
+        
+        return factory.createErrorType('Invalid destructuring element', undefined, node);
     }
 
     // ========================================================================

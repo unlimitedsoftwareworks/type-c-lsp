@@ -10,3 +10,19 @@ fn fib(n: i32) {
     return fib(n - 1) + fib(n - 2)
 }
 
+type Color = enum as u8 {
+    Red = 0,
+    Green = 1,
+    Blue = 2,
+}
+
+type Tree = variant {
+    Leaf(value: u32),
+    Branch(left: Tree, right: Tree),
+}
+
+fn main() {
+    let c = {x: "hii", z: 1u32, y: true}
+    let {x:f1, z:f2, ...f3} = c
+    let z = f1
+}

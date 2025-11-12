@@ -1,0 +1,11 @@
+
+type String = class {
+	/**
+	 * @brief: Creates a string from a byte array.
+	 * @param bytes: The byte array to create the string from.
+	 * @returns: The created string.
+	 */
+	static fn fromBytes(bytes: u8[]) -> string {
+		return ""
+	}
+}

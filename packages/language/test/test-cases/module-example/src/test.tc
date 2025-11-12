@@ -9,8 +9,11 @@ type Square = u32
 type Cat = math.Animal.Kiisu
 
 type C = class {
+    /**
+     * Returns some value idk
+     */
     static fn get() -> u32 {
-
+        return 123
     }
 }
 

@@ -48,6 +48,9 @@ import {
     UnsetTypeDescription,
     MethodType,
     AttributeType,
+    MetaVariantTypeDescription,
+    MetaVariantConstructorTypeDescription,
+    MetaEnumTypeDescription,
 } from "./type-c-types.js";
 
 // ============================================================================
@@ -279,12 +282,21 @@ export function createVariantType(
     };
 }
 
+export function createMetaVariantType(
+    baseVariant: VariantTypeDescription,
+    genericArgs: readonly TypeDescription[] = [],
+    node?: AstNode
+): MetaVariantTypeDescription {
+    return { kind: TypeKind.MetaVariant, baseVariant, genericArgs, node, toString: () => `${baseVariant.toString()}` };
+}
+
 export function createVariantConstructor(
     name: string,
     parameters: readonly StructFieldType[]
 ): VariantConstructorType {
     return { name, parameters };
 }
+
 
 /**
  * Creates a variant constructor type.
@@ -332,6 +344,15 @@ export function createVariantConstructorType(
     };
 }
 
+
+export function createMetaVariantConstructorType(
+    baseVariantConstructor: VariantConstructorTypeDescription,
+    genericArgs: readonly TypeDescription[] = [],
+    node?: AstNode
+): MetaVariantConstructorTypeDescription {
+    return { kind: TypeKind.MetaVariantConstructor, baseVariantConstructor, genericArgs, node, toString: () => `${baseVariantConstructor.toString()}` };
+}
+
 export function createEnumType(
     cases: readonly EnumCaseType[],
     encoding?: IntegerTypeDescription,
@@ -350,6 +371,13 @@ export function createEnumType(
             return `enum${encodingStr} { ${caseStrs} }`;
         }
     };
+}
+
+export function createMetaEnumType(
+    baseEnum: EnumTypeDescription,
+    node?: AstNode
+): MetaEnumTypeDescription {
+    return { kind: TypeKind.MetaEnum, baseEnum, node, toString: () => `${baseEnum.toString()}` };
 }
 
 export function createEnumCase(name: string, value?: number): EnumCaseType {

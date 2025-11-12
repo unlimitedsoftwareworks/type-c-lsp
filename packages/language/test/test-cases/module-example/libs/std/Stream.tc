@@ -1,0 +1,103 @@
+/**
+ * @brief Base Stream, for any source/dest and direction.
+ * use ready() to make sure the stream can be read/write from.
+ */
+
+type AbstractStream = interface {
+    fn ready() -> bool
+}
+
+/**
+ * Seek Origin, same interpretation as `whence`.
+ */
+type SeekOrigin = enum as u8 {
+    Absolute = 0,    //< SEEK_SET
+    Relative = 1,    //< SEEK_CUR
+    RelativeEOF = 2, //< SEEK_END
+}
+
+type SeekableStream = interface {
+    /**
+     * @brief: Seek, absolute position
+     * @returns true if success, false otherwise
+     */
+    fn seek(position: i64) -> bool
+
+    /**
+     * @biref Seek, offset-based
+     * @param offset: seek offset
+     * @param origin: origin
+     * @returns true if success, false otherwise
+     */
+    fn seek(offset: i64, origin: SeekOrigin) -> bool
+
+    /**
+     * @brief: Returns the current position in the stream
+     * @returns current position in the stream, >= 0, or -1 on failure
+     */
+    fn tell() -> i64
+}
+
+/**
+ * @brief Base InputStream for any IO InputStream.
+ */
+type InputStream = interface AbstractStream {
+    /**
+     * @brief Reads a single byte from the stream
+     */
+    fn read() -> u8
+    /**
+     * @brief Contineously read until ready() returns false
+     * @returns all data read
+     */
+    fn readAll() -> u8[]
+
+    /**
+     * @brief Reads n bytes from the stream
+     * @returns the read data, empty array of none was read, not guarenteed
+     * to read exactly n if the buffer's size is smaller than n.
+     */
+    fn readN(n: u64) -> u8[]
+
+    /**
+     * @brief Reads a line, from the buffer. Will return after encountering
+     * \r\n or EOF.
+     * @returns read string, or null if no string was read.
+     */
+    fn readLine() -> string?
+
+    /**
+     * @brief Closes the stream. After which any call to `ready` should return false
+     */
+    fn close() -> void
+}
+
+/**
+ * @brief Base Output stream for any IO OutputStream
+ */
+type OutputStream = interface AbstractStream {
+    /**
+     * @brief write a single byte into the stream
+     */
+    fn write(data: u8) -> void
+
+    /**
+     * @brief writes an array of bytes into the stream
+     */
+    fn write(data: u8[]) -> void
+
+    /**
+     * @brief Writes a string into the stream
+     */
+    fn write(data: string) -> void
+
+    /**
+     * @brief Closes the stream, no longer writable afterwards.
+     */
+    fn close() -> void
+
+    /**
+     * @brief Flushes the stream, if it uses buffers
+     */
+    fn flush() -> void
+}

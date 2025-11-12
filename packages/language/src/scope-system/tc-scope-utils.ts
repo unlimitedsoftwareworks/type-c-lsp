@@ -3,6 +3,7 @@ import * as ast from "../generated/ast.js";
 
 type ReferencableSymbol = 
     ast.VariableDeclaration | 
+    ast.DestructuringElement |
     ast.FunctionDeclaration | 
     ast.TypeDeclaration | 
     ast.NamespaceDecl | 
@@ -82,7 +83,15 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
     }
     else if (ast.isVariableDeclarationStatement(container)) {
         //console.log('Found variable declaration statement');
-        declarations.push(...container?.declarations?.variables ?? []);
+        container.declarations.variables.forEach(v => {
+           if(ast.isVariableDeclSingle(v)) {
+            declarations.push(v);
+           } else if(ast.isVariableDeclArrayDestructuring(v)
+           || ast.isVariableDeclStructDestructuring(v)
+           || ast.isVariableDeclTupleDestructuring(v)) {
+            v.elements.forEach(e => declarations.push(e));
+           } 
+        });
     }
     else if (ast.isTypeDeclaration(container)) {
         // Add generic parameters
@@ -98,7 +107,7 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
     */
     else if(ast.isClassMethod(container)) {
         // Add parameters
-        declarations.push(...container?.method?.header.args ?? []);
+        declarations.push(...container?.method?.header?.args ?? []);
         // Add generic parameters
         declarations.push(...container?.method?.genericParameters ?? []);
     }
@@ -116,7 +125,15 @@ export function getVariableDeclarations(block: ast.BlockStatement): Referencable
     // Visit all children of the block
     for (const statement of block.statements ?? []) {
         if (ast.isVariableDeclarationStatement(statement)) {
-            declarations.push(...statement.declarations.variables);
+            statement.declarations.variables.forEach(v => {
+                if(ast.isVariableDeclSingle(v)) {
+                    declarations.push(v);
+                } else if(ast.isVariableDeclArrayDestructuring(v)
+                || ast.isVariableDeclStructDestructuring(v)
+                || ast.isVariableDeclTupleDestructuring(v)) {
+                    v.elements.forEach(e => declarations.push(e));
+                } 
+            });
         } else if (ast.isFunctionDeclarationStatement(statement)) {
             declarations.push(statement.fn);
         }

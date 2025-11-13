@@ -1,0 +1,22 @@
+
+type StdIOType = u64
+
+type IO = class {
+	static fn print(stdIOType: u64) {
+	}
+}
+
+fn printf<T>(stdIOType: u64) {
+
+}
+
+fn main() -> void {
+	let x: StdIOType = 1u64
+	printf(x)
+
+	let arr: u32[] = [1u32, 2u32, 3u32, 4u32, 5u32]
+
+	for let i: u32 = 0; i < arr.length && i > 1; i++ {
+		printf(arr[i])
+	}
+}

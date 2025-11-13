@@ -30,7 +30,7 @@ import * as valUtils from "./tc-valdiation-helper.js";
  */
 export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     private readonly typeProvider: TypeCTypeProvider;
-    
+
     constructor(services: TypeCServices) {
         super();
         this.typeProvider = services.typing.TypeProvider;
@@ -87,128 +87,134 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             });
         }
     }
-/**
- * Check binary expressions for type compatibility.
- * 
- * Examples:
- * - 1 + 2           // ✅ OK (i32 + i32)
- * - 1 + 2.0         // ✅ OK (i32 + f64, promotes to f64)
- * - "hello" + "world" // ✅ OK (string concatenation)
- * - "Count: " + 42    // ✅ OK (string + int, converts to string)
- * - 1.3 + 1          // ✅ OK (f64 + i32, promotes to f64)
- */
-checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor): void => {
-    let leftType = this.typeProvider.getType(node.left);
-    const rightType = this.typeProvider.getType(node.right);
 
-    // Resolve references to check for class types
-    if (isReferenceType(leftType)) {
-        const resolved = this.typeProvider.resolveReference(leftType);
-        if (resolved) leftType = resolved;
-    }
+    /**
+     * Check binary expressions for type compatibility.
+     * 
+     * Examples:
+     * - 1 + 2           // ✅ OK (i32 + i32)
+     * - 1 + 2.0         // ✅ OK (i32 + f64, promotes to f64)
+     * - "hello" + "world" // ✅ OK (string concatenation)
+     * - "Count: " + 42    // ✅ OK (string + int, converts to string)
+     * - 1.3 + 1          // ✅ OK (f64 + i32, promotes to f64)
+     */
+    checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor): void => {
+        let leftType = this.typeProvider.getType(node.left);
+        let rightType = this.typeProvider.getType(node.right);
 
-    // Skip if operator might be overloaded (class type)
-    // TODO: Check if the specific operator is actually overloaded
-    if (isClassType(leftType)) {
-        return;
-    }
-
-    // Assignment operators: right must be compatible with left
-    const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
-    if (assignmentOps.includes(node.op)) {
-        if (!this.isTypeCompatible(rightType, leftType)) {
-            accept('error', `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`, {
-                node: node.right,
-            });
+        // Resolve references to check for class types
+        if (isReferenceType(leftType)) {
+            const resolved = this.typeProvider.resolveReference(leftType);
+            if (resolved) leftType = resolved;
         }
-        return;
-    }
 
-    // Skip validation if either side is an error type (already reported or placeholder)
-    if (leftType.kind === TypeKind.Error || rightType.kind === TypeKind.Error) {
-        return;
-    }
+        if(isReferenceType(rightType)) {
+            const resolved = this.typeProvider.resolveReference(rightType);
+            if (resolved) rightType = resolved;
+        }
 
-    // Special handling for + operator (supports strings and numeric types)
-    if (node.op === '+') {
-        const leftIsString = leftType.kind === TypeKind.String;
-        const rightIsString = rightType.kind === TypeKind.String;
-        
-        // String concatenation: string + anything
-        if (leftIsString || rightIsString) {
-            const convertibleTypes = [
-                TypeKind.String, TypeKind.Bool,
-                TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
-                TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64,
-                TypeKind.F32, TypeKind.F64
-            ];
-            
-            if (!convertibleTypes.includes(leftType.kind) || !convertibleTypes.includes(rightType.kind)) {
-                accept('error', `Cannot concatenate '${leftType.toString()}' and '${rightType.toString()}'`, {
-                    node,
+        // Skip if operator might be overloaded (class type)
+        // TODO: Check if the specific operator is actually overloaded
+        if (isClassType(leftType)) {
+            return;
+        }
+
+        // Assignment operators: right must be compatible with left
+        const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
+        if (assignmentOps.includes(node.op)) {
+            if (!this.isTypeCompatible(rightType, leftType)) {
+                accept('error', `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`, {
+                    node: node.right,
                 });
             }
             return;
         }
-        
-        // Numeric addition: allow mixed integer/float
-        if (valUtils.isNumericType(leftType) && valUtils.isNumericType(rightType)) {
-            // Allow any numeric combination (int+float, float+int, etc.)
+
+        // Skip validation if either side is an error type (already reported or placeholder)
+        if (leftType.kind === TypeKind.Error || rightType.kind === TypeKind.Error) {
             return;
         }
-        
-        accept('error', `Operator '+' requires numeric or string operands`, {
-            node,
-        });
-        return;
-    }
 
-    // Arithmetic operators (excluding +): both sides must be numeric, allow mixed int/float
-    const arithmeticOps = ['-', '*', '/', '%', '<<', '>>', '&', '|', '^'];
-    if (arithmeticOps.includes(node.op)) {
-        const leftIsNumeric = valUtils.isNumericType(leftType);
-        const rightIsNumeric = valUtils.isNumericType(rightType);
+        // Special handling for + operator (supports strings and numeric types)
+        if (node.op === '+') {
+            const leftIsString = leftType.kind === TypeKind.String;
+            const rightIsString = rightType.kind === TypeKind.String;
 
-        if (!leftIsNumeric || !rightIsNumeric) {
-            accept('error', `Operator '${node.op}' requires numeric operands`, {
+            // String concatenation: string + anything
+            if (leftIsString || rightIsString) {
+                const convertibleTypes = [
+                    TypeKind.String, TypeKind.Bool,
+                    TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,
+                    TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64,
+                    TypeKind.F32, TypeKind.F64, TypeKind.Enum
+                ];
+
+                if (!convertibleTypes.includes(leftType.kind) || !convertibleTypes.includes(rightType.kind)) {
+                    accept('error', `Cannot concatenate '${leftType.toString()}' and '${rightType.toString()}'`, {
+                        node,
+                    });
+                }
+                return;
+            }
+
+            // Numeric addition: allow mixed integer/float
+            if (valUtils.isNumericType(leftType) && valUtils.isNumericType(rightType)) {
+                // Allow any numeric combination (int+float, float+int, etc.)
+                return;
+            }
+
+            accept('error', `Operator '+' requires numeric or string operands`, {
                 node,
             });
             return;
         }
-        
-        // For bitwise operators, warn if using floats
-        const bitwiseOps = ['<<', '>>', '&', '|', '^', '%'];
-        if (bitwiseOps.includes(node.op)) {
-            const leftIsFloat = leftType.kind === TypeKind.F32 || leftType.kind === TypeKind.F64;
-            const rightIsFloat = rightType.kind === TypeKind.F32 || rightType.kind === TypeKind.F64;
-            
-            if (leftIsFloat || rightIsFloat) {
-                accept('warning', `Bitwise operator '${node.op}' used with floating-point type`, {
+
+        // Arithmetic operators (excluding +): both sides must be numeric, allow mixed int/float
+        const arithmeticOps = ['-', '*', '/', '%', '<<', '>>', '&', '|', '^'];
+        if (arithmeticOps.includes(node.op)) {
+            const leftIsNumeric = valUtils.isNumericType(leftType);
+            const rightIsNumeric = valUtils.isNumericType(rightType);
+
+            if (!leftIsNumeric || !rightIsNumeric) {
+                accept('error', `Operator '${node.op}' requires numeric operands`, {
+                    node,
+                });
+                return;
+            }
+
+            // For bitwise operators, warn if using floats
+            const bitwiseOps = ['<<', '>>', '&', '|', '^', '%'];
+            if (bitwiseOps.includes(node.op)) {
+                const leftIsFloat = leftType.kind === TypeKind.F32 || leftType.kind === TypeKind.F64;
+                const rightIsFloat = rightType.kind === TypeKind.F32 || rightType.kind === TypeKind.F64;
+
+                if (leftIsFloat || rightIsFloat) {
+                    accept('warning', `Bitwise operator '${node.op}' used with floating-point type`, {
+                        node,
+                    });
+                }
+            }
+
+            // Allow mixed numeric types (e.g., 1.3 + 1)
+            return;
+        }
+
+        // Comparison operators: operands must be compatible
+        const comparisonOps = ['==', '!=', '<', '>', '<=', '>='];
+        if (comparisonOps.includes(node.op)) {
+            // Allow comparison between any numeric types
+            if (valUtils.isNumericType(leftType) && valUtils.isNumericType(rightType)) {
+                return;
+            }
+
+            // Otherwise, require exact type compatibility
+            if (!this.isTypeCompatible(rightType, leftType) && !this.isTypeCompatible(leftType, rightType)) {
+                accept('warning', `Comparing incompatible types '${leftType.toString()}' and '${rightType.toString()}'`, {
                     node,
                 });
             }
         }
-        
-        // Allow mixed numeric types (e.g., 1.3 + 1)
-        return;
     }
-
-    // Comparison operators: operands must be compatible
-    const comparisonOps = ['==', '!=', '<', '>', '<=', '>='];
-    if (comparisonOps.includes(node.op)) {
-        // Allow comparison between any numeric types
-        if (valUtils.isNumericType(leftType) && valUtils.isNumericType(rightType)) {
-            return;
-        }
-        
-        // Otherwise, require exact type compatibility
-        if (!this.isTypeCompatible(rightType, leftType) && !this.isTypeCompatible(leftType, rightType)) {
-            accept('warning', `Comparing incompatible types '${leftType.toString()}' and '${rightType.toString()}'`, {
-                node,
-            });
-        }
-    }
-}
 
     /**
      * Check function call arguments against parameter types.
@@ -309,23 +315,23 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
      */
     checkFunctionDeclaration = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
         const fnType = this.typeProvider.getType(node);
-        
+
         if (!isFunctionType(fnType)) {
             return; // Not a function type (shouldn't happen)
         }
 
         const inferredReturnType = fnType.returnType;
-        
+
         // Check 1: If inferred return type is an error, report it
         if (inferredReturnType.kind === TypeKind.Error) {
             const errorType = inferredReturnType as ErrorTypeDescription;
             const message = errorType.message || 'Cannot infer return type';
-            
+
             // Don't report recursion placeholder errors (they're handled during inference)
             if (message === '__recursion_placeholder__') {
                 return;
             }
-            
+
             // Highlight the entire function declaration for visibility
             accept('error', message, {
                 node: node,
@@ -336,10 +342,10 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
         // Check 2: If explicit return type, validate it matches inferred type
         if (node.header.returnType) {
             const declaredReturnType = this.typeProvider.getType(node.header.returnType);
-            
+
             if (!this.isTypeCompatible(inferredReturnType, declaredReturnType)) {
-                accept('error', 
-                    `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`, 
+                accept('error',
+                    `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`,
                     {
                         node: node.header.returnType,
                     }
@@ -379,17 +385,17 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
         for (const requiredMethod of interfaceType.methods) {
             // Find a matching method in the class
             const matchingMethod = this.findMatchingMethod(classType.methods, requiredMethod);
-            
+
             if (!matchingMethod) {
                 // Method not found
                 const methodName = requiredMethod.names[0] || '<unnamed>';
-                accept('error', 
+                accept('error',
                     `Class '${classType.toString()}' does not implement interface method '${methodName}' from '${interfaceType.toString()}'`,
                     { node }
                 );
                 continue;
             }
-            
+
             // Check method signature compatibility
             this.checkMethodSignatureCompatibility(matchingMethod, requiredMethod, node, accept);
         }
@@ -420,7 +426,7 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
         accept: ValidationAcceptor
     ): void {
         const methodName = interfaceMethod.names[0] || '<unnamed>';
-        
+
         // Check parameter count
         if (classMethod.parameters.length !== interfaceMethod.parameters.length) {
             accept('error',
@@ -429,12 +435,12 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
             );
             return;
         }
-        
+
         // Check each parameter type
         for (let i = 0; i < interfaceMethod.parameters.length; i++) {
             const classParam = classMethod.parameters[i];
             const interfaceParam = interfaceMethod.parameters[i];
-            
+
             if (!this.isTypeCompatible(classParam.type, interfaceParam.type)) {
                 accept('error',
                     `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`,
@@ -442,7 +448,7 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
                 );
             }
         }
-        
+
         // Check return type
         if (!this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType)) {
             accept('error',
@@ -457,16 +463,9 @@ checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor)
      *
      * Delegates to the type-utils isAssignable function for consistent type checking.
      */
-    private isTypeCompatible(actual: TypeDescription, expected: TypeDescription): boolean {
-        // Special case: struct literal to named struct reference (duck typing)
-        // Example: {x: 5.0, y: 10.0} assigned to Point
-        if (actual.kind === TypeKind.Struct && isReferenceType(expected)) {
-            const resolved = this.typeProvider.resolveReference(expected);
-            if (resolved && resolved.kind === TypeKind.Struct) {
-                // Both are structs, check structural compatibility via isAssignable
-                return isAssignable(actual, resolved);
-            }
-        }
+    private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): boolean {
+        const actual = isReferenceType(actual_) ? this.typeProvider.resolveReference(actual_) : actual_;
+        const expected = isReferenceType(expected_) ? this.typeProvider.resolveReference(expected_) : expected_;
 
         // Use the centralized assignability check from type-utils
         // This handles:

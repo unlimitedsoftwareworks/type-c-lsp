@@ -47,6 +47,7 @@ import {
     ClassTypeDescription,
     InterfaceTypeDescription,
     VariantTypeDescription,
+    isEnumType,
 } from "./type-c-types.js";
 
 // ============================================================================
@@ -237,6 +238,14 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     // Numeric promotions
     if (isNumericType(from) && isNumericType(to)) {
         return isNumericPromotionValid(from, to);
+    }
+
+    // Int + Enum or Enum + Int should be assignable
+    if (isIntegerType(from) && isEnumType(to)) {
+        return true;
+    }
+    if (isEnumType(from) && isIntegerType(to)) {
+        return true;
     }
     
     // Null can be assigned to nullable types

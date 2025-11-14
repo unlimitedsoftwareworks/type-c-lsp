@@ -1,5 +1,18 @@
 from kiisu.kiisu import kiisu
 
+fn overloadedFn(a: u32) {}
+
+fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
+	let result: V[] = []
+	result.resize(xs.length)
+	for let i = 0u32; i < xs.length; i++ {
+		result[i] = f(xs[i])
+	}
+	return result
+}
+
 fn main() {
-	
+	let c: u32[] = [1u32,2u32,3u32]
+	let f = fn(a: u32) -> f32 { a + 1.0f }
+	let d = map<u32, u32>(c, f)
 }

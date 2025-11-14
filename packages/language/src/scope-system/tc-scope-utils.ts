@@ -66,6 +66,9 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         // Add parameters
         declarations.push(...container.header?.args ?? []);  
     }
+    else if (ast.isLambdaExpression(container)) {
+        declarations.push(...container.header.args ?? []);
+    }
     else if (ast.isBuiltinSymbolFn(container)) {
         declarations.push(...container.genericParameters ?? []);
     }

@@ -279,7 +279,6 @@ AtomicExpression infers Expression:
     LambdaExpression |
     { infer ThisExpression } 'this'  |
     DoExpression |
-    ({infer GenericReferenceExpr} reference=QualifiedReference GENERICS_OPEN genericArgs+=DataType<false> (',' genericArgs+=DataType<false>)* '>') |
     QualifiedReference |
     ArrayConstructionExpression |
     NamedStructConstructionExpression |
@@ -755,7 +754,8 @@ hidden terminal WS: /\s+/;
 // Lookahead to distinguish < as generic open from < as less-than operator
 // This pattern is more permissive to handle nested generics like Array<Array<u32>>
 // It looks for < followed by valid type syntax (identifiers, commas, nested <>, etc.) and ending with >
-terminal GENERICS_OPEN: /<(?=\s*[_a-zA-Z])/;
+// Treat `<` as GENERICS_OPEN only if there is a `>` later in the same "segment"
+terminal GENERICS_OPEN: /<(?=(?:(?!&&|\|\||==|!=|<=|>=|=).)*>)/;
 terminal LESS_THAN: /</;
 
 /**

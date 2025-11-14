@@ -1,0 +1,7 @@
+namespace kiisu
+{
+    type Animal<U, V> = variant {
+        Kiisu(name: U),
+        Neutsu(name: V),
+    }
+}

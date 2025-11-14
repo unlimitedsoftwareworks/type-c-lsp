@@ -47,6 +47,7 @@ import {
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
+import { isAssignmentOperator } from './operator-utils.js';
 
 /**
  * Main type provider service.
@@ -1445,7 +1446,6 @@ export class TypeCTypeProvider {
             }
             return res;
         }
-        if (ast.isGenericReferenceExpr(node)) return this.inferGenericReferenceExpr(node);
 
         // Operations
         if (ast.isBinaryExpression(node)) return this.inferBinaryExpression(node);
@@ -1579,32 +1579,6 @@ export class TypeCTypeProvider {
         return type;
     }
 
-    private inferGenericReferenceExpr(node: ast.GenericReferenceExpr): TypeDescription {
-        // Langium cross-references have a .ref property pointing to the target AST node
-        const ref = node.reference;
-        if (!ref || !('ref' in ref) || !ref.ref) {
-            return factory.createErrorType('Unresolved reference', undefined, node);
-        }
-
-        // Type assertion needed because Langium references are dynamically typed
-        const baseType = this.getType(ref.ref as AstNode);
-        
-        // If base type is a generic function or class, substitute generic args
-        if (isFunctionType(baseType) && baseType.genericParameters.length > 0) {
-            const genericArgs = node.genericArgs?.map(arg => this.getType(arg)) ?? [];
-            const substitutions = new Map<string, TypeDescription>();
-            baseType.genericParameters.forEach((param, i) => {
-                if (i < genericArgs.length) {
-                    substitutions.set(param.name, genericArgs[i]);
-                }
-            });
-            
-            return substituteGenerics(baseType, substitutions);
-        }
-
-        return baseType;
-    }
-
     private inferBinaryExpression(node: ast.BinaryExpression): TypeDescription {
         const left = this.inferExpression(node.left);
         const right = this.inferExpression(node.right);
@@ -1614,7 +1588,7 @@ export class TypeCTypeProvider {
         if (right.kind === TypeKind.Error) return right;
         
         // Assignment operators return the type of the right operand
-        if (node.op === '=' || node.op?.endsWith('=')) {
+        if (isAssignmentOperator(node.op)) {
             return right;
         }
         
@@ -1869,6 +1843,23 @@ export class TypeCTypeProvider {
             const member = baseType.declaration.definitions.find(m => 'name' in m && m.name === memberName);
             if (member) {
                 memberType = this.getType(member);
+
+                /**
+                 * If namespace is used as a qualified reference, than it is within an expression.
+                 */
+                if(ast.isQualifiedReference(node.expr) && ast.isNamespaceDecl(node.expr.reference.ref)) {
+                    // Resolve memberType if needed
+                    memberType = this.resolveReference(memberType);
+                    if(isVariantType(memberType)) {
+                        memberType = factory.createMetaVariantType(memberType, [], node);
+                    }
+                    else if(isVariantConstructorType(memberType)) {
+                        memberType = factory.createMetaVariantConstructorType(memberType, [], node);
+                    }
+                    else if(isEnumType(memberType)) {
+                        memberType = factory.createMetaEnumType(memberType, node);
+                    }
+                }
             }
         }
 

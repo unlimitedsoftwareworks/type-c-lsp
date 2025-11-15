@@ -15,7 +15,8 @@ import {
     isReferenceType,
     isVariantConstructorType
 } from "../typing/type-c-types.js";
-import { isAssignable } from "../typing/type-utils.js";
+import { isAssignable, substituteGenerics } from "../typing/type-utils.js";
+import { inferGenericsFromArguments } from "../typing/generic-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
 
@@ -237,8 +238,54 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        const paramTypes = fnType.parameters;
+        let paramTypes = fnType.parameters;
         const args = node.args || [];
+        const genericParams = fnType.genericParameters || [];
+        let substitutions: Map<string, TypeDescription> | undefined;
+
+        // Handle explicit generic type arguments
+        if (node.genericArgs && node.genericArgs.length > 0) {
+            // Check generic argument count
+            if (node.genericArgs.length !== genericParams.length) {
+                accept('error', `Expected ${genericParams.length} type argument(s), but got ${node.genericArgs.length}`, {
+                    node,
+                });
+                return;
+            }
+
+            // Build substitution map: generic parameter name -> concrete type
+            substitutions = new Map<string, TypeDescription>();
+            genericParams.forEach((param, index) => {
+                const concreteType = this.typeProvider.getType(node.genericArgs[index]);
+                substitutions!.set(param.name, concreteType);
+            });
+        }
+        // Attempt automatic generic inference if no explicit type arguments provided
+        else if (genericParams.length > 0) {
+            // Get concrete types of all arguments
+            const argumentTypes = args.map(arg => this.typeProvider.getType(arg));
+
+            // Get parameter types (which may contain generic references)
+            const parameterTypes = fnType.parameters.map(p => p.type);
+
+            // Infer generics from the arguments
+            const genericParamNames = genericParams.map(p => p.name);
+            substitutions = inferGenericsFromArguments(
+                genericParamNames,
+                parameterTypes,
+                argumentTypes
+            );
+        }
+
+        // Apply substitutions to parameter types if we have any
+        if (substitutions && substitutions.size > 0) {
+            const finalSubstitutions = substitutions; // Ensure TypeScript knows it's defined
+            paramTypes = paramTypes.map(param => ({
+                name: param.name,
+                type: substituteGenerics(param.type, finalSubstitutions),
+                isMut: param.isMut
+            }));
+        }
 
         // Check argument count
         if (args.length !== paramTypes.length) {

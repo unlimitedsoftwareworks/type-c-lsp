@@ -14,5 +14,5 @@ fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
 fn main() {
 	let c: u32[] = [1u32,2u32,3u32]
 	let f = fn(a: u32) -> f32 { a + 1.0f }
-	let d = map<u32, u32>(c, f)
+	let d = map(c, f)
 }

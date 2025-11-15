@@ -46,6 +46,7 @@ import {
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
 import { simplifyType, substituteGenerics } from './type-utils.js';
+import { inferGenericsFromTypes, inferGenericsFromArguments } from './generic-utils.js';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import { isAssignmentOperator } from './operator-utils.js';
 
@@ -1923,7 +1924,45 @@ export class TypeCTypeProvider {
                 return this.inferVariantConstructorCall(fnType.returnType, node);
             }
 
-            // TODO: Handle generic argument substitution if node.genericArgs is present
+            const genericParams = fnType.genericParameters || [];
+            let substitutions: Map<string, TypeDescription> | undefined;
+
+            // Handle explicit generic type arguments
+            if (node.genericArgs && node.genericArgs.length > 0) {
+                if (node.genericArgs.length === genericParams.length) {
+                    // Build substitution map: generic parameter name -> concrete type
+                    const explicitSubstitutions = new Map<string, TypeDescription>();
+                    genericParams.forEach((param, index) => {
+                        const concreteType = this.getType(node.genericArgs[index]);
+                        explicitSubstitutions.set(param.name, concreteType);
+                    });
+                    substitutions = explicitSubstitutions;
+                }
+            }
+            // Attempt automatic generic inference if no explicit type arguments provided
+            else if (genericParams.length > 0) {
+                const args = node.args || [];
+
+                // Get concrete types of all arguments
+                const argumentTypes = args.map(arg => this.inferExpression(arg));
+
+                // Get parameter types (which may contain generic references)
+                const parameterTypes = fnType.parameters.map(p => p.type);
+
+                // Infer generics from the arguments
+                const genericParamNames = genericParams.map(p => p.name);
+                substitutions = inferGenericsFromArguments(
+                    genericParamNames,
+                    parameterTypes,
+                    argumentTypes
+                );
+            }
+
+            // Apply substitutions to return type if we have any
+            if (substitutions && substitutions.size > 0) {
+                return substituteGenerics(fnType.returnType, substitutions);
+            }
+
             return fnType.returnType;
         }
 
@@ -2052,7 +2091,7 @@ export class TypeCTypeProvider {
 
             // Try to match the parameter type with the argument type to infer generics
             // For example, if parameter is T and argument is i32, then T = i32
-            this.inferGenericsFromTypes(paramType, argType, inferredGenerics);
+            inferGenericsFromTypes(paramType, argType, inferredGenerics);
         }
 
         // Create the final generic args array in the correct order
@@ -2088,76 +2127,6 @@ export class TypeCTypeProvider {
             callNode,
             variantDecl  // Pass the declaration for display purposes
         );
-    }
-
-    /**
-     * Helper method to infer generic type parameters by matching a pattern type with a concrete type.
-     *
-     * For example:
-     * - Pattern: T, Concrete: i32 → infers T = i32
-     * - Pattern: Array<T>, Concrete: Array<string> → infers T = string
-     * - Pattern: Result<T, E>, Concrete: Result<i32, string> → infers T = i32, E = string
-     *
-     * @param patternType The type pattern with generic parameters (e.g., T, Array<T>)
-     * @param concreteType The concrete type to match against (e.g., i32, Array<string>)
-     * @param inferredGenerics Map to store inferred generic parameters
-     */
-    private inferGenericsFromTypes(
-        patternType: TypeDescription,
-        concreteType: TypeDescription,
-        inferredGenerics: Map<string, TypeDescription>
-    ): void {
-        // If concrete type is a VariantConstructorType, extract its base variant
-        // Example: Result.Ok(Option.Some(42)) should infer T = Option<i32>, not Option<i32>.Some
-        // Use the declaration if available to preserve the type name for better display
-        if (isVariantConstructorType(concreteType)) {
-            if (concreteType.variantDeclaration) {
-                // Reconstruct a reference from the declaration and genericArgs
-                concreteType = factory.createReferenceType(
-                    concreteType.variantDeclaration,
-                    concreteType.genericArgs,
-                    concreteType.node
-                );
-            } else {
-                // Fallback to baseVariant for anonymous variants
-                concreteType = concreteType.baseVariant;
-            }
-        }
-
-        // If pattern is a generic parameter, infer its type from the concrete type
-        if (patternType.kind === TypeKind.Generic) {
-            const genericName = (patternType as any).name;
-            if (genericName && !inferredGenerics.has(genericName)) {
-                inferredGenerics.set(genericName, concreteType);
-            } else if (genericName && inferredGenerics.get(genericName)?.kind === TypeKind.Never) {
-                // Replace never with the concrete type
-                inferredGenerics.set(genericName, concreteType);
-            }
-            return;
-        }
-
-        // If pattern is an array, try to infer element type
-        if (isArrayType(patternType) && isArrayType(concreteType)) {
-            this.inferGenericsFromTypes(
-                patternType.elementType,
-                concreteType.elementType,
-                inferredGenerics
-            );
-            return;
-        }
-
-        // If pattern is a reference type, recurse into generic args
-        if (isReferenceType(patternType) && isReferenceType(concreteType)) {
-            const patternArgs = patternType.genericArgs;
-            const concreteArgs = concreteType.genericArgs;
-
-            for (let i = 0; i < Math.min(patternArgs.length, concreteArgs.length); i++) {
-                this.inferGenericsFromTypes(patternArgs[i], concreteArgs[i], inferredGenerics);
-            }
-            return;
-        }
-
-        // Add more cases as needed (struct, tuple, etc.)
     }
 
     private inferIndexAccess(node: ast.IndexAccess): TypeDescription {

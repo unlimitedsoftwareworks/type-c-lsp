@@ -9,7 +9,7 @@ import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
-import { TypeCLinker } from './scope-system/type-c-linker.js';
+import { TypeCLinker } from './linking/tc-linker.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -17,7 +17,8 @@ import { TypeCLinker } from './scope-system/type-c-linker.js';
 export type TypeCAddedServices = {
     references: {
         ScopeComputation: TypeCScopeComputation,
-        ScopeProvider: TypeCScopeProvider
+        ScopeProvider: TypeCScopeProvider,
+        Linker: TypeCLinker
     },
     typing: {
         TypeProvider: TypeCTypeProvider

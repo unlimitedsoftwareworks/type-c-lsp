@@ -42,10 +42,11 @@ import {
     isEnumType,
     isMetaVariantType,
     isMetaEnumType,
-    isMetaVariantConstructorType
+    isMetaVariantConstructorType,
+    FunctionTypeDescription
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
-import { simplifyType, substituteGenerics } from './type-utils.js';
+import { areTypesEqual, isAssignable, simplifyType, substituteGenerics } from './type-utils.js';
 import { inferGenericsFromTypes, inferGenericsFromArguments } from './generic-utils.js';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import { isAssignmentOperator } from './operator-utils.js';
@@ -2475,6 +2476,41 @@ export class TypeCTypeProvider {
         
         // Return empty prototype if not found
         return factory.createPrototypeType('array', [], []);
+    }
+
+    /**
+     * Returns the indexes of all valid targets for a function call
+     * @param args 
+     * @param functions 
+     * @returns The indexes of all valid targets for a function call
+     */
+    resolveFunctionCall(args: ast.Expression[], functions: FunctionTypeDescription[]): number[] {
+        const expressionTypes = args.map(arg => this.inferExpression(arg));
+        const argBasedCandidates = functions.filter(fn => fn.parameters.length === expressionTypes.length);
+
+
+        if(argBasedCandidates.length === 1) {
+            return [functions.indexOf(argBasedCandidates[0])];
+        }
+        
+
+        const finalCandidates = [];
+        // First prio is exact match
+        for(const fn of functions) {
+            if(fn.parameters.every((param, index) => areTypesEqual(expressionTypes[index], param.type))) {
+                finalCandidates.push(fn);
+            }
+        }
+
+        // Second prio is assignable match
+        if(finalCandidates.length === 0) {
+            for(const fn of argBasedCandidates) {
+                if(fn.parameters.every((param, index) => isAssignable(expressionTypes[index], param.type))) {
+                    finalCandidates.push(fn);
+                }
+            }
+        }
+        return finalCandidates.map(fn => functions.indexOf(fn));
     }
 }
 

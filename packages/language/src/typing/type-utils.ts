@@ -64,7 +64,7 @@ import {
 export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
     // Quick reference equality check
     if (a === b) return true;
-    
+
     // Different kinds are never equal
     if (a.kind !== b.kind) return false;
     
@@ -98,17 +98,19 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
         case TypeKind.Nullable:
             return areTypesEqual(
                 (a as NullableTypeDescription).baseType,
-                (b as NullableTypeDescription).baseType
+                (b as NullableTypeDescription).baseType,
             );
-            
+
+        /**
+         * - Unions are only used for generic constraints, so they are never equal to other types
+         * - Tuples are only used for return types and unpacking, so they are never equal to other types
+         * - Joins are resolved prior to reaching this point, this condition should never be reached
+         */
         case TypeKind.Union:
-            return areUnionTypesEqual(a as UnionTypeDescription, b as UnionTypeDescription);
-            
-        case TypeKind.Join:
-            return areJoinTypesEqual(a as JoinTypeDescription, b as JoinTypeDescription);
-            
         case TypeKind.Tuple:
-            return areTupleTypesEqual(a as TupleTypeDescription, b as TupleTypeDescription);
+        case TypeKind.Join:
+            return false;
+            
             
         case TypeKind.Struct:
             return areStructTypesEqual(a as StructTypeDescription, b as StructTypeDescription);
@@ -127,37 +129,6 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
         default:
             return a.toString() === b.toString();
     }
-}
-
-function areUnionTypesEqual(a: UnionTypeDescription, b: UnionTypeDescription): boolean {
-    if (a.types.length !== b.types.length) return false;
-    
-    // Union types are equal if they contain the same types (order-independent)
-    return a.types.every(aType => 
-        b.types.some(bType => areTypesEqual(aType, bType))
-    ) && b.types.every(bType => 
-        a.types.some(aType => areTypesEqual(aType, bType))
-    );
-}
-
-function areJoinTypesEqual(a: JoinTypeDescription, b: JoinTypeDescription): boolean {
-    if (a.types.length !== b.types.length) return false;
-    
-    // Join types are equal if they contain the same types (order-independent)
-    return a.types.every(aType => 
-        b.types.some(bType => areTypesEqual(aType, bType))
-    ) && b.types.every(bType => 
-        a.types.some(aType => areTypesEqual(aType, bType))
-    );
-}
-
-function areTupleTypesEqual(a: TupleTypeDescription, b: TupleTypeDescription): boolean {
-    if (a.elementTypes.length !== b.elementTypes.length) return false;
-    
-    // Tuples are equal if all elements are equal (order matters)
-    return a.elementTypes.every((aType, i) => 
-        areTypesEqual(aType, b.elementTypes[i])
-    );
 }
 
 function areStructTypesEqual(a: StructTypeDescription, b: StructTypeDescription): boolean {

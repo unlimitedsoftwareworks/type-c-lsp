@@ -51,6 +51,7 @@ import {
     MetaVariantTypeDescription,
     MetaVariantConstructorTypeDescription,
     MetaEnumTypeDescription,
+    MetaClassTypeDescription,
 } from "./type-c-types.js";
 
 // ============================================================================
@@ -314,12 +315,14 @@ export function createVariantConstructor(
 export function createVariantConstructorType(
     baseVariant: VariantTypeDescription,
     constructorName: string,
+    parentConstructor: ast.VariantConstructor,
     genericArgs: readonly TypeDescription[] = [],
     node?: AstNode,
     variantDeclaration?: ast.TypeDeclaration
 ): VariantConstructorTypeDescription {
     return {
         kind: TypeKind.VariantConstructor,
+        parentConstructor,
         baseVariant,
         variantDeclaration,
         constructorName,
@@ -437,6 +440,13 @@ export function createClassType(
             return `class ${extendsStr}{ ... }`;
         }
     };
+}
+
+export function createMetaClassType(
+    baseClass: ClassTypeDescription,
+    node?: AstNode
+): MetaClassTypeDescription {
+    return { kind: TypeKind.MetaClass, baseClass, node, toString: () => `${baseClass.toString()}` };
 }
 
 export function createImplementationType(

@@ -68,6 +68,7 @@ export enum TypeKind {
     
     // Object-oriented types
     Class = 'class',
+    MetaClass = 'meta-class',
     Interface = 'interface',
     Implementation = 'impl',
     
@@ -226,6 +227,8 @@ export interface VariantConstructorTypeDescription extends TypeDescription {
     readonly constructorName: string;
     /** Generic arguments for this constructor (may include never) */
     readonly genericArgs: readonly TypeDescription[];
+    /** Parent constructor type  */
+    readonly parentConstructor: ast.VariantConstructor;
 }
 
 export interface EnumCaseType {
@@ -283,6 +286,11 @@ export interface ClassTypeDescription extends TypeDescription {
     readonly methods: readonly MethodType[];
     readonly superTypes: readonly TypeDescription[];
     readonly implementations: readonly TypeDescription[];
+}
+
+export interface MetaClassTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.MetaClass;
+    readonly baseClass: ClassTypeDescription;
 }
 
 export interface ImplementationTypeDescription extends TypeDescription {
@@ -480,6 +488,10 @@ export function isInterfaceType(type: TypeDescription): type is InterfaceTypeDes
 
 export function isClassType(type: TypeDescription): type is ClassTypeDescription {
     return type.kind === TypeKind.Class;
+}
+
+export function isMetaClassType(type: TypeDescription): type is MetaClassTypeDescription {
+    return type.kind === TypeKind.MetaClass;
 }
 
 export function isImplementationType(type: TypeDescription): type is ImplementationTypeDescription {

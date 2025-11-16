@@ -607,5 +607,18 @@ describe('Type Provider', async () => {
                 });
             });
         });
+
+
+        /**
+         * Generic tests
+         */
+        describe('Generic inference', () => {
+
+            test('should properly infer types with constructor type annotations', async () => {
+                await assertType('generics/correct/file1.tc', {
+                    'd': 'i32[]',
+                });
+            });
+        });
     });
 });

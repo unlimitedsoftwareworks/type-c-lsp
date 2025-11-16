@@ -16,7 +16,6 @@ import {
     isVariantConstructorType
 } from "../typing/type-c-types.js";
 import { isAssignable, substituteGenerics } from "../typing/type-utils.js";
-import { inferGenericsFromArguments } from "../typing/generic-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
 
@@ -270,7 +269,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
             // Infer generics from the arguments
             const genericParamNames = genericParams.map(p => p.name);
-            substitutions = inferGenericsFromArguments(
+            substitutions = this.typeProvider.inferGenericsFromArguments(
                 genericParamNames,
                 parameterTypes,
                 argumentTypes

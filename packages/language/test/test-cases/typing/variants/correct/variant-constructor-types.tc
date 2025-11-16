@@ -18,7 +18,7 @@ type Status<T> = variant {
 
 // Test 1: Simple variant constructor type without generics
 fn testSimpleConstructorType() -> void {
-    let noneVal: Option<never>.None = Option.None()
+    let noneVal: Option.None<never> = Option.None()
 }
 
 // Test 2: Variant constructor type with generics

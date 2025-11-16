@@ -9,7 +9,8 @@ import {
     ReferenceInfo,
     Scope,
     Stream,
-    stream
+    stream,
+    StreamScope
 } from "langium";
 import * as path from "node:path";
 import * as builtins from "../builtins/index.js";
@@ -181,7 +182,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             }
         }
 
-        return new MapScope(stream(descriptions));
+        return new StreamScope(stream(descriptions));
     }
 
     getScopeFromReferenceType(container: ast.ReferenceType): Scope {

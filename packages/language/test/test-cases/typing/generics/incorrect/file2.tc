@@ -19,5 +19,5 @@ type Status<T> = variant {
 // Test 1: Simple variant constructor type without generics
 fn testSimpleConstructorType() -> void { 
     //let noneVal2: Option<string> = Option.Some({x: 1u32})
-    let noneVal: Option<string> = Option.Some({x: 1u32})
+    let noneVal: Option<string> = Option.Some({x: 1u32})   // <- Error here
 }

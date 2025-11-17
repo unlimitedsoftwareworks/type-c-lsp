@@ -23,37 +23,37 @@ fn testSimpleConstructorType() -> void {
 
 // Test 2: Variant constructor type with generics
 fn testConstructorTypeWithGenerics() -> void {
-    let someVal: Option<u32>.Some = Option.Some(42u32)
-    let okVal: Result<i32, string>.Ok = Result.Ok(100i32)
-    let errVal: Result<i32, string>.Err = Result.Err("error")
+    let someVal: Option.Some<u32> = Option.Some(42u32)
+    let okVal: Result.Ok<i32, string> = Result.Ok(100i32)
+    let errVal: Result.Err<i32, string> = Result.Err("error")
 }
 
 // Test 3: More constructor types with different generics
 fn testMoreConstructorTypes() -> void {
-    let successVal: Status<i32>.Success = Status.Success(200i32)
-    let failureVal: Status<i32>.Failure = Status.Failure("failed")
+    let successVal: Status.Success<i32> = Status.Success(200i32)
+    let failureVal: Status.Failure<i32> = Status.Failure("failed")
 }
 
 // Test 4: Constructor types in function parameters
-fn processSome(val: Option<string>.Some) -> string {
+fn processSome(val: Option.Some<string>) -> string {
     return "processed"
 }
 
-fn processOk(result: Result<u32, string>.Ok) -> u32 {
+fn processOk(result: Result.Ok<u32, string>) -> u32 {
     return 0u32
 }
 
 // Test 5: Constructor types in function return types
-fn createSome() -> Option<i32>.Some {
+fn createSome() -> Option.Some<i32> {
     return Option.Some(42)
 }
 
-fn createOk() -> Result<string, i32>.Ok {
+fn createOk() -> Result.Ok<string, i32> {
     return Result.Ok("success")
 }
 
 // Test 6: Using constructor types with inference
 fn testInference() -> void {
-    let s: Option<u32>.Some = Option.Some(10u32)
-    let n: Option<bool>.None = Option.None()
+    let s: Option.Some<u32> = Option.Some(10u32)
+    let n: Option.None<bool> = Option.None()
 }

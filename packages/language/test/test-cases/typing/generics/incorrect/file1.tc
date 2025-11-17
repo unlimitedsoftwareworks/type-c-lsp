@@ -20,4 +20,5 @@ type Status<T> = variant {
 fn testSimpleConstructorType() -> void { 
     //let noneVal2: Option<string> = Option.Some({x: 1u32})
     let noneVal: Option<string> = Option.Some({x: 1u32})
+	noneVal.value = 1 // <- Error here 
 }

@@ -67,7 +67,7 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
 
     // Different kinds are never equal
     if (a.kind !== b.kind) return false;
-    
+
     // Handle each type kind
     switch (a.kind) {
         // Primitive types - kind equality is sufficient
@@ -123,12 +123,32 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
             
         case TypeKind.Generic:
             return areGenericTypesEqual(a as GenericTypeDescription, b as GenericTypeDescription);
-            
+
+        case TypeKind.Variant:
+            return areVariantTypesEqual(a as VariantTypeDescription, b as VariantTypeDescription);
+
         // For other complex types, fall back to string comparison
         // (This is a simplified approach; real implementation would need deeper comparison)
         default:
             return a.toString() === b.toString();
     }
+}
+
+function areVariantTypesEqual(a: VariantTypeDescription, b: VariantTypeDescription): boolean {
+    // Variants are equal if they have the same constructors with the same parameter types
+    if (a.constructors.length !== b.constructors.length) return false;
+
+    return a.constructors.every(aConstructor => {
+        const bConstructor = b.constructors.find(c => c.name === aConstructor.name);
+        if (!bConstructor) return false;
+
+        if (aConstructor.parameters.length !== bConstructor.parameters.length) return false;
+
+        return aConstructor.parameters.every((aParam, i) => {
+            const bParam = bConstructor.parameters[i];
+            return aParam.name === bParam.name && areTypesEqual(aParam.type, bParam.type);
+        });
+    });
 }
 
 function areStructTypesEqual(a: StructTypeDescription, b: StructTypeDescription): boolean {
@@ -188,7 +208,9 @@ function areGenericTypesEqual(a: GenericTypeDescription, b: GenericTypeDescripti
  */
 export function isAssignable(from: TypeDescription, to: TypeDescription): boolean {
     // Exact equality
-    if (areTypesEqual(from, to)) return true;
+    if (areTypesEqual(from, to)) {
+        return true;
+    }
     
     // Any type accepts everything, everything is assignable to Any
     if (isAnyType(to)) return true;
@@ -414,31 +436,60 @@ function isVariantConstructorAssignableToVariant(
     from: VariantConstructorTypeDescription,
     to: VariantTypeDescription
 ): boolean {
-    // Get the base variant from the constructor
-    let fromBaseVariant = from.baseVariant;
-
-    // If it's a reference type, we need to check if it matches the target variant
-    // For now, we do a simple structural check - in a full implementation, we'd resolve references
-    if (isReferenceType(fromBaseVariant)) {
-        // The constructor's base must be the same as the target variant
-        // This is a simplified check - ideally we'd resolve and compare
-        // For now, we assume they're compatible if they come from the same reference
-        // and check generic args compatibility
+    // Find the constructor in the target variant
+    const toConstructor = to.constructors.find(c => c.name === from.constructorName);
+    if (!toConstructor) {
+        // Constructor doesn't exist in target variant
+        return false;
     }
 
-    // Check if generic arguments are compatible
-    // Generic args from the constructor must be assignable to the variant's expected args
-    // Note: 'never' is assignable to any type, so Result.Ok<i32, never> <: Result<i32, E> for any E
-    if (from.genericArgs.length === 0) {
-        // No generic args in constructor, compatible with any variant
-        return true;
+    // Find the constructor in the source's base variant
+    const fromConstructor = from.baseVariant.constructors.find(c => c.name === from.constructorName);
+    if (!fromConstructor) {
+        return false;
     }
 
-    // If we have generic args, we need to check compatibility
-    // For now, we allow the assignment if all generic args are either:
-    // 1. Never type (uninferred, compatible with anything)
-    // 2. Compatible with the expected type
-    return true; // Simplified: always allow for now, refinement needed
+    // Check that parameter counts match
+    if (fromConstructor.parameters.length !== toConstructor.parameters.length) {
+        return false;
+    }
+
+    // The from constructor has genericArgs that represent the inferred types (e.g., [struct{x: u32}])
+    // The to constructor has parameter types that have been substituted (e.g., value: string)
+    // We need to check if the from's inferred types match the to's expected types
+
+    // Build a substitution map for the from constructor's generics
+    // This maps generic parameter names to the inferred types
+    const fromSubstitutions = new Map<string, TypeDescription>();
+    if (from.genericArgs.length > 0 && from.variantDeclaration?.genericParameters) {
+        from.variantDeclaration.genericParameters.forEach((param, i) => {
+            if (i < from.genericArgs.length) {
+                fromSubstitutions.set(param.name, from.genericArgs[i]);
+            }
+        });
+    }
+
+    // Check each parameter
+    for (let i = 0; i < fromConstructor.parameters.length; i++) {
+        const fromParamType = fromConstructor.parameters[i].type;
+        const toParamType = toConstructor.parameters[i].type;
+
+        // Substitute generics in the from parameter type
+        const resolvedFromParamType = fromSubstitutions.size > 0
+            ? substituteGenerics(fromParamType, fromSubstitutions)
+            : fromParamType;
+
+        // Check assignability: never is compatible with anything
+        if (isNeverType(resolvedFromParamType)) {
+            continue;
+        }
+
+        if (!isAssignable(resolvedFromParamType, toParamType)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /**
@@ -745,6 +796,38 @@ export function substituteGenerics(
             }
         };
         return variantConstructorType;
+    }
+
+    // Substitute generics in variant types
+    if (isVariantType(type)) {
+        const substitutedConstructors = type.constructors.map(constructor => ({
+            name: constructor.name,
+            parameters: constructor.parameters.map(param => {
+                const substitutedParamType = substituteGenerics(param.type, substitutions);
+                return {
+                    name: param.name,
+                    type: substitutedParamType
+                };
+            })
+        }));
+        const variantType: VariantTypeDescription = {
+            kind: type.kind,
+            constructors: substitutedConstructors,
+            node: type.node,
+            toString: () => {
+                const constructorStrs = substitutedConstructors.map(c => {
+                    if (c.parameters.length === 0) {
+                        return c.name;
+                    }
+                    const paramStrs = c.parameters.map(p =>
+                        `${p.name}: ${p.type.toString()}`
+                    ).join(', ');
+                    return `${c.name}(${paramStrs})`;
+                }).join(', ');
+                return `variant { ${constructorStrs} }`;
+            }
+        };
+        return variantType;
     }
 
     // For other types, return as-is

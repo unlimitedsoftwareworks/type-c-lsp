@@ -60,8 +60,6 @@ export class TypeCTypeProvider {
     /** Cache for computed types, keyed by AST node */
     private readonly typeCache = new WeakMap<AstNode, TypeDescription>();
 
-    /** Cache for resolved reference types (avoids re-resolving references) */
-    private readonly resolvedReferenceCache = new WeakMap<AstNode, TypeDescription>();
 
     /**
      * Tracks functions currently being inferred to prevent infinite recursion.
@@ -789,18 +787,13 @@ export class TypeCTypeProvider {
     /**
      * Resolves a reference type to its actual type definition.
      * Handles generic substitution.
+     *
+     * Note: We don't cache at this level because different generic instantiations
+     * need different resolved types, and the main typeCache handles AST node caching.
      */
     resolveReference(refType: TypeDescription): TypeDescription {
         if (!isReferenceType(refType)) {
             return refType;
-        }
-
-        // Check if already resolved in cache
-        if (refType.node) {
-            const cached = this.resolvedReferenceCache.get(refType.node);
-            if (cached) {
-                return cached;
-            }
         }
 
         // Check if already resolved in actualType property
@@ -820,19 +813,7 @@ export class TypeCTypeProvider {
                 }
             });
 
-            const substitutedType = substituteGenerics(actualType, substitutions);
-
-            // Cache the resolved type
-            if (refType.node) {
-                this.resolvedReferenceCache.set(refType.node, substitutedType);
-            }
-
-            return substitutedType;
-        }
-
-        // Cache the resolved type
-        if (refType.node) {
-            this.resolvedReferenceCache.set(refType.node, actualType);
+            return substituteGenerics(actualType, substitutions);
         }
 
         return actualType;

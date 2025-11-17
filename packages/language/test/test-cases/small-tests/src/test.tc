@@ -1,23 +1,11 @@
-// Test variant constructor type annotations
-// Testing: Using variant constructor types (e.g., Option.Some) in type annotations
 
-type Option<T> = variant {
-    Some(value: T),
-    None()
+fn overloadedFn(a: u32) -> i32 {}
+fn overloadedFn(a: f32) -> f64{}
+
+fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
 }
 
-type Result<T, E> = variant {
-    Ok(value: T),
-    Err(error: E)
-}
-
-type Status<T> = variant {
-    Success(data: T),
-    Failure(message: string)
-}
-
-// Test 1: Simple variant constructor type without generics
-fn testSimpleConstructorType() -> void { 
-    //let noneVal2: Option<string> = Option.Some({x: 1u32})
-    let noneVal: Option<string> = Option.Some({x: 1u32})
+fn main() {
+    let c: u32[] = [1u32,2u32,3u32]
+    let e = map(c, overloadedFn) // <- The issue is here  
 }

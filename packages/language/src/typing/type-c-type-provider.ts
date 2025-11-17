@@ -23,6 +23,7 @@ import {
     isArrayType,
     isClassType,
     isEnumType,
+    isErrorType,
     isFFIType,
     isFunctionType,
     isGenericType,
@@ -2472,6 +2473,11 @@ export class TypeCTypeProvider {
 
         const resolvedParameterType = isReferenceType(parameterType) ? this.resolveReference(parameterType) : parameterType;
         const resolvedArgumentType = isReferenceType(argumentType) ? this.resolveReference(argumentType) : argumentType;
+
+        // Ignore error types
+        if (isErrorType(resolvedParameterType) || isErrorType(resolvedArgumentType)) {
+            return;
+        }
         
         if (isStructType(resolvedParameterType) && isStructType(resolvedArgumentType)) {
             for (const field of resolvedParameterType.fields) {
@@ -2480,6 +2486,14 @@ export class TypeCTypeProvider {
                     this.extractGenericArgsFromTypeDescription(field.type, fieldInArgumentType.type, genericMap);
                 }
             }
+        }
+
+        if (isArrayType(resolvedParameterType) && isArrayType(resolvedArgumentType)) {
+            this.extractGenericArgsFromTypeDescription(resolvedParameterType.elementType, resolvedArgumentType.elementType, genericMap);
+        }
+
+        if(isNullableType(resolvedParameterType) && isNullableType(resolvedArgumentType)) {
+            this.extractGenericArgsFromTypeDescription(resolvedParameterType.baseType, resolvedArgumentType.baseType, genericMap);
         }
 
         if(isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {

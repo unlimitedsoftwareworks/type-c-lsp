@@ -1,0 +1,14 @@
+type Option<T> = variant {
+    Some(value: T),
+    None()
+}
+
+type Stuff<T> = class {
+	let data: Option.Some<T>
+}
+
+// Test 1: Simple variant constructor type without generics
+fn testSimpleConstructorType() -> void { 
+	let m = new Stuff<string>()
+	let f = m.data
+}

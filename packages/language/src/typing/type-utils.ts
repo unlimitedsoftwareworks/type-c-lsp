@@ -717,7 +717,7 @@ export function substituteGenerics(
             actualType: type.actualType,
             node: type.node,
             toString: () => {
-                const argsStr = substitutedArgs.length > 0 
+                const argsStr = substitutedArgs.length > 0
                     ? `<${substitutedArgs.map(a => a.toString()).join(', ')}>`
                     : '';
                 return `${type.declaration.name}${argsStr}`;
@@ -725,7 +725,28 @@ export function substituteGenerics(
         };
         return refType;
     }
-    
+
+    if (isVariantConstructorType(type) && type.genericArgs.length > 0) {
+        const substitutedArgs = type.genericArgs.map(t => substituteGenerics(t, substitutions));
+        const variantConstructorType: VariantConstructorTypeDescription = {
+            kind: type.kind,
+            baseVariant: type.baseVariant,
+            variantDeclaration: type.variantDeclaration,
+            constructorName: type.constructorName,
+            genericArgs: substitutedArgs,
+            parentConstructor: type.parentConstructor,
+            node: type.node,
+            toString: () => {
+                const variantName = type.variantDeclaration?.name ?? 'Variant';
+                const argsStr = substitutedArgs.length > 0
+                    ? `<${substitutedArgs.map(a => a.toString()).join(', ')}>`
+                    : '';
+                return `${variantName}.${type.constructorName}${argsStr}`;
+            }
+        };
+        return variantConstructorType;
+    }
+
     // For other types, return as-is
     return type;
 }

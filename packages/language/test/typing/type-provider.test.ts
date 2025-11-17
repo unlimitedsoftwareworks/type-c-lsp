@@ -619,6 +619,11 @@ describe('Type Provider', async () => {
                     'd': 'i32[]',
                 });
             });
+            test('should properly infer types with constructor type annotations', async () => {
+                await assertType('generics/correct/file2.tc', {
+                    'f': 'Option.Some<string>',
+                });
+            });
         });
     });
 });

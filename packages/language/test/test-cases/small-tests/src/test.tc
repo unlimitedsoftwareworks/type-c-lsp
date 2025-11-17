@@ -1,8 +1,24 @@
+// Test variant constructor type annotations
+// Testing: Using variant constructor types (e.g., Option.Some) in type annotations
 
-fn test<T>(a: {x: T, y: u32}) -> T {
-	return a.x
+type Option<T> = variant {
+    Some(value: T),
+    None()
 }
 
-fn main() {
-	let a = test({x: "cool", y: 2u32})   
-}  
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Status<T> = variant {
+    Success(data: T),
+    Failure(message: string)
+}
+
+// Test 1: Simple variant constructor type without generics
+fn testSimpleConstructorType() -> void { 
+    //let noneVal2: Option<string> = Option.Some({x: 1u32})
+    let noneVal = Option.Some({x: 1u32})
+	noneVal.value = 1
+}

@@ -1557,12 +1557,19 @@ export class TypeCTypeProvider {
         }
 
         // Type assertion needed because Langium references are dynamically typed
-        const type = this.getType(ref.ref as AstNode);
+        let type = this.getType(ref.ref as AstNode);
+        if(isReferenceType(type)) {
+            type = this.resolveReference(type);
+        }
 
 
         if (isVariantType(type) && ast.isTypeDeclaration(node.reference.ref)) {
             // Generics are pushed to the constuctor i.e Option.Some<T>
             return factory.createMetaVariantType(type, [], node);
+        }
+
+        if(isEnumType(type) && ast.isTypeDeclaration(node.reference.ref)) {
+            return factory.createMetaEnumType(type, node);
         }
 
         return type;

@@ -489,6 +489,8 @@ export class TypeCTypeProvider {
         }
         if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
         if (ast.isVariantConstructorField(node)) return this.inferVariantConstructorField(node);
+        if (ast.isStructFieldKeyValuePair(node)) return this.inferStructFieldKeyValuePair(node);
+        if (ast.isStructField(node)) return this.inferStructField(node);
 
         return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
@@ -1757,19 +1759,22 @@ export class TypeCTypeProvider {
         // If the element is a type-decl, we wrap it in a meta type!
         if (ast.isTypeDeclaration(targetRef)) {
             if (isVariantType(memberType)) {
-                return factory.createMetaVariantType(memberType);
+                memberType = factory.createMetaVariantType(memberType);
             }
             else if (isVariantConstructorType(memberType)) {
-                return factory.createMetaVariantConstructorType(memberType, [], targetRef);
+                memberType = factory.createMetaVariantConstructorType(memberType, [], targetRef);
             }
             else if (isEnumType(memberType)) {
-                return factory.createMetaEnumType(memberType, targetRef);
+                memberType = factory.createMetaEnumType(memberType, targetRef);
             }
             else if (isClassType(memberType)) {
-                return factory.createMetaClassType(memberType, targetRef);
+                memberType = factory.createMetaClassType(memberType, targetRef);
             }
         }
 
+        if(node.isNullable) {
+            memberType = factory.createNullableType(memberType, node);
+        }
         return memberType;
     }
 
@@ -2306,6 +2311,14 @@ export class TypeCTypeProvider {
     }
 
     private inferVariantConstructorField(node: ast.VariantConstructorField): TypeDescription {
+        return this.getType(node.type);
+    }
+
+    private inferStructFieldKeyValuePair(node: ast.StructFieldKeyValuePair): TypeDescription {
+        return this.getType(node.expr);
+    }
+
+    private inferStructField(node: ast.StructField): TypeDescription {
         return this.getType(node.type);
     }
 

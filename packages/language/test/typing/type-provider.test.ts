@@ -403,7 +403,7 @@ describe('Type Provider', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
                     // okResponse should be Result<i32, never>.Ok
                     // When only T is inferrable, E becomes never
-                    'okResponse': 'Result<i32, never>.Ok',
+                    'okResponse': 'Result.Ok<i32, never>',
                 });
             });
 
@@ -411,7 +411,7 @@ describe('Type Provider', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
                     // errResponse should be Result<never, string>.Err
                     // When only E is inferrable, T becomes never
-                    'errResponse': 'Result<never, string>.Err',
+                    'errResponse': 'Result.Err<never, string>',
                 });
             });
         });
@@ -433,8 +433,8 @@ describe('Type Provider', async () => {
         describe('Return Type Unification', () => {
             test('should unify variant types from conditional expressions', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'ok': 'Result<i32, never>.Ok',
-                    'err': 'Result<never, string>.Err',
+                    'ok': 'Result.Ok<i32, never>',
+                    'err': 'Result.Err<never, string>',
                     'testReturnUnification': 'fn() -> Result<i32, string>',
                 });
             });
@@ -453,7 +453,7 @@ describe('Type Provider', async () => {
         describe('Nested Variants', () => {
             test('should handle nested variant types', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'nested': 'Result<Option<i32>, never>.Ok',
+                    'nested': 'Result.Ok<Option.Some<i32>, never>',
                     'testNestedVariants': 'fn() -> Result<Option<i32>, string>',
                 });
             });
@@ -462,8 +462,8 @@ describe('Type Provider', async () => {
         describe('Single Type Parameter Variants', () => {
             test('should infer Option with single type parameter', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'someVal': 'Option<i32>.Some',
-                    'noneVal': 'Option<never>.None',  // No params to infer, all become never
+                    'someVal': 'Option.Some<i32>',
+                    'noneVal': 'Option.None<never>',  // No params to infer, all become never
                     'testSingleParamVariant': 'fn() -> Option<i32>',
                 });
             });
@@ -473,7 +473,7 @@ describe('Type Provider', async () => {
             test('should infer from function parameter types', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
                     'processResult': 'fn(r: Result<i32, string>) -> i32',
-                    'result': 'Result<i32, never>.Ok',
+                    'result': 'Result.Ok<i32, never>',
                 });
             });
         });
@@ -481,11 +481,11 @@ describe('Type Provider', async () => {
         describe('Multiple Partial Inferences', () => {
             test('should handle multiple partial inferences in same scope', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'ok1': 'Result<i32, never>.Ok',
-                    'ok2': 'Result<i32, never>.Ok',
-                    'ok3': 'Result<i32, never>.Ok',
-                    'err1': 'Result<never, string>.Err',
-                    'err2': 'Result<never, string>.Err',
+                    'ok1': 'Result.Ok<i32, never>',
+                    'ok2': 'Result.Ok<i32, never>',
+                    'ok3': 'Result.Ok<i32, never>',
+                    'err1': 'Result.Err<never, string>',
+                    'err2': 'Result.Err<never, string>',
                 });
             });
         });
@@ -520,8 +520,8 @@ describe('Type Provider', async () => {
         describe('Complex Variant Constructors', () => {
             test('should handle variants with multiple parameters in constructors', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'simple': 'Value<f64>.Primitive',
-                    'complex': 'Value<f64>.Complex',
+                    'simple': 'Value.Primitive<f64>',
+                    'complex': 'Value.Complex<f64>',
                     'testComplexVariant': 'fn() -> Value<f64>',
                 });
             });
@@ -530,9 +530,9 @@ describe('Type Provider', async () => {
         describe('Three Type Parameters', () => {
             test('should handle variants with three type parameters', async () => {
                 await assertType('variants/correct/variant-generics.tc', {
-                    'first': 'Triple<i32, never, never>.First',
-                    'second': 'Triple<never, string, never>.Second',
-                    'third': 'Triple<never, never, bool>.Third',
+                    'first': 'Triple.First<i32, never, never>',
+                    'second': 'Triple.Second<never, string, never>',
+                    'third': 'Triple.Third<never, never, bool>',
                     'testThreeParams': 'fn() -> Triple<i32, string, bool>',
                 });
             });
@@ -559,7 +559,7 @@ describe('Type Provider', async () => {
         describe('Simple Constructor Type Annotations', () => {
             test('should allow variant constructor types without generics', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    'noneVal': 'Option<never>.None',
+                    'noneVal': 'Option.None<never>',
                 });
             });
         });
@@ -567,9 +567,9 @@ describe('Type Provider', async () => {
         describe('Constructor Types with Generics', () => {
             test('should allow variant constructor types with generic parameters', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    'someVal': 'Option<u32>.Some',
-                    'okVal': 'Result<i32, string>.Ok',
-                    'errVal': 'Result<i32, string>.Err',
+                    'someVal': 'Option.Some<u32>',
+                    'okVal': 'Result.Ok<i32, string>',
+                    'errVal': 'Result.Err<i32, string>',
                 });
             });
         });
@@ -577,8 +577,8 @@ describe('Type Provider', async () => {
         describe('More Constructor Types', () => {
             test('should allow constructor types with different type parameters', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    'successVal': 'Status<i32>.Success',
-                    'failureVal': 'Status<i32>.Failure',
+                    'successVal': 'Status.Success<i32>',
+                    'failureVal': 'Status.Failure<i32>',
                 });
             });
         });
@@ -586,15 +586,15 @@ describe('Type Provider', async () => {
         describe('Constructor Types in Function Signatures', () => {
             test('should allow constructor types in function parameters', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    'processSome': 'fn(val: Option<string>.Some) -> string',
-                    'processOk': 'fn(result: Result<u32, string>.Ok) -> u32',
+                    'processSome': 'fn(val: Option.Some<string>) -> string',
+                    'processOk': 'fn(result: Result.Ok<u32, string>) -> u32',
                 });
             });
 
             test('should allow constructor types in function return types', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    'createSome': 'fn() -> Option<i32>.Some',
-                    'createOk': 'fn() -> Result<string, i32>.Ok',
+                    'createSome': 'fn() -> Option.Some<i32>',
+                    'createOk': 'fn() -> Result.Ok<string, i32>',
                 });
             });
         });
@@ -602,8 +602,8 @@ describe('Type Provider', async () => {
         describe('Constructor Types with Type Inference', () => {
             test('should properly infer types with constructor type annotations', async () => {
                 await assertType('variants/correct/variant-constructor-types.tc', {
-                    's': 'Option<u32>.Some',
-                    'n': 'Option<bool>.None',
+                    's': 'Option.Some<u32>',
+                    'n': 'Option.None<bool>',
                 });
             });
         });

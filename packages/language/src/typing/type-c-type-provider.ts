@@ -15,6 +15,7 @@ import { AstNode, AstUtils, URI } from 'langium';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
+import { TypeCLinker } from '../linking/tc-linker.js';
 import { isAssignmentOperator } from './operator-utils.js';
 import {
     ErrorTypeDescription,
@@ -1421,7 +1422,7 @@ export class TypeCTypeProvider {
     // Expression Type Inference
     // ========================================================================
 
-    private inferExpression(node: ast.Expression): TypeDescription {
+    private inferExpression(node: ast.Expression, expectedType?: TypeDescription): TypeDescription {
         // Literals
         if (ast.isIntegerLiteral(node)) return this.inferIntegerLiteral(node);
         if (ast.isFloatingPointLiteral(node)) return this.inferFloatLiteral(node);
@@ -1436,7 +1437,7 @@ export class TypeCTypeProvider {
 
         // References
         if (ast.isQualifiedReference(node)) {
-            const res = this.inferQualifiedReference(node);
+            const res = this.inferQualifiedReference(node, expectedType);
             return res;
         }
 
@@ -1550,9 +1551,36 @@ export class TypeCTypeProvider {
         return factory.createF64Type(node);
     }
 
-    private inferQualifiedReference(node: ast.QualifiedReference): TypeDescription {
+    private inferQualifiedReference(node: ast.QualifiedReference, expectedType?: TypeDescription): TypeDescription {
         // Langium cross-references have a .ref property pointing to the target AST node
         const ref = node.reference;
+
+        // Check if this reference has multiple overload candidates
+        const linker = this.services.references.Linker as TypeCLinker;
+        const candidates = linker.getCandidatesForReference(ref);
+
+        if (candidates && candidates.length > 1) {
+            // Multiple candidates - try to resolve using expected type
+            if (expectedType && isFunctionType(expectedType)) {
+                const candidateNodes = candidates.map(c => c.node).filter((n): n is AstNode => n !== undefined);
+                const resolved = this.resolveOverloadByExpectedType(candidateNodes, expectedType);
+
+                if (resolved) {
+                    // Note: We can't update ref.ref (it's read-only), but we can return the correct type
+                    // The reference will stay pointing to the placeholder, but type checking will use the correct type
+                    return this.getType(resolved);
+                }
+            }
+
+            // Can't resolve yet - return error with helpful message
+            return factory.createErrorType(
+                `Cannot resolve overloaded function '${ref.$refText}' without type context. ` +
+                `Found ${candidates.length} candidates.`,
+                undefined,
+                node
+            );
+        }
+
         if (!ref || !('ref' in ref) || !ref.ref) {
             return factory.createErrorType('Unresolved reference', undefined, node);
         }
@@ -1802,14 +1830,72 @@ export class TypeCTypeProvider {
             else if (genericParams.length > 0) {
                 const args = node.args || [];
 
-                // Get concrete types of all arguments
-                const argumentTypes = args.map(arg => this.inferExpression(arg));
-
                 // Get parameter types (which may contain generic references)
                 const parameterTypes = fnType.parameters.map(p => p.type);
-
-                // Infer generics from the arguments
                 const genericParamNames = genericParams.map(p => p.name);
+
+                // Two-pass inference for overload resolution:
+                // Pass 1: Infer from non-overloaded arguments to get partial substitutions
+                const partialSubstitutions = new Map<string, TypeDescription[]>();
+                for (const paramName of genericParamNames) {
+                    partialSubstitutions.set(paramName, []);
+                }
+
+                const argumentTypes: TypeDescription[] = [];
+                const linker = this.services.references.Linker as TypeCLinker;
+
+                for (let i = 0; i < args.length; i++) {
+                    const arg = args[i];
+
+                    // Check if this argument is an overloaded reference
+                    const isOverloaded = ast.isQualifiedReference(arg) &&
+                        (linker.getCandidatesForReference(arg.reference)?.length ?? 0) > 1;
+
+                    if (!isOverloaded) {
+                        // Non-overloaded: infer type normally
+                        const argType = this.inferExpression(arg);
+                        argumentTypes.push(argType);
+
+                        // Extract generic constraints from this argument
+                        if (i < parameterTypes.length) {
+                            this.extractGenericArgsFromTypeDescription(
+                                parameterTypes[i],
+                                argType,
+                                partialSubstitutions
+                            );
+                        }
+                    } else {
+                        // Overloaded: defer for now
+                        argumentTypes.push(factory.createAnyType(arg));
+                    }
+                }
+
+                // Create partial substitution map
+                const partialMap = new Map<string, TypeDescription>();
+                for (const [key, values] of partialSubstitutions) {
+                    if (values.length > 0) {
+                        partialMap.set(key, this.getCommonType(values));
+                    }
+                }
+
+                // Pass 2: Infer overloaded arguments with expected types
+                for (let i = 0; i < args.length; i++) {
+                    const arg = args[i];
+
+                    const isOverloaded = ast.isQualifiedReference(arg) &&
+                        (linker.getCandidatesForReference(arg.reference)?.length ?? 0) > 1;
+
+                    if (isOverloaded && i < parameterTypes.length) {
+                        // Substitute known generics into expected type
+                        const expectedType = substituteGenerics(parameterTypes[i], partialMap);
+
+                        // Infer with expected type context
+                        const argType = this.inferExpression(arg, expectedType);
+                        argumentTypes[i] = argType;
+                    }
+                }
+
+                // Final inference with all argument types
                 substitutions = this.inferGenericsFromArguments(
                     genericParamNames,
                     parameterTypes,
@@ -2351,9 +2437,95 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Get declared type from a function declaration without inference.
+     * This is safe to call during linking as it only reads declared types,
+     * not inferred types (avoiding cycles).
+     *
+     * @param fnDecl Function declaration node
+     * @returns Function type based on declared signature
+     */
+    public getDeclaredType(fnDecl: ast.FunctionDeclaration): FunctionTypeDescription {
+        const genericParams = fnDecl.genericParameters?.map(g => this.inferGenericType(g)) as GenericTypeDescription[] ?? [];
+        const params = fnDecl.header?.args?.map(arg => factory.createFunctionParameterType(
+            arg.name,
+            this.getType(arg.type),
+            arg.isMut
+        )) ?? [];
+
+        const returnType = fnDecl.header?.returnType
+            ? this.getType(fnDecl.header.returnType)
+            : factory.createVoidType(fnDecl);
+
+        return factory.createFunctionType(
+            params,
+            returnType,
+            fnDecl.fnType,
+            genericParams,
+            fnDecl
+        );
+    }
+
+    /**
+     * Resolve an overloaded function by matching against expected type.
+     * Used for cases like: map(c, overloadedFn) where overloadedFn has multiple overloads.
+     *
+     * @param candidates All overload candidates
+     * @param expectedType Expected function type (from context)
+     * @returns The matching function declaration, or undefined if no match
+     */
+    public resolveOverloadByExpectedType(
+        candidates: AstNode[],
+        expectedType: FunctionTypeDescription
+    ): ast.FunctionDeclaration | undefined {
+        for (const candidate of candidates) {
+            if (!ast.isFunctionDeclaration(candidate)) continue;
+
+            const candidateType = this.getDeclaredType(candidate);
+
+            if (this.functionTypesMatch(candidateType, expectedType)) {
+                return candidate;
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Check if a candidate function type matches an expected function type.
+     * Used for overload resolution.
+     *
+     * @param candidate Candidate function type
+     * @param expected Expected function type
+     * @returns True if candidate matches expected type structure
+     */
+    private functionTypesMatch(
+        candidate: FunctionTypeDescription,
+        expected: FunctionTypeDescription
+    ): boolean {
+        // Check parameter count
+        if (candidate.parameters.length !== expected.parameters.length) {
+            return false;
+        }
+
+        // Check parameter types
+        for (let i = 0; i < candidate.parameters.length; i++) {
+            const candidateParam = candidate.parameters[i].type;
+            const expectedParam = expected.parameters[i].type;
+
+            // Use assignability check
+            if (!isAssignable(candidateParam, expectedParam)) {
+                return false;
+            }
+        }
+
+        // Check return type is assignable
+        return isAssignable(candidate.returnType, expected.returnType);
+    }
+
+    /**
      * Returns the indexes of all valid targets for a function call
-     * @param args 
-     * @param functions 
+     * @param args
+     * @param functions
      * @returns The indexes of all valid targets for a function call
      */
     resolveFunctionCall(args: ast.Expression[], functions: FunctionTypeDescription[]): number[] {

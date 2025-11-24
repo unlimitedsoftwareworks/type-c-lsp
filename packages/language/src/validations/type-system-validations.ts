@@ -4,10 +4,7 @@ import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
     ArrayTypeDescription,
-    ClassTypeDescription,
     ErrorTypeDescription,
-    InterfaceTypeDescription,
-    MethodType,
     TypeDescription,
     TypeKind,
     isArrayType,
@@ -77,24 +74,24 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             if (resolved) inferredType = resolved;
         }
 
-        // Interface compatibility checking
-        if (isInterfaceType(expectedType) && isClassType(inferredType)) {
-            this.checkInterfaceCompatibility(
-                inferredType,
-                expectedType,
-                node.initializer,
-                accept,
-                `Variable assignment requires that '${inferredType.toString()}' implements '${expectedType.toString()}'`
-            );
-            return;
-        }
-
-        // Check compatibility
+        // Check compatibility using the centralized type compatibility checker
+        // This handles all cases including interface compatibility
         const compatResult = this.isTypeCompatible(inferredType, expectedType);
         if (!compatResult.success) {
-            const errorMsg = compatResult.message
-                ? `Type mismatch: ${compatResult.message}`
-                : `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`;
+            // Build context-aware error message
+            let errorMsg: string;
+            if (isInterfaceType(expectedType) && isClassType(inferredType)) {
+                // Special formatting for interface implementation errors
+                errorMsg = `Variable '${node.name}' requires that '${inferredType.toString()}' implements '${expectedType.toString()}'`;
+                if (compatResult.message) {
+                    errorMsg += `. ${compatResult.message}`;
+                }
+            } else {
+                // General type mismatch
+                errorMsg = compatResult.message
+                    ? `Type mismatch: ${compatResult.message}`
+                    : `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`;
+            }
             accept('error', errorMsg, {
                 node: node.initializer,
                 property: 'initializer',
@@ -535,129 +532,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     // ========================================================================
 
     /**
-     * Check if a class implements all methods required by an interface.
-     * 
-     * Validates:
-     * - All interface methods are present in the class
-     * - Method signatures match (parameters and return type)
-     * - Handles method overloading (multiple names per method)
-     * 
-     * Example:
-     * ```
-     * type Drawable = interface {
-     *     fn draw() -> void
-     * }
-     * type Circle = class { ... }
-     * let d: Drawable = new Circle()  // Check Circle implements draw()
-     * ```
-     */
-    private checkInterfaceCompatibility(
-        classType: ClassTypeDescription,
-        interfaceType: InterfaceTypeDescription,
-        node: AstNode,
-        accept: ValidationAcceptor,
-        context?: string
-    ): void {
-        // Check each method required by the interface
-        for (const requiredMethod of interfaceType.methods) {
-            // Find a matching method in the class
-            const matchingMethod = this.findMatchingMethod(classType.methods, requiredMethod);
-
-            if (!matchingMethod) {
-                // Method not found
-                const methodName = requiredMethod.names[0] || '<unnamed>';
-                const errorMsg = context
-                    ? `${context}. Missing method '${methodName}'`
-                    : `Class '${classType.toString()}' does not implement interface method '${methodName}' from '${interfaceType.toString()}'`;
-                accept('error', errorMsg, { node });
-                continue;
-            }
-
-            // Check method signature compatibility
-            this.checkMethodSignatureCompatibility(matchingMethod, requiredMethod, node, accept, context);
-        }
-    }
-
-    /**
-     * Find a method in the class that matches one of the interface method's names.
-     */
-    private findMatchingMethod(
-        classMethods: readonly MethodType[],
-        interfaceMethod: MethodType
-    ): MethodType | undefined {
-        // Check if any class method has a name that matches any of the interface method's names
-        return classMethods.find(classMethod =>
-            classMethod.names.some(className =>
-                interfaceMethod.names.some(interfaceName => className === interfaceName)
-            )
-        );
-    }
-
-    /**
-     * Check if a class method's signature is compatible with the interface requirement.
-     */
-    private checkMethodSignatureCompatibility(
-        classMethod: MethodType,
-        interfaceMethod: MethodType,
-        node: AstNode,
-        accept: ValidationAcceptor,
-        context?: string
-    ): void {
-        const methodName = interfaceMethod.names[0] || '<unnamed>';
-
-        // Check parameter count
-        if (classMethod.parameters.length !== interfaceMethod.parameters.length) {
-            const errorMsg = context
-                ? `${context}. Method '${methodName}' parameter count mismatch: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`
-                : `Method '${methodName}' has wrong number of parameters: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`;
-            accept('error', errorMsg, { node });
-            return;
-        }
-
-        // Check each parameter type
-        for (let i = 0; i < interfaceMethod.parameters.length; i++) {
-            const classParam = classMethod.parameters[i];
-            const interfaceParam = interfaceMethod.parameters[i];
-
-            const compatResult = this.isTypeCompatible(classParam.type, interfaceParam.type);
-            if (!compatResult.success) {
-                let errorMsg: string;
-                if (context) {
-                    errorMsg = `${context}. Method '${methodName}' parameter ${i + 1} ('${interfaceParam.name}') type mismatch: expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
-                    if (compatResult.message) {
-                        errorMsg += `. Reason: ${compatResult.message}`;
-                    }
-                } else {
-                    errorMsg = compatResult.message
-                        ? `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': ${compatResult.message}`
-                        : `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
-                }
-                accept('error', errorMsg, { node });
-            }
-        }
-
-        // Check return type
-        const returnCompatResult = this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType);
-        if (!returnCompatResult.success) {
-            let errorMsg: string;
-            if (context) {
-                errorMsg = `${context}. Method '${methodName}' return type mismatch: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
-                if (returnCompatResult.message) {
-                    errorMsg += `. Reason: ${returnCompatResult.message}`;
-                }
-            } else {
-                errorMsg = returnCompatResult.message
-                    ? `Method '${methodName}' return type incompatible: ${returnCompatResult.message}`
-                    : `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
-            }
-            accept('error', errorMsg, { node });
-        }
-    }
-
-    /**
      * Check if a type is compatible with an expected type.
      *
      * Delegates to the type-utils isAssignable function for consistent type checking.
+     * This handles ALL compatibility checks including:
+     * - Interface implementation (via isClassAssignableToInterface in type-utils.ts)
+     * - Numeric promotions
+     * - Struct compatibility
+     * - Variant constructor assignability
+     * - Generic type substitution
+     * - And more...
+     *
      * Returns the detailed error message if types are incompatible.
      */
     private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): { success: boolean; message?: string } {

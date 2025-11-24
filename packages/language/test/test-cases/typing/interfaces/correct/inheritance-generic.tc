@@ -58,7 +58,7 @@ type List<V> = class AbstractList<V> {
         return this.items[index]
     }
     
-    fn rset | [-]= (index: u64, value: V?) -> void {
+    fn rset | [-]= (index: u64, value: V) -> void {
         if index >= this.count {
             throw "Index out of bounds"
         }
@@ -83,7 +83,7 @@ fn main() -> void {
     let item4 = list2.get(0)
     let item5 = list2.rget(0)
     list2.set(0, list)
-    list2.rset(0, null) 
+    list2.rset(0, list) 
 
     let const itemList = list2[0]  
 }

@@ -13,4 +13,23 @@ fn fib(n: u32) -> u32 =
 
 fn main () -> void {
 	let x = fib(10u32)
+	test(null)
+	let y: {x: u32}? = {x: 5u32}
+	let z = test(y)
+	let a = test({x: 10u32})
+
+	let const w = new Whatever()
+	let b = w.test(null)
+	let c = w.test(y)
+	let d = w.test({x: 15u32})
+}
+
+fn test(param: {x: u32}?) -> bool {
+	return false
+}
+
+type Whatever = class {
+	fn test(param: {x: u32}?) -> bool {
+		return false
+	}
 }

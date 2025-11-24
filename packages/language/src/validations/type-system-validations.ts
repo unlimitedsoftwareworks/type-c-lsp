@@ -3,12 +3,14 @@ import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
+    ArrayTypeDescription,
     ClassTypeDescription,
     ErrorTypeDescription,
     InterfaceTypeDescription,
     MethodType,
     TypeDescription,
     TypeKind,
+    isArrayType,
     isClassType,
     isFunctionType,
     isInterfaceType,
@@ -43,6 +45,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             FunctionCall: this.checkFunctionCall,
             ReturnStatement: this.checkReturnStatement,
             FunctionDeclaration: this.checkFunctionDeclaration,
+            IndexSet: this.checkIndexSet,
+            ReverseIndexSet: this.checkReverseIndexSet,
         };
     }
 
@@ -75,7 +79,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // Interface compatibility checking
         if (isInterfaceType(expectedType) && isClassType(inferredType)) {
-            this.checkInterfaceCompatibility(inferredType, expectedType, node.initializer, accept);
+            this.checkInterfaceCompatibility(
+                inferredType,
+                expectedType,
+                node.initializer,
+                accept,
+                `Variable assignment requires that '${inferredType.toString()}' implements '${expectedType.toString()}'`
+            );
             return;
         }
 
@@ -419,6 +429,107 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
     }
 
+    /**
+     * Check index set operations (e.g., arr[0] = value).
+     * Validates that the assigned value is compatible with the array/container element type.
+     */
+    checkIndexSet = (node: ast.IndexSet, accept: ValidationAcceptor): void => {
+        let baseType = this.typeProvider.getType(node.expr);
+
+        // Resolve reference types
+        if (isReferenceType(baseType)) {
+            const resolved = this.typeProvider.resolveReference(baseType);
+            if (resolved) baseType = resolved;
+        }
+
+        const valueType = this.typeProvider.getType(node.value);
+
+        // For arrays: check element type compatibility
+        if (isArrayType(baseType)) {
+            const arrayType = baseType as ArrayTypeDescription;
+            const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign to array: ${compatResult.message}`
+                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.value,
+                });
+            }
+            return;
+        }
+
+        // For classes with []= operator: validate against the operator's parameter type
+        if (isClassType(baseType)) {
+            const indexSetMethod = baseType.methods.find(m => m.names.includes('[]='));
+            if (indexSetMethod) {
+                // The value parameter is typically the last parameter
+                const valueParam = indexSetMethod.parameters[indexSetMethod.parameters.length - 1];
+                if (valueParam) {
+                    const compatResult = this.isTypeCompatible(valueType, valueParam.type);
+                    if (!compatResult.success) {
+                        const errorMsg = compatResult.message
+                            ? `Cannot assign to index: ${compatResult.message}`
+                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                        accept('error', errorMsg, {
+                            node: node.value,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Check reverse index set operations (e.g., arr[-1] = value).
+     */
+    checkReverseIndexSet = (node: ast.ReverseIndexSet, accept: ValidationAcceptor): void => {
+        let baseType = this.typeProvider.getType(node.expr);
+
+        // Resolve reference types
+        if (isReferenceType(baseType)) {
+            const resolved = this.typeProvider.resolveReference(baseType);
+            if (resolved) baseType = resolved;
+        }
+
+        const valueType = this.typeProvider.getType(node.value);
+
+        // For arrays: check element type compatibility
+        if (isArrayType(baseType)) {
+            const arrayType = baseType as ArrayTypeDescription;
+            const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign to array: ${compatResult.message}`
+                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.value,
+                });
+            }
+            return;
+        }
+
+        // For classes with [-]= operator: validate against the operator's parameter type
+        if (isClassType(baseType)) {
+            const reverseIndexSetMethod = baseType.methods.find(m => m.names.includes('[-]='));
+            if (reverseIndexSetMethod) {
+                // The value parameter is typically the last parameter
+                const valueParam = reverseIndexSetMethod.parameters[reverseIndexSetMethod.parameters.length - 1];
+                if (valueParam) {
+                    const compatResult = this.isTypeCompatible(valueType, valueParam.type);
+                    if (!compatResult.success) {
+                        const errorMsg = compatResult.message
+                            ? `Cannot assign to reverse index: ${compatResult.message}`
+                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                        accept('error', errorMsg, {
+                            node: node.value,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     // ========================================================================
     // Helper Methods
     // ========================================================================
@@ -444,7 +555,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         classType: ClassTypeDescription,
         interfaceType: InterfaceTypeDescription,
         node: AstNode,
-        accept: ValidationAcceptor
+        accept: ValidationAcceptor,
+        context?: string
     ): void {
         // Check each method required by the interface
         for (const requiredMethod of interfaceType.methods) {
@@ -454,15 +566,15 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             if (!matchingMethod) {
                 // Method not found
                 const methodName = requiredMethod.names[0] || '<unnamed>';
-                accept('error',
-                    `Class '${classType.toString()}' does not implement interface method '${methodName}' from '${interfaceType.toString()}'`,
-                    { node }
-                );
+                const errorMsg = context
+                    ? `${context}. Missing method '${methodName}'`
+                    : `Class '${classType.toString()}' does not implement interface method '${methodName}' from '${interfaceType.toString()}'`;
+                accept('error', errorMsg, { node });
                 continue;
             }
 
             // Check method signature compatibility
-            this.checkMethodSignatureCompatibility(matchingMethod, requiredMethod, node, accept);
+            this.checkMethodSignatureCompatibility(matchingMethod, requiredMethod, node, accept, context);
         }
     }
 
@@ -488,16 +600,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         classMethod: MethodType,
         interfaceMethod: MethodType,
         node: AstNode,
-        accept: ValidationAcceptor
+        accept: ValidationAcceptor,
+        context?: string
     ): void {
         const methodName = interfaceMethod.names[0] || '<unnamed>';
 
         // Check parameter count
         if (classMethod.parameters.length !== interfaceMethod.parameters.length) {
-            accept('error',
-                `Method '${methodName}' has wrong number of parameters: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`,
-                { node }
-            );
+            const errorMsg = context
+                ? `${context}. Method '${methodName}' parameter count mismatch: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`
+                : `Method '${methodName}' has wrong number of parameters: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`;
+            accept('error', errorMsg, { node });
             return;
         }
 
@@ -508,9 +621,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
             const compatResult = this.isTypeCompatible(classParam.type, interfaceParam.type);
             if (!compatResult.success) {
-                const errorMsg = compatResult.message
-                    ? `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': ${compatResult.message}`
-                    : `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
+                let errorMsg: string;
+                if (context) {
+                    errorMsg = `${context}. Method '${methodName}' parameter ${i + 1} ('${interfaceParam.name}') type mismatch: expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
+                    if (compatResult.message) {
+                        errorMsg += `. Reason: ${compatResult.message}`;
+                    }
+                } else {
+                    errorMsg = compatResult.message
+                        ? `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': ${compatResult.message}`
+                        : `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
+                }
                 accept('error', errorMsg, { node });
             }
         }
@@ -518,9 +639,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Check return type
         const returnCompatResult = this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType);
         if (!returnCompatResult.success) {
-            const errorMsg = returnCompatResult.message
-                ? `Method '${methodName}' return type incompatible: ${returnCompatResult.message}`
-                : `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
+            let errorMsg: string;
+            if (context) {
+                errorMsg = `${context}. Method '${methodName}' return type mismatch: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
+                if (returnCompatResult.message) {
+                    errorMsg += `. Reason: ${returnCompatResult.message}`;
+                }
+            } else {
+                errorMsg = returnCompatResult.message
+                    ? `Method '${methodName}' return type incompatible: ${returnCompatResult.message}`
+                    : `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
+            }
             accept('error', errorMsg, { node });
         }
     }

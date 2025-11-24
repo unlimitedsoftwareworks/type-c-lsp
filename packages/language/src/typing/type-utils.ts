@@ -97,7 +97,7 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
 
     // Different kinds are never equal
     if (a.kind !== b.kind) {
-        return failure(`Type kinds differ: ${a.toString()} vs ${b.toString()}`);
+        return failure(`expected '${b.toString()}', got '${a.toString()}'`);
     }
 
     // Handle each type kind
@@ -245,14 +245,14 @@ function areFunctionTypesEqual(a: FunctionTypeDescription, b: FunctionTypeDescri
         const bParam = b.parameters[i];
         const typeResult = areTypesEqual(aParam.type, bParam.type);
         if (!typeResult.success) {
-            return failure(`Parameter ${i + 1} type mismatch: ${typeResult.message}`);
+            return failure(`parameter ${i + 1} type mismatch: ${typeResult.message}`);
         }
     }
     
     // Check return type
     const returnResult = areTypesEqual(a.returnType, b.returnType);
     if (!returnResult.success) {
-        return failure(`Return type mismatch: ${returnResult.message}`);
+        return failure(`return type mismatch: ${returnResult.message}`);
     }
     
     return success();
@@ -569,14 +569,14 @@ function isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceT
     for (const method of to.methods) {
         const classMethod = from.methods.find(m => m.names.some(name => method.names.includes(name)));
         if (!classMethod) {
-            return failure(`Method '${method.names[0]}' not implemented by class`);
+            return failure(`class does not implement required method '${method.names[0]}'`);
         }
         const result = areFunctionTypesEqual(
             factory.createFunctionType(classMethod.parameters, classMethod.returnType, 'fn', classMethod.genericParameters, undefined),
             factory.createFunctionType(method.parameters, method.returnType, 'fn', method.genericParameters, undefined)
         );
         if (!result.success) {
-            return failure(`Method '${method.names[0]}' signature mismatch: ${result.message}`);
+            return failure(`method '${method.names[0]}' signature mismatch: ${result.message}`);
         }
     }
     return success();

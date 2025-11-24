@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test:*)",
+      "Bash(npm run build:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc --build)",
+      "Bash(npx vitest:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run langium:generate:*)",
+      "Bash(npx type-c:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+      "Bash(xargs rm:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(npm run type-c:*)",
+      "Bash(node:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,26 +1,9 @@
-fn overloadedFn(a: u32) -> i32 {
-    return 1i32
-}
-
-fn overloadedFn(a: f32) -> f64 {
-    return 1.0
-}
-
-fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
-    let result: V[] = []
-    result.resize(xs.length)
-    for let i = 0u32; i < xs.length; i++ {
-        result[i] = f(xs[i])
+type Server = class {
+    static fn init(ip: string, port: u32) {
+        // Implementation here
     }
-    return result
 }
 
-fn main() {
-    let c: u32[] = [1u32,2u32,3u32]
-
-    // Direct overload reference - should resolve to fn(u32) -> i32
-    let e = map(c, overloadedFn)
-
-    // Verify the type is correct
-    let f: i32[] = e  // Should compile without error
+fn main () {
+    Server.init()
 }

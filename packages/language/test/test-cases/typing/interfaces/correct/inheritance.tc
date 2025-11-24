@@ -1,0 +1,32 @@
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Object = interface Serializable {
+    fn toString() -> string
+}
+
+type ActorModel = class Object {
+    let name: string
+    let age: u32
+
+    fn toString() -> string {
+        return "ActorModel(name: $name, age: $age)"
+    }
+
+    fn serialize() -> string {
+        return "ActorModel(name: $name, age: $age)"
+    }
+}
+
+fn main() -> void {
+    let actor1: Serializable = new ActorModel("John", 30)
+    let serialized1 = actor1.serialize()
+
+    let actor2: ActorModel = new ActorModel("Jane", 25)
+    let serialized2 = actor2.serialize()
+
+    let actor3: Object = new ActorModel("Jim", 35)
+    let serialized3 = actor3.serialize()
+    let string3 = actor3.toString()
+}

@@ -80,8 +80,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Check compatibility
-        if (!this.isTypeCompatible(inferredType, expectedType)) {
-            accept('error', `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`, {
+        const compatResult = this.isTypeCompatible(inferredType, expectedType);
+        if (!compatResult.success) {
+            const errorMsg = compatResult.message
+                ? `Type mismatch: ${compatResult.message}`
+                : `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`;
+            accept('error', errorMsg, {
                 node: node.initializer,
                 property: 'initializer',
             });
@@ -122,8 +126,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Assignment operators: right must be compatible with left
         const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
         if (assignmentOps.includes(node.op)) {
-            if (!this.isTypeCompatible(rightType, leftType)) {
-                accept('error', `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(rightType, leftType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign: ${compatResult.message}`
+                    : `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`;
+                accept('error', errorMsg, {
                     node: node.right,
                 });
             }
@@ -208,7 +216,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
 
             // Otherwise, require exact type compatibility
-            if (!this.isTypeCompatible(rightType, leftType) && !this.isTypeCompatible(leftType, rightType)) {
+            const rightToLeft = this.isTypeCompatible(rightType, leftType);
+            const leftToRight = this.isTypeCompatible(leftType, rightType);
+            if (!rightToLeft.success && !leftToRight.success) {
                 accept('warning', `Comparing incompatible types '${leftType.toString()}' and '${rightType.toString()}'`, {
                     node,
                 });
@@ -299,8 +309,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const expectedType = paramTypes[index].type;
             const actualType = this.typeProvider.getType(arg);
 
-            if (!this.isTypeCompatible(actualType, expectedType)) {
-                accept('error', `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(actualType, expectedType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Argument ${index + 1}: ${compatResult.message}`
+                    : `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
                     node: arg,
                 });
             }
@@ -330,8 +344,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         if (node.expr) {
             const actualType = this.typeProvider.getType(node.expr);
-            if (!this.isTypeCompatible(actualType, expectedReturnType)) {
-                accept('error', `Return type mismatch: expected '${expectedReturnType.toString()}' but got '${actualType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(actualType, expectedReturnType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Return type mismatch: ${compatResult.message}`
+                    : `Return type mismatch: expected '${expectedReturnType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
                     node: node.expr,
                 });
             }
@@ -389,13 +407,14 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if (node.header.returnType) {
             const declaredReturnType = this.typeProvider.getType(node.header.returnType);
 
-            if (!this.isTypeCompatible(inferredReturnType, declaredReturnType)) {
-                accept('error',
-                    `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`,
-                    {
-                        node: node.header.returnType,
-                    }
-                );
+            const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Function return type mismatch: ${compatResult.message}`
+                    : `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.header.returnType,
+                });
             }
         }
     }
@@ -487,20 +506,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const classParam = classMethod.parameters[i];
             const interfaceParam = interfaceMethod.parameters[i];
 
-            if (!this.isTypeCompatible(classParam.type, interfaceParam.type)) {
-                accept('error',
-                    `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`,
-                    { node }
-                );
+            const compatResult = this.isTypeCompatible(classParam.type, interfaceParam.type);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': ${compatResult.message}`
+                    : `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`;
+                accept('error', errorMsg, { node });
             }
         }
 
         // Check return type
-        if (!this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType)) {
-            accept('error',
-                `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`,
-                { node }
-            );
+        const returnCompatResult = this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType);
+        if (!returnCompatResult.success) {
+            const errorMsg = returnCompatResult.message
+                ? `Method '${methodName}' return type incompatible: ${returnCompatResult.message}`
+                : `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`;
+            accept('error', errorMsg, { node });
         }
     }
 
@@ -508,8 +529,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Check if a type is compatible with an expected type.
      *
      * Delegates to the type-utils isAssignable function for consistent type checking.
+     * Returns the detailed error message if types are incompatible.
      */
-    private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): boolean {
+    private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): { success: boolean; message?: string } {
         const actual = isReferenceType(actual_) ? this.typeProvider.resolveReference(actual_) : actual_;
         const expected = isReferenceType(expected_) ? this.typeProvider.resolveReference(expected_) : expected_;
 

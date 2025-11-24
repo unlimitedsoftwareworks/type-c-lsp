@@ -1,0 +1,89 @@
+type Container<T> = interface {
+    fn  get | [] (index: u64) -> T
+    fn rget | [-] (index: u64) -> T
+    fn  set | []= (index: u64, value: T) -> void
+    fn rset | [-]= (index: u64, value: T) -> void
+}
+
+type AbstractList<U> = interface Container<U> {
+    fn push(value: U) -> void
+    fn pop() -> U
+}
+
+type List<V> = class AbstractList<V> {
+    let items: V[]
+    let count: u64
+    let capacity: u64
+
+    fn init() {
+        this.items = []
+        this.count = 0
+    }
+
+    fn push(value: V) -> void {
+        if this.count >= this.capacity {
+            this.capacity = this.capacity * 2
+            this.items.resize(this.capacity)
+        }
+        this.items[this.count] = value
+        this.count = this.count + 1
+    }
+
+    fn pop() -> V {
+        if this.count == 0 {
+            throw "List is empty"
+        }
+        this.count = this.count - 1
+        return this.items[this.count]
+    }
+    
+    fn get | [](index: u64) -> V {
+        if index >= this.count {
+            throw "Index out of bounds"
+        }
+        return this.items[index]
+    }
+
+    fn set(index: u64, value: V) -> void {
+        if index >= this.count {
+            throw "Index out of bounds"
+        }
+        this.items[index] = value
+    }
+
+    fn rget | [-] (index: u64) -> V {
+        if index >= this.count {
+            throw "Index out of bounds"
+        }
+        return this.items[index]
+    }
+    
+    fn rset | [-]= (index: u64, value: V?) -> void {
+        if index >= this.count {
+            throw "Index out of bounds"
+        }
+        this.items[index] = value
+    }
+}
+
+fn main() -> void {
+    let list: List<i32> = new List<i32>()
+    list.push(1)
+    list.push(2)
+    list.push(3)
+    let item = list.pop()
+    let item2 = list.get(0)
+    list.set(0, 4)
+    let item3 = list.rget(0)
+    list.rset(0, 5)
+
+
+    let list2: List<Container<i32> > = new List<Container<i32> >()
+    list2.push(list)
+    let item4 = list2.get(0)
+    let item5 = list2.rget(0)
+    list2.set(0, list)
+    list2.rset(0, null) 
+
+    let const itemList = list2[0]  
+}

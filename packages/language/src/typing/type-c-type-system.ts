@@ -1,6 +1,6 @@
 /**
  * Type System for Type-C
- * 
+ *
  * This module provides the high-level type system interface for Type-C.
  * It coordinates type inference, type checking, and type operations.
  */
@@ -8,7 +8,7 @@
 import type { TypeCServices } from '../type-c-module.js';
 import type { AstNode } from 'langium';
 import { TypeDescription } from './type-c-types.js';
-import { areTypesEqual, isAssignable, narrowType, simplifyType, substituteGenerics } from './type-utils.js';
+import { areTypesEqual, isAssignable, narrowType, simplifyType, substituteGenerics, TypeCheckResult } from './type-utils.js';
 import * as factory from './type-factory.js';
 
 /**
@@ -55,15 +55,17 @@ export class TypeCTypeSystem {
 
     /**
      * Checks if two types are exactly equal.
+     * @returns TypeCheckResult with success status and optional error message
      */
-    areEqual(a: TypeDescription, b: TypeDescription): boolean {
+    areEqual(a: TypeDescription, b: TypeDescription): TypeCheckResult {
         return areTypesEqual(a, b);
     }
 
     /**
      * Checks if a value of type 'from' can be assigned to 'to'.
+     * @returns TypeCheckResult with success status and optional error message
      */
-    isAssignable(from: TypeDescription, to: TypeDescription): boolean {
+    isAssignable(from: TypeDescription, to: TypeDescription): TypeCheckResult {
         return isAssignable(from, to);
     }
 

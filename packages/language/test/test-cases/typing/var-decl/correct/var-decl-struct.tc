@@ -1,0 +1,16 @@
+
+fn main() {
+    let {
+        x,
+        y: alpha?,
+        z,
+        ...rest?
+    } = {
+        x: 1u32,
+        y: "string",
+        z: 3.14,
+        a: 1u8,
+        b: "cool",
+        c: true
+    }
+} 

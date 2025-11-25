@@ -616,9 +616,8 @@ export class TypeCTypeProvider {
     }
 
     private inferStringEnumType(node: ast.StringEnumType): TypeDescription {
-        // Remove quotes from string literals
-        const values = node.cases.map(c => c.substring(1, c.length - 1));
-        return factory.createStringEnumType(values, node);
+        // Langium parser already strips quotes from STRING terminals, use values directly
+        return factory.createStringEnumType(node.cases, node);
     }
 
     private inferInterfaceType(node: ast.InterfaceType): TypeDescription {

@@ -47,6 +47,7 @@ export enum TypeKind {
     Bool = 'bool',
     Void = 'void',
     String = 'string',
+    StringLiteral = 'string-literal',
     Null = 'null',
     
     // Composite types
@@ -119,16 +120,22 @@ export interface StringTypeDescription extends TypeDescription {
     readonly kind: TypeKind.String;
 }
 
+export interface StringLiteralTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.StringLiteral;
+    readonly value: string;
+}
+
 export interface NullTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Null;
 }
 
-export type PrimitiveTypeDescription = 
-    | IntegerTypeDescription 
-    | FloatTypeDescription 
-    | BoolTypeDescription 
-    | VoidTypeDescription 
-    | StringTypeDescription 
+export type PrimitiveTypeDescription =
+    | IntegerTypeDescription
+    | FloatTypeDescription
+    | BoolTypeDescription
+    | VoidTypeDescription
+    | StringTypeDescription
+    | StringLiteralTypeDescription
     | NullTypeDescription;
 
 // ============================================================================
@@ -548,4 +555,8 @@ export function isUnsetType(type: TypeDescription): type is UnsetTypeDescription
 
 export function isStringType(type: TypeDescription): type is StringTypeDescription {
     return type.kind === TypeKind.String;
+}
+
+export function isStringLiteralType(type: TypeDescription): type is StringLiteralTypeDescription {
+    return type.kind === TypeKind.StringLiteral;
 }

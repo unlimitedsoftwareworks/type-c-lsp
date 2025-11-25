@@ -1,6 +1,6 @@
 /**
  * Type Factory Functions
- * 
+ *
  * This module provides factory functions for creating type descriptions.
  * All type creation should go through these factories to ensure consistency.
  */
@@ -15,6 +15,7 @@ import {
     BoolTypeDescription,
     VoidTypeDescription,
     StringTypeDescription,
+    StringLiteralTypeDescription,
     NullTypeDescription,
     ArrayTypeDescription,
     NullableTypeDescription,
@@ -177,6 +178,15 @@ export function createStringType(node?: AstNode): StringTypeDescription {
         kind: TypeKind.String,
         node,
         toString: () => 'string'
+    };
+}
+
+export function createStringLiteralType(value: string, node?: AstNode): StringLiteralTypeDescription {
+    return {
+        kind: TypeKind.StringLiteral,
+        value,
+        node,
+        toString: () => JSON.stringify(value)
     };
 }
 

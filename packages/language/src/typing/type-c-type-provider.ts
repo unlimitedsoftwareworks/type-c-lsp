@@ -37,6 +37,8 @@ import {
     isNullableType,
     isPrototypeType,
     isReferenceType,
+    isStringEnumType,
+    isStringLiteralType,
     isStringType,
     isStructType,
     isTupleType,
@@ -308,8 +310,8 @@ export class TypeCTypeProvider {
             return (type.baseEnum.node as ast.EnumType).cases;
         }
 
-        // Array types - get prototype methods (length, push, pop, etc.)
-        if (isArrayType(type) || isStringType(type)) {
+        // Array types, string types, and string literals - get prototype methods (length, push, pop, etc.)
+        if (isArrayType(type) || isStringType(type) || isStringLiteralType(type)) {
             const prototypeType = isArrayType(type) ? this.getArrayPrototype() : this.getStringPrototype();
             if (prototypeType.node && ast.isBuiltinDefinition(prototypeType.node)) {
                 // check if attribute or method
@@ -1439,7 +1441,26 @@ export class TypeCTypeProvider {
         // Literals
         if (ast.isIntegerLiteral(node)) return this.inferIntegerLiteral(node);
         if (ast.isFloatingPointLiteral(node)) return this.inferFloatLiteral(node);
-        if (ast.isStringLiteralExpression(node)) return factory.createStringType(node);
+        if (ast.isStringLiteralExpression(node)) {
+            // STRING terminal includes quotes, so we need to strip them
+            // node.value = "red" (with quotes) -> we want "red" (without quotes)
+            const stringValue = node.value.startsWith('"') && node.value.endsWith('"')
+                ? node.value.substring(1, node.value.length - 1)
+                : node.value;
+            
+            // Use contextual typing to determine if we should keep as literal or widen to string
+            let expectedType = this.getExpectedType(node);
+            expectedType = expectedType && isReferenceType(expectedType)? this.resolveReference(expectedType) : expectedType;
+            
+            // If expected type is a string enum, keep as literal for validation
+            if (expectedType && isStringEnumType(expectedType)) {
+                return factory.createStringLiteralType(stringValue, node);
+            }
+            
+            // Otherwise, widen to string type (for better compatibility with generic inference)
+            // This includes: expected type is string, expected type is generic, or no expected type
+            return factory.createStringType(node);
+        }
         if (ast.isBinaryStringLiteralExpression(node)) {
             return factory.createArrayType(factory.createU8Type(node), node);
         }

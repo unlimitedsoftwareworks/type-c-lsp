@@ -626,4 +626,43 @@ describe('Type Provider', async () => {
             });
         });
     });
+
+    describe('String Enum and Literal Types', () => {
+        describe('Valid String Literal Assignments', () => {
+            test('should infer string literal types', async () => {
+                await assertType('string-enums/correct/string-literal-to-enum.tc', {
+                    'color1': 'Colors',
+                    'color2': 'Colors',
+                    'color3': 'Colors',
+                    'color4': '"green" | "red"',
+                });
+            });
+
+            test('should allow string literal access to string methods', async () => {
+                await assertType('string-enums/correct/string-literal-to-enum.tc', {
+                    'len': 'u64',
+                    'upper': 'string',
+                });
+            });
+        });
+
+        describe('Invalid String Literal Assignments', () => {
+            test('should reject string literals not in enum', async () => {
+                const content = await readFile(path.join(testFilesDir, 'string-enums/incorrect/invalid-string-literal.tc'), 'utf-8');
+                const document = await parseAndValidate(content);
+                
+                // Expect exactly 1 validation error
+                expect(document.diagnostics?.length).toBe(1);
+                
+                const diagnostics = document.diagnostics || [];
+                const errorMessages = diagnostics.map((d: any) => d.message);
+                
+                // Check that the error mentions "yellow" and the enum values
+                const assignabilityError = errorMessages.find((msg: string) =>
+                    msg.includes('yellow') && msg.includes('not assignable')
+                );
+                expect(assignabilityError).toBeDefined();
+            });
+        });
+    });
 });

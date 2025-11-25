@@ -77,6 +77,10 @@ import {
     InterfaceTypeDescription,
     VariantTypeDescription,
     isEnumType,
+    isStringEnumType,
+    isStringLiteralType,
+    StringEnumTypeDescription,
+    StringLiteralTypeDescription,
 } from "./type-c-types.js";
 import * as factory from "./type-factory.js";
 
@@ -116,10 +120,38 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
         case TypeKind.Bool:
         case TypeKind.Void:
         case TypeKind.String:
+        case TypeKind.StringLiteral:
         case TypeKind.Null:
         case TypeKind.Never:
         case TypeKind.Any:
             return success();
+        
+        case TypeKind.StringEnum: {
+            const aEnum = a as StringEnumTypeDescription;
+            const bEnum = b as StringEnumTypeDescription;
+            
+            // String enums are equal if they have the same values
+            if (aEnum.values.length !== bEnum.values.length) {
+                return failure(`String enum value count mismatch: ${aEnum.values.length} vs ${bEnum.values.length}`);
+            }
+            
+            // Check all values match (order doesn't matter for structural equality)
+            const aSet = new Set(aEnum.values);
+            const bSet = new Set(bEnum.values);
+            
+            for (const val of aEnum.values) {
+                if (!bSet.has(val)) {
+                    return failure(`String enum value "${val}" not found in target enum`);
+                }
+            }
+            for (const val of bEnum.values) {
+                if (!aSet.has(val)) {
+                    return failure(`String enum value "${val}" not found in source enum`);
+                }
+            }
+            
+            return success();
+        }
             
         case TypeKind.Array: {
             const result = areTypesEqual(
@@ -336,6 +368,32 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCh
         return success();
     }
     
+    // String literal to string enum: check if literal value is in enum
+    if (isStringLiteralType(from) && isStringEnumType(to)) {
+        const literal = from as StringLiteralTypeDescription;
+        const stringEnum = to as StringEnumTypeDescription;
+        if (stringEnum.values.includes(literal.value)) {
+            return success();
+        }
+        return failure(`String literal "${literal.value}" is not assignable to ${stringEnum.values.map(v => `"${v}"`).join(' | ')}`);
+    }
+    
+    // String literal to string: always valid (string literal is a subtype of string)
+    if (isStringLiteralType(from) && to.kind === TypeKind.String) {
+        return success();
+    }
+    
+    // String enum to string literal: only if enum has exactly that value
+    if (isStringEnumType(from) && isStringLiteralType(to)) {
+        const stringEnum = from as StringEnumTypeDescription;
+        const literal = to as StringLiteralTypeDescription;
+        // This is generally not assignable unless the enum is a single-value enum
+        if (stringEnum.values.length === 1 && stringEnum.values[0] === literal.value) {
+            return success();
+        }
+        return failure(`String enum ${stringEnum.values.map(v => `"${v}"`).join(' | ')} is not assignable to literal "${literal.value}"`);
+    }
+    
     // Null can be assigned to nullable types
     if (from.kind === TypeKind.Null && isNullableType(to)) {
         return success();
@@ -409,6 +467,20 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCh
             }
         }
         return failure(`${from.toString()} is not assignable to any member of union ${to.toString()}`);
+    }
+    
+    // String enum to string enum: check if all values in 'from' are in 'to'
+    if (isStringEnumType(from) && isStringEnumType(to)) {
+        const fromEnum = from as StringEnumTypeDescription;
+        const toEnum = to as StringEnumTypeDescription;
+        
+        // All values in 'from' must be present in 'to'
+        for (const value of fromEnum.values) {
+            if (!toEnum.values.includes(value)) {
+                return failure(`String enum value "${value}" from ${from.toString()} is not in target enum ${to.toString()}`);
+            }
+        }
+        return success();
     }
     
     // Join (intersection) type handling

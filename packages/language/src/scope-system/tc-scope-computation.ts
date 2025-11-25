@@ -62,6 +62,12 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 if (name) {
                     symbols.add(container, this.descriptions.createDescription(declaration, name, document));
                 }
+                else if (ast.isMethodHeader(declaration)) {
+                    for(const name of declaration.names) {
+                        // TODO: Add custom name provider
+                        symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                    }
+                }
             }
         }
     }

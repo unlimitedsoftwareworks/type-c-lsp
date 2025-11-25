@@ -716,7 +716,7 @@ export class TypeCTypeProvider {
 
     private inferFunctionType(node: ast.FunctionType): TypeDescription {
         const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
-            arg.name,
+            arg?.name ?? '[anonymous]',
             this.getType(arg.type),
             arg.isMut
         )) ?? [];

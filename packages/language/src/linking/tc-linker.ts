@@ -50,10 +50,20 @@ export class TypeCLinker extends DefaultLinker {
 			}
 		}
 
-		if(allDescriptions.count() === 1) {
+		if(allDescriptions.count() > 0) {
 			return allDescriptions.toArray()[0];
 		}
 		else if(allDescriptions.count() > 1) {
+			// if we are not referencing a function, we just grab the first one (could be improved later)
+			if(allDescriptions.map((d) => {
+				const node = d.node;
+				if(ast.isFunctionDeclaration(node) || ast.isMethodHeader(node)) {
+					return true;
+				}
+				return false;
+			}).reduce((acc, curr) => acc || curr, false)) {
+				return allDescriptions.toArray()[0];
+			}
 			return {
 				info: refInfo,
 				message: `Ambiguous reference to '${refInfo.reference.$refText}', too many candidates.`,

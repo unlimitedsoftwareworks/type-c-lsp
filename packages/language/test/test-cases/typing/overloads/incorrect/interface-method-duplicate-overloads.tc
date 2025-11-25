@@ -1,0 +1,42 @@
+// Test cases for duplicate interface method overloads (should fail validation)
+
+// Case 1: Exact duplicate with different return types
+type Calculator = interface {
+    fn add(a: u32, b: u32) -> u32
+    
+    // ERROR: Duplicate - same signature, return type doesn't matter
+    fn add(a: u32, b: u32) -> i32
+}
+
+// Case 2: Generic interface methods cannot be overloaded
+type Container<T> = interface {
+    fn process(item: T) -> T
+    
+    // ERROR: Generic methods cannot be overloaded
+    fn process(item: T, index: u32) -> T
+}
+
+// Case 3: Duplicate with void return type
+type Logger = interface {
+    fn log(msg: string) -> void
+    
+    // ERROR: Duplicate - return type doesn't matter
+    fn log(msg: string) -> string
+}
+
+// Case 4: Duplicate operator overloading
+type Addable = interface {
+    fn +(other: Addable) -> Addable
+    
+    // ERROR: Duplicate operator
+    fn +(other: Addable) -> string
+}
+
+// Case 5: Multiple duplicate methods
+type Processor = interface {
+    fn process(data: u32) -> string
+    fn process(data: string) -> u32
+    
+    // ERROR: Duplicate of first process method
+    fn process(data: u32) -> u32
+}

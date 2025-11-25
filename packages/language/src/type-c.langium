@@ -545,7 +545,7 @@ ImplementationMethodDecl:
 
 
 FunctionType:
-    fnType=('fn'|'cfn') header=FnHeader;
+    fnType=('fn'|'cfn') header=(FnHeader|FnTypeHeader);
 
 CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader '>';

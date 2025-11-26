@@ -11,7 +11,7 @@
  * - Integration with Langium: uses Langium's linking and scoping
  */
 
-import { AstNode, AstUtils, URI } from 'langium';
+import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
@@ -61,12 +61,14 @@ import { areTypesEqual, isAssignable, simplifyType, substituteGenerics } from '.
  */
 export class TypeCTypeProvider {
     /** Cache for computed types, keyed by AST node */
-    private readonly typeCache = new WeakMap<AstNode, TypeDescription>();
+    private readonly typeCache: DocumentCache<AstNode, TypeDescription>;
 
+    /** Cache for expected types, keyed by AST node */
+    private readonly expectedTypeCache: DocumentCache<AstNode, TypeDescription | undefined>;
 
     /**
      * Tracks functions currently being inferred to prevent infinite recursion.
-     * 
+     *
      * When inferring recursive functions like `fn fib(n) = fib(n-1) + fib(n-2)`,
      * we need to detect when we're already inferring the same function to avoid
      * stack overflow.
@@ -81,6 +83,8 @@ export class TypeCTypeProvider {
 
     constructor(services: TypeCServices) {
         this.services = services;
+        this.typeCache = new DocumentCache(services.shared);
+        this.expectedTypeCache = new DocumentCache(services.shared);
     }
 
     // ========================================================================
@@ -119,19 +123,10 @@ export class TypeCTypeProvider {
             return factory.createErrorType('Node is undefined');
         }
 
-        // Check cache first
-        const cached = this.typeCache.get(node);
-        if (cached) {
-            return cached;
-        }
-
-        // Compute type based on node type
-        const type = this.computeType(node);
-
-        // Cache result
-        this.typeCache.set(node, type);
-
-        return type;
+        const documentUri = AstUtils.getDocument(node).uri;
+        
+        // Get from cache or compute if not cached
+        return this.typeCache.get(documentUri, node, () => this.computeType(node));
     }
 
     /**
@@ -139,11 +134,9 @@ export class TypeCTypeProvider {
      * Call this when an AST node changes.
      */
     invalidateCache(node: AstNode): void {
-        this.typeCache.delete(node);
-        // Also invalidate children
-        for (const child of AstUtils.streamAllContents(node)) {
-            this.typeCache.delete(child);
-        }
+        const documentUri = AstUtils.getDocument(node).uri;
+        this.typeCache.clear(documentUri);
+        this.expectedTypeCache.clear(documentUri);
     }
 
     /**
@@ -185,6 +178,17 @@ export class TypeCTypeProvider {
      * ```
      */
     getExpectedType(node: AstNode): TypeDescription | undefined {
+        const documentUri = AstUtils.getDocument(node).uri;
+        
+        // Get from cache or compute if not cached
+        return this.expectedTypeCache.get(documentUri, node, () => this.computeExpectedType(node));
+    }
+
+    /**
+     * Computes the expected type for an expression based on its context.
+     * This is the internal implementation that actually performs the computation.
+     */
+    private computeExpectedType(node: AstNode): TypeDescription | undefined {
         const parent = node.$container;
 
         // Variable declaration with annotation

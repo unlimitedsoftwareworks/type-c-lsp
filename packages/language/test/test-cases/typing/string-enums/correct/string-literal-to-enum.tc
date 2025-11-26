@@ -8,7 +8,6 @@ fn main() -> void {
     let color1: Colors = "red"
     let color2: Colors = "green"
     let color3: Colors = "blue"
-
     
     // String literals should have string methods
     let len: u64 = "red".length()

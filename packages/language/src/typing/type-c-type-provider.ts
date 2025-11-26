@@ -17,7 +17,6 @@ import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
 import { isAssignmentOperator } from './operator-utils.js';
 import {
-    ErrorTypeDescription,
     FunctionTypeDescription,
     GenericTypeDescription,
     isArrayType,

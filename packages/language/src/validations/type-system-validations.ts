@@ -3,9 +3,6 @@ import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
-    ArrayTypeDescription,
-    CoroutineTypeDescription,
-    ErrorTypeDescription,
     TypeDescription,
     TypeKind,
     isArrayType,

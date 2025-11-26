@@ -52,7 +52,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
 
         this.globalCache = new DocumentCache(services.shared);
         this.typeProvider = services.typing.TypeProvider;
-        this.workspaceManager = services.shared.workspace.WorkspaceManager as TCWorkspaceManager;
+        const wsManager = services.shared.workspace.WorkspaceManager;
+        // Ensure we have the correct workspace manager type
+        if (!(wsManager instanceof TCWorkspaceManager)) {
+            throw new Error('WorkspaceManager must be an instance of TCWorkspaceManager');
+        }
+        this.workspaceManager = wsManager;
     }
 
     /**
@@ -210,7 +215,11 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
 
     private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
         const document = AstUtils.getDocument(context.container);
-        const model = document.parseResult.value as ast.Program;
+        const parseResult = document.parseResult.value;
+        if (!ast.isProgram(parseResult)) {
+            return EMPTY_SCOPE;
+        }
+        const model = parseResult;
         const uris = new Set<string>();
 
         for (const fileImport of model.imports) {
@@ -230,7 +239,11 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     private getAllExportedRefsFromModule(importEntry: ast.Import): AstNodeDescription[] {
         const uri = this.findURIForImport(importEntry);
         if (uri) {
-            const nodes = this.indexManager.allElements(ast.IdentifiableReference.$type, new Set([uri])).toArray().map(description => description.node as AstNode).filter(node => node !== undefined);
+            const nodes = this.indexManager
+                .allElements(ast.IdentifiableReference.$type, new Set([uri]))
+                .toArray()
+                .map(description => description.node)
+                .filter((node): node is AstNode => node !== undefined);
             return nodes.map(node => this.descriptions.createDescription(node, this.nameProvider.getName(node)));
         }
         return [];

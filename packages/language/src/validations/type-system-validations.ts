@@ -11,6 +11,7 @@ import {
     isArrayType,
     isClassType,
     isCoroutineType,
+    isErrorType,
     isFunctionType,
     isInterfaceType,
     isReferenceType,
@@ -252,7 +253,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // Handle coroutine instance calls
         if (isCoroutineType(fnType)) {
-            const coroutineType = fnType as CoroutineTypeDescription;
+            const coroutineType = fnType;
             const args = node.args || [];
             
             // Check argument count
@@ -531,8 +532,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const inferredReturnType = fnType.returnType;
 
         // Check 1: If inferred return/yield type is an error, report it
-        if (inferredReturnType.kind === TypeKind.Error) {
-            const errorType = inferredReturnType as ErrorTypeDescription;
+        if (isErrorType(inferredReturnType)) {
+            const errorType = inferredReturnType;
             const message = errorType.message || (isCoroutine ? 'Cannot infer yield type' : 'Cannot infer return type');
 
             // Don't report recursion placeholder errors (they're handled during inference)
@@ -581,7 +582,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // For arrays: check element type compatibility
         if (isArrayType(baseType)) {
-            const arrayType = baseType as ArrayTypeDescription;
+            const arrayType = baseType;
             const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
             if (!compatResult.success) {
                 const errorMsg = compatResult.message
@@ -631,7 +632,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // For arrays: check element type compatibility
         if (isArrayType(baseType)) {
-            const arrayType = baseType as ArrayTypeDescription;
+            const arrayType = baseType;
             const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
             if (!compatResult.success) {
                 const errorMsg = compatResult.message

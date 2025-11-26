@@ -45,7 +45,11 @@ export class TCWorkspaceManager extends DefaultWorkspaceManager {
             return undefined;
         }
         const content = this.fileSystemProvider.readFileSync(URI.parse(moduleJsonPath));
-        this.moduleConfig = JSON.parse(content) as TypeCModuleConfig;
+        const parsed = JSON.parse(content);
+        // Validate it's a proper TypeCModuleConfig object
+        if (typeof parsed === 'object' && parsed !== null) {
+            this.moduleConfig = parsed;
+        }
         return this.moduleConfig;
     }
 

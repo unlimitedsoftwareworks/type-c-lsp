@@ -1,21 +1,21 @@
-type Colors = "red" | "green" | "blue"
-
-fn test(color: Colors) {
-    
+cfn generator<T>(data: T[]) {
+    for let i = 0u64; i < data.length; i++ {
+        yield data[i];
+    }
 }
 
-fn main() -> void {
-    let color1: Colors = "red"
-    let color2: Colors = "green"
-    let color3: Colors = "blue"
+cfn gen() {
+    yield {x: 1u32, y: "hi"}
+    yield {x: 2u32, y: "hello", z: 10.f}
+}
 
-    
-    // String literals should have string methods
-    let len: u64 = "red".length()
-    let upper: string = "red".toUpperCase()
+fn generator_test() {
+    let numbers = [10, 20, 30, 40, 50]
+    let gen = generator(numbers)
+}
 
-    test(color1)
-
-    let color4: "green" | "red" = "green"
-    test(color4)
+type Test = class {
+    let x: u32 = 1
+    fn init() {
+    }
 }

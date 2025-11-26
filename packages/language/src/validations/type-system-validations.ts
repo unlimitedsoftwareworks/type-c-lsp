@@ -41,6 +41,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             BinaryExpression: this.checkBinaryExpression,
             FunctionCall: this.checkFunctionCall,
             ReturnStatement: this.checkReturnStatement,
+            YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
             IndexSet: this.checkIndexSet,
             ReverseIndexSet: this.checkReverseIndexSet,
@@ -343,6 +344,15 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         const fn: ast.FunctionDeclaration = current;
+
+        // Check if this is a coroutine - return statements not allowed in coroutines
+        if (fn.fnType === 'cfn') {
+            accept('error', `Coroutines must use 'yield' instead of 'return'`, {
+                node,
+            });
+            return;
+        }
+
         if (!fn.header.returnType) {
             return; // No explicit return type
         }
@@ -371,17 +381,83 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
-     * Check function declarations for return type issues.
-     * 
+     * Check yield expressions against coroutine yield type.
+     */
+    checkYieldExpression = (node: ast.YieldExpression, accept: ValidationAcceptor): void => {
+        // Find the containing function
+        let current: AstNode | undefined = node.$container;
+        while (current && !ast.isFunctionDeclaration(current)) {
+            current = current.$container;
+        }
+
+        if (!current || !ast.isFunctionDeclaration(current)) {
+            accept('error', `Yield expression must be inside a coroutine function`, {
+                node,
+            });
+            return;
+        }
+
+        const fn: ast.FunctionDeclaration = current;
+
+        // Check if this is a regular function - yield not allowed
+        if (fn.fnType !== 'cfn') {
+            accept('error', `Yield expression can only be used in coroutines (cfn). Use 'return' in regular functions.`, {
+                node,
+            });
+            return;
+        }
+
+        // If there's an explicit return type, validate the yield against it
+        if (!fn.header.returnType) {
+            return; // No explicit yield type to validate against
+        }
+
+        const expectedYieldType = this.typeProvider.getType(fn.header.returnType);
+
+        if (node.expr) {
+            const actualType = this.typeProvider.getType(node.expr);
+            const compatResult = this.isTypeCompatible(actualType, expectedYieldType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Yield type mismatch: ${compatResult.message}`
+                    : `Yield type mismatch: expected '${expectedYieldType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.expr,
+                });
+            }
+        } else {
+            // Yield with no value
+            if (expectedYieldType.kind !== TypeKind.Void) {
+                accept('error', `Coroutine must yield a value of type '${expectedYieldType.toString()}'`, {
+                    node,
+                });
+            }
+        }
+    }
+
+    /**
+     * Check function declarations for return/yield type issues.
+     *
      * Validates:
-     * 1. If no explicit return type → ensure we can infer successfully (no error type)
-     * 2. If explicit return type → ensure inferred type matches declared type
-     * 
+     * 1. If no explicit return/yield type → ensure we can infer successfully (no error type)
+     * 2. If explicit return/yield type → ensure inferred type matches declared type
+     *
+     * For regular functions:
+     * - Checks return statements and infers return type
+     *
+     * For coroutines (cfn):
+     * - Checks yield expressions and infers yield type
+     * - The "return type" annotation actually represents the yield type
+     *
      * Examples:
      * ```
      * fn bad() = match n { 0 => 1, _ => "oops" }  // ❌ Can't infer common type
      * fn good() -> u32 = ...                       // ✅ Explicit type
      * fn good2() = 42                              // ✅ Can infer u32
+     *
+     * cfn gen() -> u32 { yield 1; yield 2; }      // ✅ Explicit yield type
+     * cfn gen() { yield 1; yield 2; }             // ✅ Can infer u32 from yields
+     * cfn bad() { yield 1; yield "oops"; }        // ❌ Can't infer common type
      * ```
      */
     checkFunctionDeclaration = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
@@ -391,12 +467,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return; // Not a function type (shouldn't happen)
         }
 
+        const isCoroutine = node.fnType === 'cfn';
         const inferredReturnType = fnType.returnType;
 
-        // Check 1: If inferred return type is an error, report it
+        // Check 1: If inferred return/yield type is an error, report it
         if (inferredReturnType.kind === TypeKind.Error) {
             const errorType = inferredReturnType as ErrorTypeDescription;
-            const message = errorType.message || 'Cannot infer return type';
+            const message = errorType.message || (isCoroutine ? 'Cannot infer yield type' : 'Cannot infer return type');
 
             // Don't report recursion placeholder errors (they're handled during inference)
             if (message === '__recursion_placeholder__') {
@@ -410,15 +487,16 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        // Check 2: If explicit return type, validate it matches inferred type
+        // Check 2: If explicit return/yield type, validate it matches inferred type
         if (node.header.returnType) {
             const declaredReturnType = this.typeProvider.getType(node.header.returnType);
 
             const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
             if (!compatResult.success) {
+                const typeKind = isCoroutine ? 'yield' : 'return';
                 const errorMsg = compatResult.message
-                    ? `Function return type mismatch: ${compatResult.message}`
-                    : `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`;
+                    ? `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: ${compatResult.message}`
+                    : `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.header.returnType,
                 });

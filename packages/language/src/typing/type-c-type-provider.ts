@@ -946,17 +946,24 @@ export class TypeCTypeProvider {
 
     /**
      * Infers the type of a function declaration.
-     * 
+     *
      * **For recursive functions:**
      * - If return type is explicitly annotated → use it
      * - If not annotated → try to infer from non-recursive paths (base cases)
      * - If inference fails (no base cases) → ERROR
-     * 
+     *
+     * **For coroutines:**
+     * - Return type represents the yield type (what the coroutine yields)
+     * - Inferred from yield expressions instead of return statements
+     *
      * Examples:
      * ```
      * fn fib(n: u32) -> u32 = ...        // ✅ Explicit type
      * fn fib(n: u32) = if n < 2 => n ... // ✅ Can infer u32 from base case
      * fn fib(n: u32) = fib(n-1)          // ❌ Error: no base case to infer from
+     *
+     * cfn gen() -> u32 { yield 1; yield 2; } // ✅ Yields u32
+     * cfn gen() { yield 1; yield 2; }        // ✅ Can infer u32 from yields
      * ```
      */
     private inferFunctionDeclaration(node: ast.FunctionDeclaration): TypeDescription {
@@ -966,6 +973,8 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
+
+        const isCoroutine = node.fnType === 'cfn';
 
         // For recursive functions: use explicit type if available
         if (this.inferringFunctions.has(node)) {
@@ -991,9 +1000,21 @@ export class TypeCTypeProvider {
         this.inferringFunctions.add(node);
 
         try {
-            const returnType = node.header?.returnType
-                ? this.getType(node.header.returnType)
-                : this.inferReturnTypeFromBody(node.body, node.expr);
+            let returnType: TypeDescription;
+            
+            if (node.header?.returnType) {
+                // Explicit return/yield type provided
+                returnType = this.getType(node.header.returnType);
+            } else {
+                // Infer type from body
+                if (isCoroutine) {
+                    // For coroutines: infer from yield expressions
+                    returnType = this.inferYieldTypeFromBody(node.body, node.expr);
+                } else {
+                    // For regular functions: infer from return statements
+                    returnType = this.inferReturnTypeFromBody(node.body, node.expr);
+                }
+            }
 
             return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
         } finally {
@@ -1004,7 +1025,7 @@ export class TypeCTypeProvider {
 
     /**
      * Infer return type from function body or expression.
-     * 
+     *
      * Strategy:
      * 1. If expression-body function: use expression type
      * 2. If block-body function: collect all return statements (only from this function!)
@@ -1053,6 +1074,56 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Infer yield type from coroutine body or expression.
+     *
+     * Strategy:
+     * 1. If expression-body coroutine: use expression type (treating it as a yield)
+     * 2. If block-body coroutine: collect all yield expressions (only from this coroutine!)
+     * 3. Find common type of all yields
+     * 4. If no yields → void
+     */
+    private inferYieldTypeFromBody(body?: ast.BlockStatement, expr?: ast.Expression): TypeDescription {
+        // Expression-body coroutine: cfn foo() = expr (expression is implicitly yielded)
+        if (expr) {
+            return this.getType(expr);
+        }
+
+        // Block-body coroutine: cfn foo() { ... }
+        if (body) {
+            const yieldExpressions = this.collectYieldExpressions(body);
+
+            if (yieldExpressions.length === 0) {
+                return factory.createVoidType();
+            }
+
+            // Get types of all yield expressions
+            const allYieldTypes = yieldExpressions
+                .map(yieldExpr => yieldExpr.expr ? this.getType(yieldExpr.expr) : factory.createVoidType());
+
+            // Filter out recursion placeholders (error types with specific message)
+            const nonPlaceholderTypes = allYieldTypes.filter(type => {
+                if (type.kind === TypeKind.Error) {
+                    const errorType = type as ErrorTypeDescription;
+                    return errorType.message !== '__recursion_placeholder__';
+                }
+                return true; // Keep non-error types
+            });
+
+            // Use non-placeholder types if available, otherwise all types
+            const yieldTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allYieldTypes;
+
+            if (yieldTypes.length === 0) {
+                return factory.createVoidType();
+            }
+
+            // Find common type
+            return this.getCommonType(yieldTypes);
+        }
+
+        return factory.createVoidType();
+    }
+
+    /**
      * Collect all return statements from a block, but ONLY from this function level.
      * Does NOT collect returns from nested functions!
      */
@@ -1081,6 +1152,37 @@ export class TypeCTypeProvider {
         }
 
         return returns;
+    }
+
+    /**
+     * Collect all yield expressions from a block, but ONLY from this coroutine level.
+     * Does NOT collect yields from nested coroutines!
+     */
+    private collectYieldExpressions(block: ast.BlockStatement): ast.YieldExpression[] {
+        const yields: ast.YieldExpression[] = [];
+
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function/coroutine - don't collect its yields!
+            if (ast.isFunctionDeclaration(node)) {
+                return; // Don't traverse into nested functions
+            }
+
+            if (ast.isYieldExpression(node)) {
+                yields.push(node);
+            }
+
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+
+        return yields;
     }
 
     /**

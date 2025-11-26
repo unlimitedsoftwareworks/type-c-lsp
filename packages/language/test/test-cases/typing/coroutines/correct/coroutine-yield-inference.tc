@@ -1,0 +1,69 @@
+// Test coroutine yield type inference
+
+// ✅ Simple coroutine with inferred yield type
+cfn simpleGen() {
+    yield 1
+    yield 2
+    yield 3
+}
+
+// ✅ Coroutine with explicit yield type
+cfn explicitGen() -> u32 {
+    yield 1u32
+    yield 2u32
+}
+
+// ✅ Coroutine with expression body (implicitly yields)
+cfn exprGen() = 42
+
+// ✅ Coroutine with explicit yield type matching expression
+cfn exprGenExplicit() -> u32 = 42u32
+
+// ✅ Coroutine yielding strings
+cfn stringGen() -> string {
+    yield "hello"
+    yield "world"
+}
+
+// ✅ Coroutine yielding inferred strings
+cfn inferredStringGen() {
+    yield "hello"
+    yield "world"
+}
+
+// ✅ Coroutine with conditional yields (all same type)
+cfn conditionalGen(flag: bool) -> u32 {
+    if flag {
+        yield 1u32
+    } else {
+        yield 2u32
+    }
+}
+
+// ✅ Coroutine yielding void
+cfn voidGen() {
+    yield
+    yield
+}
+
+// ✅ Explicit void yield type
+cfn explicitVoidGen() -> void {
+    yield
+}
+
+// ✅ Coroutine with struct yields
+cfn structGen() {
+    yield {x: 1u32, y: 2u32}
+    yield {x: 3u32, y: 4u32}
+}
+
+// ✅ Generic coroutine with yield
+cfn genericGen<T>(value: T) -> T {
+    yield value
+}
+
+// ✅ Coroutine yielding arrays
+cfn arrayGen() -> u32[] {
+    yield [1u32, 2u32, 3u32]
+    yield [4u32, 5u32]
+}

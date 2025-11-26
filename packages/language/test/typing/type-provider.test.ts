@@ -664,5 +664,93 @@ describe('Type Provider', async () => {
                 expect(assignabilityError).toBeDefined();
             });
         });
+    
+        describe('Coroutine Types', () => {
+            describe('Yield Type Inference', () => {
+                test('should infer yield types from simple coroutines', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'simpleGen': 'cfn() -> i32',
+                        'explicitGen': 'cfn() -> u32',
+                        'exprGen': 'cfn() -> i32',
+                        'exprGenExplicit': 'cfn() -> u32',
+                    });
+                });
+    
+                test('should infer string yield types', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'stringGen': 'cfn() -> string',
+                        'inferredStringGen': 'cfn() -> string',
+                    });
+                });
+    
+                test('should handle void yields', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'voidGen': 'cfn() -> void',
+                        'explicitVoidGen': 'cfn() -> void',
+                    });
+                });
+    
+                test('should infer struct yield types', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'structGen': 'cfn() -> struct { x: u32, y: u32 }',
+                    });
+                });
+    
+                test('should handle generic coroutines', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'genericGen': 'cfn<T>(value: T) -> T',
+                    });
+                });
+    
+                test('should infer array yield types', async () => {
+                    await assertType('coroutines/correct/coroutine-yield-inference.tc', {
+                        'arrayGen': 'cfn() -> u32[]',
+                    });
+                });
+            });
+    
+            describe('Coroutine Instance Types', () => {
+                test('should create coroutine instances', async () => {
+                    await assertType('coroutines/correct/coroutine-instance-types.tc', {
+                        'loop': 'cfn(x: u32[]) -> u32',
+                    });
+                });
+    
+                test('should handle different parameter types', async () => {
+                    await assertType('coroutines/correct/coroutine-instance-types.tc', {
+                        'stringGen': 'cfn(prefix: string, count: u32) -> string',
+                    });
+                });
+            });
+    
+            describe('Coroutine Validation Errors', () => {
+                test('should error on mismatched yield types', async () => {
+                    const content = await readFile(path.join(testFilesDir, 'coroutines/incorrect/coroutine-yield-errors.tc'), 'utf-8');
+                    const document = await parseAndValidate(content);
+                    
+                    const errors = document.diagnostics?.filter(d => d.severity === 1) || []; // severity 1 = error
+                    expect(errors.length).toBeGreaterThan(0);
+                    
+                    // Should have error about cannot infer common type
+                    expect(errors.some(d => d.message.includes('Cannot infer common type'))).toBe(true);
+                });
+    
+                test('should error on yield in regular function', async () => {
+                    const content = await readFile(path.join(testFilesDir, 'coroutines/incorrect/coroutine-yield-errors.tc'), 'utf-8');
+                    const document = await parseAndValidate(content);
+                    
+                    const errors = document.diagnostics?.filter(d => d.severity === 1) || [];
+                    expect(errors.some(d => d.message.includes('only be used in coroutines'))).toBe(true);
+                });
+    
+                test('should error on return in coroutine', async () => {
+                    const content = await readFile(path.join(testFilesDir, 'coroutines/incorrect/coroutine-yield-errors.tc'), 'utf-8');
+                    const document = await parseAndValidate(content);
+                    
+                    const errors = document.diagnostics?.filter(d => d.severity === 1) || [];
+                    expect(errors.some(d => d.message.includes('must use') && d.message.includes('yield'))).toBe(true);
+                });
+            });
+        });
     });
 });

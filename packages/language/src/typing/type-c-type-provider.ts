@@ -323,9 +323,10 @@ export class TypeCTypeProvider {
                     if (ast.isBuiltinSymbolID(symbol)) {
                         nodes.push(symbol);
                     } else if (ast.isBuiltinSymbolFn(symbol)) {
-                        // BuiltinSymbolFn has multiple names, but we push the node itself
-                        // The scope provider will handle exposing all names
-                        nodes.push(symbol);
+                        for (const name of symbol.names) {
+                            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                            nodes.push({ name, ...symbol } as AstNode);
+                        }
                     }
                 }
             }

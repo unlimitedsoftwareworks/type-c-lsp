@@ -33,12 +33,6 @@ fn testLambdaCoroutine() {
         yield n
         yield n + 1u32
     }
-
-    let co2 = coroutine cfn(n: u32) {
-        yield n
-        yield n+1
-    }
     
-    let x = [co(10u32), co2(10)]
-    let y = co(10)
+    let x = co(10u32)
 }

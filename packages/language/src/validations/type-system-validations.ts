@@ -333,31 +333,41 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Check return statements against function return type.
      */
     checkReturnStatement = (node: ast.ReturnStatement, accept: ValidationAcceptor): void => {
-        // Find the containing function
+        // Find the containing function or lambda
         let current: AstNode | undefined = node.$container;
-        while (current && !ast.isFunctionDeclaration(current)) {
+        while (current && !ast.isFunctionDeclaration(current) && !ast.isLambdaExpression(current)) {
             current = current.$container;
         }
 
-        if (!current || !ast.isFunctionDeclaration(current)) {
-            return; // Not in a function
+        if (!current) {
+            return; // Not in a function or lambda
         }
 
-        const fn: ast.FunctionDeclaration = current;
+        // Get fnType from either FunctionDeclaration or LambdaExpression
+        const fnType = ast.isFunctionDeclaration(current) ? current.fnType :
+                       ast.isLambdaExpression(current) ? current.fnType : undefined;
+
+        if (!fnType) {
+            return; // Shouldn't happen
+        }
 
         // Check if this is a coroutine - return statements not allowed in coroutines
-        if (fn.fnType === 'cfn') {
+        if (fnType === 'cfn') {
             accept('error', `Coroutines must use 'yield' instead of 'return'`, {
                 node,
             });
             return;
         }
 
-        if (!fn.header.returnType) {
+        // Get header from either FunctionDeclaration or LambdaExpression
+        const header = ast.isFunctionDeclaration(current) ? current.header :
+                       ast.isLambdaExpression(current) ? current.header : undefined;
+
+        if (!header || !header.returnType) {
             return; // No explicit return type
         }
 
-        const expectedReturnType = this.typeProvider.getType(fn.header.returnType);
+        const expectedReturnType = this.typeProvider.getType(header.returnType);
 
         if (node.expr) {
             const actualType = this.typeProvider.getType(node.expr);
@@ -384,35 +394,47 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Check yield expressions against coroutine yield type.
      */
     checkYieldExpression = (node: ast.YieldExpression, accept: ValidationAcceptor): void => {
-        // Find the containing function
+        // Find the containing function or lambda
         let current: AstNode | undefined = node.$container;
-        while (current && !ast.isFunctionDeclaration(current)) {
+        while (current && !ast.isFunctionDeclaration(current) && !ast.isLambdaExpression(current)) {
             current = current.$container;
         }
 
-        if (!current || !ast.isFunctionDeclaration(current)) {
+        if (!current) {
             accept('error', `Yield expression must be inside a coroutine function`, {
                 node,
             });
             return;
         }
 
-        const fn: ast.FunctionDeclaration = current;
+        // Get fnType from either FunctionDeclaration or LambdaExpression
+        const fnType = ast.isFunctionDeclaration(current) ? current.fnType :
+                       ast.isLambdaExpression(current) ? current.fnType : undefined;
+
+        if (!fnType) {
+            accept('error', `Yield expression must be inside a coroutine function`, {
+                node,
+            });
+            return;
+        }
 
         // Check if this is a regular function - yield not allowed
-        if (fn.fnType !== 'cfn') {
+        if (fnType !== 'cfn') {
             accept('error', `Yield expression can only be used in coroutines (cfn). Use 'return' in regular functions.`, {
                 node,
             });
             return;
         }
 
-        // If there's an explicit return type, validate the yield against it
-        if (!fn.header.returnType) {
+        // Get header from either FunctionDeclaration or LambdaExpression
+        const header = ast.isFunctionDeclaration(current) ? current.header :
+                       ast.isLambdaExpression(current) ? current.header : undefined;
+
+        if (!header || !header.returnType) {
             return; // No explicit yield type to validate against
         }
 
-        const expectedYieldType = this.typeProvider.getType(fn.header.returnType);
+        const expectedYieldType = this.typeProvider.getType(header.returnType);
 
         if (node.expr) {
             const actualType = this.typeProvider.getType(node.expr);

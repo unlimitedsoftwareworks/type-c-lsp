@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { clearFileDocuments, setupLanguageServices } from "./test-utils.js";
+import { clearFileDocuments, setupLanguageServices } from "../test-utils.js";
 import { Diagnostic, DiagnosticSeverity } from "vscode-languageserver-types";
 
 describe('Coroutine Validation', () => {
@@ -186,6 +186,52 @@ describe('Coroutine Validation', () => {
             const diagnostics = await parseAndGetDiagnostics(code);
             const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
             expect(errors.length).toBeGreaterThan(0);
+        });
+
+
+        test('should work on lambda coroutine functions', async () => {
+            const code = `
+                // Test coroutine instance types
+
+                // ✅ Creating a coroutine instance from a coroutine function
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                    yield x[1]
+                }
+
+                fn main() {
+                    // co has type: coroutine<fn(x: u32[]) -> u32>
+                    let co = coroutine loop
+                    
+                    // Calling the coroutine instance multiple times
+                    let x = co([1u32, 2u32, 3u32])  // yields u32
+                    let y = co([4u32, 5u32, 6u32])  // yields u32
+                    let z = co([7u32, 8u32, 9u32])  // yields u32
+                }
+
+                // ✅ Coroutine instance with different parameter types
+                cfn stringGen(prefix: string, count: u32) -> string {
+                    yield prefix
+                }
+
+                fn testStrings() {
+                    let co = coroutine stringGen
+                    let a = co("hello", 5u32)
+                    let b = co("world", 10u32)
+                }
+
+                // ✅ Coroutine instance from lambda
+                fn testLambdaCoroutine() {
+                    let co = coroutine cfn(n: u32) -> u32 {
+                        yield n
+                        yield n + 1u32
+                    }
+                    
+                    let x = co(10u32)
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            expect(diagnostics).toHaveLength(0);
         });
     });
 });

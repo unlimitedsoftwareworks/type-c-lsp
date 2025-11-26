@@ -738,15 +738,13 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
-        const returnType = node.header?.returnType
+        // For coroutine type annotations: coroutine<fn(params) -> YieldType>
+        // The "returnType" in the header actually represents the yield type
+        const yieldType = node.header?.returnType
             ? this.getType(node.header.returnType)
             : factory.createVoidType(node);
 
-        // For coroutines, we need to infer the yield type
-        // This would require flow analysis - for now, use 'any'
-        const yieldType = factory.createAnyType(node);
-
-        return factory.createCoroutineType(params, returnType, yieldType, 'fn', node);
+        return factory.createCoroutineType(params, yieldType, node);
     }
 
     private inferReturnType(node: ast.ReturnType): TypeDescription {
@@ -2224,9 +2222,23 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
-        const returnType = node.header.returnType
-            ? this.getType(node.header.returnType)
-            : this.inferReturnTypeFromBody(node.body, node.expr);
+        
+        const isCoroutine = node.fnType === 'cfn';
+        
+        let returnType: TypeDescription;
+        if (node.header.returnType) {
+            // Explicit return/yield type provided
+            returnType = this.getType(node.header.returnType);
+        } else {
+            // Infer type from body
+            if (isCoroutine) {
+                // For coroutine lambdas: infer from yield expressions
+                returnType = this.inferYieldTypeFromBody(node.body, node.expr);
+            } else {
+                // For regular function lambdas: infer from return statements
+                returnType = this.inferReturnTypeFromBody(node.body, node.expr);
+            }
+        }
 
         return factory.createFunctionType(params, returnType, node.fnType, [], node);
     }
@@ -2341,11 +2353,11 @@ export class TypeCTypeProvider {
         const fnType = this.inferExpression(node.fn);
 
         if (isFunctionType(fnType)) {
+            // The coroutine expression wraps a function and creates a coroutine instance
+            // For coroutines, the function's returnType is actually the yieldType
             return factory.createCoroutineType(
                 fnType.parameters,
-                fnType.returnType,
-                factory.createAnyType(node), // TODO: infer yield type
-                fnType.fnType,
+                fnType.returnType,  // This is the yield type for coroutines
                 node
             );
         }

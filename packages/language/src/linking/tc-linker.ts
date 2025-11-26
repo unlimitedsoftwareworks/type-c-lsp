@@ -16,15 +16,19 @@ export class TypeCLinker extends DefaultLinker {
         const scope = this.scopeProvider.getScope(refInfo);
         const unfilteredDescriptions = scope.getAllElements().filter(e => e.name === refInfo.reference.$refText);
 		// Remove duplicates (same path, different names)
-		const allDescriptions = stream(unfilteredDescriptions.reduce((acc, d) => {
-			if(!acc.some(t => t.path === d.path)) {
-				acc.push(d);
+		const uniqueDescriptions: AstNodeDescription[] = [];
+		for (const d of unfilteredDescriptions) {
+			if (!uniqueDescriptions.some(t => t.path === d.path)) {
+				uniqueDescriptions.push(d);
 			}
-			return acc;
-		}, [] as AstNodeDescription[]));
+		}
+		const allDescriptions = stream(uniqueDescriptions);
 
 		if((ast.isFunctionCall(refInfo.container.$container) || ast.isFunctionCall(refInfo.container?.$container?.$container))&& allDescriptions.count() > 1) {
-			const fnCallNode = ast.isFunctionCall(refInfo.container.$container) ? refInfo.container.$container : refInfo.container?.$container?.$container as ast.FunctionCall;
+			const potentialFnCallNode = ast.isFunctionCall(refInfo.container.$container)
+				? refInfo.container.$container
+				: refInfo.container?.$container?.$container;
+			const fnCallNode = potentialFnCallNode && ast.isFunctionCall(potentialFnCallNode) ? potentialFnCallNode : undefined;
 			if(!fnCallNode) {
 				return {
 					info: refInfo,
@@ -33,11 +37,14 @@ export class TypeCLinker extends DefaultLinker {
 			}
 
 			const candidates = this.typeProvider.resolveFunctionCall(
-				fnCallNode.args, 
+				fnCallNode.args,
 				allDescriptions
 					.toArray()
-					.map(d => this.typeProvider.getType(d.node as ast.FunctionDeclaration))
-					.filter(d => isFunctionType(d)) as FunctionTypeDescription[]
+					.map(d => {
+						const node = d.node;
+						return ast.isFunctionDeclaration(node) ? this.typeProvider.getType(node) : undefined;
+					})
+					.filter((d): d is FunctionTypeDescription => d !== undefined && isFunctionType(d))
 			);
 			if(candidates.length === 1) {
 				return allDescriptions.toArray()[candidates[0]];

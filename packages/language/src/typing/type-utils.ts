@@ -127,24 +127,25 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
             return success();
         
         case TypeKind.StringEnum: {
-            const aEnum = a as StringEnumTypeDescription;
-            const bEnum = b as StringEnumTypeDescription;
+            if (!isStringEnumType(a) || !isStringEnumType(b)) {
+                return failure('Expected string enum types');
+            }
             
             // String enums are equal if they have the same values
-            if (aEnum.values.length !== bEnum.values.length) {
-                return failure(`String enum value count mismatch: ${aEnum.values.length} vs ${bEnum.values.length}`);
+            if (a.values.length !== b.values.length) {
+                return failure(`String enum value count mismatch: ${a.values.length} vs ${b.values.length}`);
             }
             
             // Check all values match (order doesn't matter for structural equality)
-            const aSet = new Set(aEnum.values);
-            const bSet = new Set(bEnum.values);
+            const aSet = new Set(a.values);
+            const bSet = new Set(b.values);
             
-            for (const val of aEnum.values) {
+            for (const val of a.values) {
                 if (!bSet.has(val)) {
                     return failure(`String enum value "${val}" not found in target enum`);
                 }
             }
-            for (const val of bEnum.values) {
+            for (const val of b.values) {
                 if (!aSet.has(val)) {
                     return failure(`String enum value "${val}" not found in source enum`);
                 }
@@ -154,10 +155,10 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
         }
             
         case TypeKind.Array: {
-            const result = areTypesEqual(
-                (a as ArrayTypeDescription).elementType,
-                (b as ArrayTypeDescription).elementType
-            );
+            if (!isArrayType(a) || !isArrayType(b)) {
+                return failure('Expected array types');
+            }
+            const result = areTypesEqual(a.elementType, b.elementType);
             if (!result.success) {
                 return failure(`Array element types differ: ${result.message}`);
             }
@@ -165,10 +166,10 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
         }
             
         case TypeKind.Nullable: {
-            const result = areTypesEqual(
-                (a as NullableTypeDescription).baseType,
-                (b as NullableTypeDescription).baseType
-            );
+            if (!isNullableType(a) || !isNullableType(b)) {
+                return failure('Expected nullable types');
+            }
+            const result = areTypesEqual(a.baseType, b.baseType);
             if (!result.success) {
                 return failure(`Nullable base types differ: ${result.message}`);
             }
@@ -187,19 +188,34 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheck
             
             
         case TypeKind.Struct:
-            return areStructTypesEqual(a as StructTypeDescription, b as StructTypeDescription);
+            if (!isStructType(a) || !isStructType(b)) {
+                return failure('Expected struct types');
+            }
+            return areStructTypesEqual(a, b);
             
         case TypeKind.Function:
-            return areFunctionTypesEqual(a as FunctionTypeDescription, b as FunctionTypeDescription);
+            if (!isFunctionType(a) || !isFunctionType(b)) {
+                return failure('Expected function types');
+            }
+            return areFunctionTypesEqual(a, b);
             
         case TypeKind.Reference:
-            return areReferenceTypesEqual(a as ReferenceTypeDescription, b as ReferenceTypeDescription);
+            if (!isReferenceType(a) || !isReferenceType(b)) {
+                return failure('Expected reference types');
+            }
+            return areReferenceTypesEqual(a, b);
             
         case TypeKind.Generic:
-            return areGenericTypesEqual(a as GenericTypeDescription, b as GenericTypeDescription);
+            if (!isGenericType(a) || !isGenericType(b)) {
+                return failure('Expected generic types');
+            }
+            return areGenericTypesEqual(a, b);
 
         case TypeKind.Variant:
-            return areVariantTypesEqual(a as VariantTypeDescription, b as VariantTypeDescription);
+            if (!isVariantType(a) || !isVariantType(b)) {
+                return failure('Expected variant types');
+            }
+            return areVariantTypesEqual(a, b);
 
         // For other complex types, fall back to string comparison
         // (This is a simplified approach; real implementation would need deeper comparison)
@@ -370,12 +386,10 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCh
     
     // String literal to string enum: check if literal value is in enum
     if (isStringLiteralType(from) && isStringEnumType(to)) {
-        const literal = from as StringLiteralTypeDescription;
-        const stringEnum = to as StringEnumTypeDescription;
-        if (stringEnum.values.includes(literal.value)) {
+        if (to.values.includes(from.value)) {
             return success();
         }
-        return failure(`String literal "${literal.value}" is not assignable to ${stringEnum.values.map(v => `"${v}"`).join(' | ')}`);
+        return failure(`String literal "${from.value}" is not assignable to ${to.values.map(v => `"${v}"`).join(' | ')}`);
     }
     
     // String literal to string: always valid (string literal is a subtype of string)
@@ -385,13 +399,11 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCh
     
     // String enum to string literal: only if enum has exactly that value
     if (isStringEnumType(from) && isStringLiteralType(to)) {
-        const stringEnum = from as StringEnumTypeDescription;
-        const literal = to as StringLiteralTypeDescription;
         // This is generally not assignable unless the enum is a single-value enum
-        if (stringEnum.values.length === 1 && stringEnum.values[0] === literal.value) {
+        if (from.values.length === 1 && from.values[0] === to.value) {
             return success();
         }
-        return failure(`String enum ${stringEnum.values.map(v => `"${v}"`).join(' | ')} is not assignable to literal "${literal.value}"`);
+        return failure(`String enum ${from.values.map(v => `"${v}"`).join(' | ')} is not assignable to literal "${to.value}"`);
     }
     
     // Null can be assigned to nullable types
@@ -471,12 +483,9 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCh
     
     // String enum to string enum: check if all values in 'from' are in 'to'
     if (isStringEnumType(from) && isStringEnumType(to)) {
-        const fromEnum = from as StringEnumTypeDescription;
-        const toEnum = to as StringEnumTypeDescription;
-        
         // All values in 'from' must be present in 'to'
-        for (const value of fromEnum.values) {
-            if (!toEnum.values.includes(value)) {
+        for (const value of from.values) {
+            if (!to.values.includes(value)) {
                 return failure(`String enum value "${value}" from ${from.toString()} is not in target enum ${to.toString()}`);
             }
         }

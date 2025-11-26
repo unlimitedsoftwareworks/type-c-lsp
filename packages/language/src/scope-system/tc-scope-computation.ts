@@ -7,8 +7,11 @@ import * as scopeUtils from "./tc-scope-utils.js";
  */
 export class TypeCScopeComputation extends DefaultScopeComputation {
     override collectExportedSymbols(document: LangiumDocument, cancelToken?: CancellationToken): Promise<AstNodeDescription[]> {
-        const model = document.parseResult.value as ast.Module;
-        return this.collectExportedSymbolsForNode(model, document, this.exportFilter, cancelToken);
+        const parseResult = document.parseResult.value;
+        if (!ast.isModule(parseResult)) {
+            return Promise.resolve([]);
+        }
+        return this.collectExportedSymbolsForNode(parseResult, document, this.exportFilter, cancelToken);
     }
 
     exportFilter(node: AstNode): Iterable<AstNode>{

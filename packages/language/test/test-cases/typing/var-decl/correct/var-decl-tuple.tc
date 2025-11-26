@@ -1,0 +1,7 @@
+fn getValues() -> (string, u8[], u64, u32, {x: f32, y: f32}) {
+    return ("hello", [1u8, 2u8, 3u8], 1u64, 42u32, {x: 1.0f, y: 2.0f})
+}
+
+fn main() {
+    let (a, b, _, d, e) = getValues()
+}

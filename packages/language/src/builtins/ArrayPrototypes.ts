@@ -1,7 +1,7 @@
 export const arrayPrototype = `
 /**
  * @file ArrayPrototypes.tc
- * @brief: Provides builtin prototypes for array and coroutine, used only by the LSP.
+ * @brief: Provides builtin prototypes for arrays, used only by the LSP.
  */
 prototype for array {
     /**

@@ -1,0 +1,107 @@
+// Test cases for valid function overloads (should pass validation)
+
+// Case 1: Different parameter types
+fn process(x: u32) -> string {
+    return "u32"
+}
+
+fn process(x: u64) -> string {
+    return "u64"
+}
+
+fn process(x: string) -> string {
+    return x
+}
+
+fn process(x: bool) -> string {
+    return "bool"
+}
+
+// Case 2: Different parameter counts
+fn add(a: u32) -> u32 {
+    return a
+}
+
+fn add(a: u32, b: u32) -> u32 {
+    return a + b
+}
+
+fn add(a: u32, b: u32, c: u32) -> u32 {
+    return a + b + c
+}
+
+// Case 3: Mixed parameter types with arrays
+fn transform(xs: u32[]) -> i32[] {
+    let result: i32[] = []
+    return result
+}
+
+fn transform(xs: string[]) -> u32[] {
+    let result: u32[] = []
+    return result
+}
+
+// Case 4: Functions with tuple parameters
+fn combine(a: u32, b: u32) -> (u32, u32) {
+    return (a, b)
+}
+
+fn combine(a: string, b: string) -> (string, string) {
+    return (a, b)
+}
+
+// Case 5: Namespace overloads
+namespace Utils {
+    fn helper(x: u32) -> u32 {
+        return x
+    }
+    
+    fn helper(x: string) -> string {
+        return x
+    }
+    
+    fn helper(x: u32, y: u32) -> u32 {
+        return x + y
+    }
+}
+
+// Case 6: Nested namespace overloads
+namespace Outer {
+    namespace Inner {
+        fn nested(x: u32) -> u32 {
+            return x
+        }
+        
+        fn nested(x: string) -> string {
+            return x
+        }
+    }
+}
+
+// Case 7: Function with struct parameters
+fn handleStruct(s: struct { x: u32, y: u32 }) -> u32 {
+    return s.x + s.y
+}
+
+fn handleStruct(s: struct { x: string, y: string }) -> string {
+    return s.x + s.y
+}
+
+// Case 8: Functions in different scopes are OK
+fn outerFn(x: u32) -> u32 {
+    return x
+}
+
+namespace Scope1 {
+    // This is OK - different scope
+    fn outerFn(x: u32) -> u32 {
+        return x
+    }
+}
+
+namespace Scope2 {
+    // This is also OK - different scope
+    fn outerFn(x: u32) -> u32 {
+        return x
+    }
+}

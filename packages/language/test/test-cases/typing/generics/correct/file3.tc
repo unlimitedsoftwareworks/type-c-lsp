@@ -1,0 +1,68 @@
+type Container<U> = interface {
+    fn size() -> u64
+    fn copy() -> Container<U>
+    fn [] (index: u64) -> U
+}
+
+type Array<T> = class Container<T>{
+    let items: T[]
+    
+    fn init(items: T[]) {
+        this.items = items
+    }
+    
+    fn size() -> u64 {
+        return this.items.length as u64
+    }
+    
+    fn copy() -> Container<T> {
+        let newItems: T[] = []
+        newItems.resize(this.size())
+        for let i = 0u64; i < this.size(); i = i + 1u64 {
+            newItems[i] = this.items[i]
+        }
+
+        return new Array<T>(newItems)
+    }
+
+    fn slice(end: u64) -> Array<T> {
+        let newItems: T[] = []
+        newItems.resize(end)
+        for let i = 0u64; i < end; i = i + 1u64 {
+            newItems[i] = this.items[i]
+        }
+        return new Array<T>(newItems)
+    }
+
+    fn slice(start: u64, end: u64) -> Array<T> {
+        let newItems: T[] = []
+        newItems.resize(end - start)
+        for let i = start; i < end; i = i + 1u64 {
+            newItems[i - start] = this.items[i]
+        }
+        return new Array<T>(newItems)
+    }
+
+    fn [] (index: u64) -> T {
+        return this.items[index]
+    }
+}
+
+fn main() -> void {
+    let arr: Array<u32> = new Array<u32>([1u32, 2u32, 3u32])
+    let size = arr.size()
+    let arrCopy: Container<u32> = arr.copy()
+
+    let slice1 = arr.slice(2u64)
+    let slice2 = arr.slice(1u64, 3u64)
+}
+
+fn main2() {
+    let arr = new Array<Array<{x: u32, y: u32}> >([
+        new Array<{x: u32, y: u32}>([{x: 1u32}, {x: 2u32}]),
+        new Array<{x: u32, y: u32}>([{x: 3u32}, {x: 4u32}])
+    ])
+
+    let size = arr.size()
+    let firstInnerArray = arr[0][0].y
+}

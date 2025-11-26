@@ -224,10 +224,10 @@ type File = class {
     fn read(n: u64) -> string {
         let (buffer, error) = fs_api.fs_read(this.fileHandler, n)
         if(error) {
-            return new string()
+            return String.fromBytes([])
         }
         else {
-            return new string(buffer)
+            return String.fromBytes(buffer)
         }
     }
 
@@ -235,10 +235,10 @@ type File = class {
         let (buffer, error) = fs_api.fs_readline(this.fileHandler)
         if(error) {
             println("Error reading line: "+ error)
-            return new string()
+            return String.fromBytes([])
         }
         else {
-            return new string(buffer)
+            return String.fromBytes(buffer)
         }
     }
 
@@ -246,10 +246,10 @@ type File = class {
         let (buffer, error) = fs_api.fs_readall(this.fileHandler)
         if(error) {
             println("Error reading all")
-            return new string()
+            return String.fromBytes([])
         }
         else {
-            return new string(buffer)
+            return String.fromBytes(buffer)
         }
     }
 
@@ -345,8 +345,8 @@ namespace fs {
 
         let filesList: string[] = []
         filesList.resize(files.length)
-        for let i: u64 = 0; i < files ; i = i + 1 {
-            let file = new string(files[i])
+        for let i: u64 = 0; i < files.length ; i = i + 1 {
+            let file = String.fromBytes(files[i])
             filesList[i] = file
         }
 
@@ -361,7 +361,7 @@ namespace fs {
             return null
         }
 
-        return new string(dir)
+        return String.fromBytes(dir)
     }
 
     fn getUserDirectory() -> string? {
@@ -371,7 +371,7 @@ namespace fs {
             return null
         }
 
-        return new string(dir)
+        return String.fromBytes(dir)
     }
 
     fn getFileAttributes(filepath: string) -> FileAttributes? {
@@ -445,7 +445,7 @@ namespace fs {
             return null
         }
 
-        return new string(link)
+        return String.fromBytes(link)
     }
 
     fn realpath(path: string) -> string? {
@@ -454,16 +454,17 @@ namespace fs {
             return null
         }
 
-        return new string(real)
+        return String.fromBytes(real)
     }
 
     fn getenv(path: string) -> string? {
         let (value, error) = fs_api.fs_getenv(path.cstr())
+        
         if (error) {
             return null
         }
 
-        return new string(value)
+        return String.fromBytes(value)
     }
 
     fn setenv(path: string, value: string, overwrite: bool) -> FSError {

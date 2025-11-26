@@ -1,0 +1,44 @@
+// Test cases for valid interface method overloads
+
+// Case 1: Different parameter types
+type Drawable = interface {
+    fn draw(x: u32, y: u32) -> void
+    fn draw(x: f64, y: f64) -> void
+    fn draw(point: struct { x: f64, y: f64 }) -> void
+}
+
+// Case 2: Different parameter counts
+type Logger = interface {
+    fn log(msg: string) -> void
+    fn log(level: u32, msg: string) -> void
+    fn log(level: u32, category: string, msg: string) -> void
+}
+
+// Case 3: Multiple method signatures
+type Processor = interface {
+    fn process(data: u32[]) -> u32
+    fn process(data: string[]) -> string
+    fn process(data: struct { value: u32 }) -> u32
+}
+
+// Case 4: Operator overloading in interfaces
+type Addable = interface {
+    fn +|add(other: Addable) -> Addable
+    fn -(other: Addable) -> Addable
+}
+
+// Case 5: Multiple interfaces with same method names (different scopes)
+type Reader = interface {
+    fn read(path: string) -> string
+}
+
+type Writer = interface {
+    fn read(bytes: u32) -> u8[]  // Different scope, OK
+}
+
+// Case 6: Interface with various data types
+type Converter = interface {
+    fn convert(value: u32) -> string
+    fn convert(value: string) -> u32
+    fn convert(value: bool) -> string
+}

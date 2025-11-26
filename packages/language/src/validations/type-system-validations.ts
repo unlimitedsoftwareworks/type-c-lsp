@@ -3,12 +3,11 @@ import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
-    ClassTypeDescription,
+    ArrayTypeDescription,
     ErrorTypeDescription,
-    InterfaceTypeDescription,
-    MethodType,
     TypeDescription,
     TypeKind,
+    isArrayType,
     isClassType,
     isFunctionType,
     isInterfaceType,
@@ -42,7 +41,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             BinaryExpression: this.checkBinaryExpression,
             FunctionCall: this.checkFunctionCall,
             ReturnStatement: this.checkReturnStatement,
+            YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
+            IndexSet: this.checkIndexSet,
+            ReverseIndexSet: this.checkReverseIndexSet,
         };
     }
 
@@ -73,15 +75,25 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             if (resolved) inferredType = resolved;
         }
 
-        // Interface compatibility checking
-        if (isInterfaceType(expectedType) && isClassType(inferredType)) {
-            this.checkInterfaceCompatibility(inferredType, expectedType, node.initializer, accept);
-            return;
-        }
-
-        // Check compatibility
-        if (!this.isTypeCompatible(inferredType, expectedType)) {
-            accept('error', `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`, {
+        // Check compatibility using the centralized type compatibility checker
+        // This handles all cases including interface compatibility
+        const compatResult = this.isTypeCompatible(inferredType, expectedType);
+        if (!compatResult.success) {
+            // Build context-aware error message
+            let errorMsg: string;
+            if (isInterfaceType(expectedType) && isClassType(inferredType)) {
+                // Special formatting for interface implementation errors
+                errorMsg = `Variable '${node.name}' requires that '${inferredType.toString()}' implements '${expectedType.toString()}'`;
+                if (compatResult.message) {
+                    errorMsg += `. ${compatResult.message}`;
+                }
+            } else {
+                // General type mismatch
+                errorMsg = compatResult.message
+                    ? `Type mismatch: ${compatResult.message}`
+                    : `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`;
+            }
+            accept('error', errorMsg, {
                 node: node.initializer,
                 property: 'initializer',
             });
@@ -122,8 +134,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Assignment operators: right must be compatible with left
         const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
         if (assignmentOps.includes(node.op)) {
-            if (!this.isTypeCompatible(rightType, leftType)) {
-                accept('error', `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(rightType, leftType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign: ${compatResult.message}`
+                    : `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`;
+                accept('error', errorMsg, {
                     node: node.right,
                 });
             }
@@ -208,7 +224,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
 
             // Otherwise, require exact type compatibility
-            if (!this.isTypeCompatible(rightType, leftType) && !this.isTypeCompatible(leftType, rightType)) {
+            const rightToLeft = this.isTypeCompatible(rightType, leftType);
+            const leftToRight = this.isTypeCompatible(leftType, rightType);
+            if (!rightToLeft.success && !leftToRight.success) {
                 accept('warning', `Comparing incompatible types '${leftType.toString()}' and '${rightType.toString()}'`, {
                     node,
                 });
@@ -299,8 +317,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const expectedType = paramTypes[index].type;
             const actualType = this.typeProvider.getType(arg);
 
-            if (!this.isTypeCompatible(actualType, expectedType)) {
-                accept('error', `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(actualType, expectedType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Argument ${index + 1}: ${compatResult.message}`
+                    : `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
                     node: arg,
                 });
             }
@@ -311,27 +333,50 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Check return statements against function return type.
      */
     checkReturnStatement = (node: ast.ReturnStatement, accept: ValidationAcceptor): void => {
-        // Find the containing function
+        // Find the containing function or lambda
         let current: AstNode | undefined = node.$container;
-        while (current && !ast.isFunctionDeclaration(current)) {
+        while (current && !ast.isFunctionDeclaration(current) && !ast.isLambdaExpression(current)) {
             current = current.$container;
         }
 
-        if (!current || !ast.isFunctionDeclaration(current)) {
-            return; // Not in a function
+        if (!current) {
+            return; // Not in a function or lambda
         }
 
-        const fn: ast.FunctionDeclaration = current;
-        if (!fn.header.returnType) {
+        // Get fnType from either FunctionDeclaration or LambdaExpression
+        const fnType = ast.isFunctionDeclaration(current) ? current.fnType :
+                       ast.isLambdaExpression(current) ? current.fnType : undefined;
+
+        if (!fnType) {
+            return; // Shouldn't happen
+        }
+
+        // Check if this is a coroutine - return statements not allowed in coroutines
+        if (fnType === 'cfn') {
+            accept('error', `Coroutines must use 'yield' instead of 'return'`, {
+                node,
+            });
+            return;
+        }
+
+        // Get header from either FunctionDeclaration or LambdaExpression
+        const header = ast.isFunctionDeclaration(current) ? current.header :
+                       ast.isLambdaExpression(current) ? current.header : undefined;
+
+        if (!header || !header.returnType) {
             return; // No explicit return type
         }
 
-        const expectedReturnType = this.typeProvider.getType(fn.header.returnType);
+        const expectedReturnType = this.typeProvider.getType(header.returnType);
 
         if (node.expr) {
             const actualType = this.typeProvider.getType(node.expr);
-            if (!this.isTypeCompatible(actualType, expectedReturnType)) {
-                accept('error', `Return type mismatch: expected '${expectedReturnType.toString()}' but got '${actualType.toString()}'`, {
+            const compatResult = this.isTypeCompatible(actualType, expectedReturnType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Return type mismatch: ${compatResult.message}`
+                    : `Return type mismatch: expected '${expectedReturnType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
                     node: node.expr,
                 });
             }
@@ -346,17 +391,95 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
-     * Check function declarations for return type issues.
-     * 
+     * Check yield expressions against coroutine yield type.
+     */
+    checkYieldExpression = (node: ast.YieldExpression, accept: ValidationAcceptor): void => {
+        // Find the containing function or lambda
+        let current: AstNode | undefined = node.$container;
+        while (current && !ast.isFunctionDeclaration(current) && !ast.isLambdaExpression(current)) {
+            current = current.$container;
+        }
+
+        if (!current) {
+            accept('error', `Yield expression must be inside a coroutine function`, {
+                node,
+            });
+            return;
+        }
+
+        // Get fnType from either FunctionDeclaration or LambdaExpression
+        const fnType = ast.isFunctionDeclaration(current) ? current.fnType :
+                       ast.isLambdaExpression(current) ? current.fnType : undefined;
+
+        if (!fnType) {
+            accept('error', `Yield expression must be inside a coroutine function`, {
+                node,
+            });
+            return;
+        }
+
+        // Check if this is a regular function - yield not allowed
+        if (fnType !== 'cfn') {
+            accept('error', `Yield expression can only be used in coroutines (cfn). Use 'return' in regular functions.`, {
+                node,
+            });
+            return;
+        }
+
+        // Get header from either FunctionDeclaration or LambdaExpression
+        const header = ast.isFunctionDeclaration(current) ? current.header :
+                       ast.isLambdaExpression(current) ? current.header : undefined;
+
+        if (!header || !header.returnType) {
+            return; // No explicit yield type to validate against
+        }
+
+        const expectedYieldType = this.typeProvider.getType(header.returnType);
+
+        if (node.expr) {
+            const actualType = this.typeProvider.getType(node.expr);
+            const compatResult = this.isTypeCompatible(actualType, expectedYieldType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Yield type mismatch: ${compatResult.message}`
+                    : `Yield type mismatch: expected '${expectedYieldType.toString()}' but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.expr,
+                });
+            }
+        } else {
+            // Yield with no value
+            if (expectedYieldType.kind !== TypeKind.Void) {
+                accept('error', `Coroutine must yield a value of type '${expectedYieldType.toString()}'`, {
+                    node,
+                });
+            }
+        }
+    }
+
+    /**
+     * Check function declarations for return/yield type issues.
+     *
      * Validates:
-     * 1. If no explicit return type → ensure we can infer successfully (no error type)
-     * 2. If explicit return type → ensure inferred type matches declared type
-     * 
+     * 1. If no explicit return/yield type → ensure we can infer successfully (no error type)
+     * 2. If explicit return/yield type → ensure inferred type matches declared type
+     *
+     * For regular functions:
+     * - Checks return statements and infers return type
+     *
+     * For coroutines (cfn):
+     * - Checks yield expressions and infers yield type
+     * - The "return type" annotation actually represents the yield type
+     *
      * Examples:
      * ```
      * fn bad() = match n { 0 => 1, _ => "oops" }  // ❌ Can't infer common type
      * fn good() -> u32 = ...                       // ✅ Explicit type
      * fn good2() = 42                              // ✅ Can infer u32
+     *
+     * cfn gen() -> u32 { yield 1; yield 2; }      // ✅ Explicit yield type
+     * cfn gen() { yield 1; yield 2; }             // ✅ Can infer u32 from yields
+     * cfn bad() { yield 1; yield "oops"; }        // ❌ Can't infer common type
      * ```
      */
     checkFunctionDeclaration = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
@@ -366,12 +489,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return; // Not a function type (shouldn't happen)
         }
 
+        const isCoroutine = node.fnType === 'cfn';
         const inferredReturnType = fnType.returnType;
 
-        // Check 1: If inferred return type is an error, report it
+        // Check 1: If inferred return/yield type is an error, report it
         if (inferredReturnType.kind === TypeKind.Error) {
             const errorType = inferredReturnType as ErrorTypeDescription;
-            const message = errorType.message || 'Cannot infer return type';
+            const message = errorType.message || (isCoroutine ? 'Cannot infer yield type' : 'Cannot infer return type');
 
             // Don't report recursion placeholder errors (they're handled during inference)
             if (message === '__recursion_placeholder__') {
@@ -385,17 +509,120 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        // Check 2: If explicit return type, validate it matches inferred type
+        // Check 2: If explicit return/yield type, validate it matches inferred type
         if (node.header.returnType) {
             const declaredReturnType = this.typeProvider.getType(node.header.returnType);
 
-            if (!this.isTypeCompatible(inferredReturnType, declaredReturnType)) {
-                accept('error',
-                    `Function return type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`,
-                    {
-                        node: node.header.returnType,
+            const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
+            if (!compatResult.success) {
+                const typeKind = isCoroutine ? 'yield' : 'return';
+                const errorMsg = compatResult.message
+                    ? `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: ${compatResult.message}`
+                    : `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.header.returnType,
+                });
+            }
+        }
+    }
+
+    /**
+     * Check index set operations (e.g., arr[0] = value).
+     * Validates that the assigned value is compatible with the array/container element type.
+     */
+    checkIndexSet = (node: ast.IndexSet, accept: ValidationAcceptor): void => {
+        let baseType = this.typeProvider.getType(node.expr);
+
+        // Resolve reference types
+        if (isReferenceType(baseType)) {
+            const resolved = this.typeProvider.resolveReference(baseType);
+            if (resolved) baseType = resolved;
+        }
+
+        const valueType = this.typeProvider.getType(node.value);
+
+        // For arrays: check element type compatibility
+        if (isArrayType(baseType)) {
+            const arrayType = baseType as ArrayTypeDescription;
+            const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign to array: ${compatResult.message}`
+                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.value,
+                });
+            }
+            return;
+        }
+
+        // For classes with []= operator: validate against the operator's parameter type
+        if (isClassType(baseType)) {
+            const indexSetMethod = baseType.methods.find(m => m.names.includes('[]='));
+            if (indexSetMethod) {
+                // The value parameter is typically the last parameter
+                const valueParam = indexSetMethod.parameters[indexSetMethod.parameters.length - 1];
+                if (valueParam) {
+                    const compatResult = this.isTypeCompatible(valueType, valueParam.type);
+                    if (!compatResult.success) {
+                        const errorMsg = compatResult.message
+                            ? `Cannot assign to index: ${compatResult.message}`
+                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                        accept('error', errorMsg, {
+                            node: node.value,
+                        });
                     }
-                );
+                }
+            }
+        }
+    }
+
+    /**
+     * Check reverse index set operations (e.g., arr[-1] = value).
+     */
+    checkReverseIndexSet = (node: ast.ReverseIndexSet, accept: ValidationAcceptor): void => {
+        let baseType = this.typeProvider.getType(node.expr);
+
+        // Resolve reference types
+        if (isReferenceType(baseType)) {
+            const resolved = this.typeProvider.resolveReference(baseType);
+            if (resolved) baseType = resolved;
+        }
+
+        const valueType = this.typeProvider.getType(node.value);
+
+        // For arrays: check element type compatibility
+        if (isArrayType(baseType)) {
+            const arrayType = baseType as ArrayTypeDescription;
+            const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Cannot assign to array: ${compatResult.message}`
+                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.value,
+                });
+            }
+            return;
+        }
+
+        // For classes with [-]= operator: validate against the operator's parameter type
+        if (isClassType(baseType)) {
+            const reverseIndexSetMethod = baseType.methods.find(m => m.names.includes('[-]='));
+            if (reverseIndexSetMethod) {
+                // The value parameter is typically the last parameter
+                const valueParam = reverseIndexSetMethod.parameters[reverseIndexSetMethod.parameters.length - 1];
+                if (valueParam) {
+                    const compatResult = this.isTypeCompatible(valueType, valueParam.type);
+                    if (!compatResult.success) {
+                        const errorMsg = compatResult.message
+                            ? `Cannot assign to reverse index: ${compatResult.message}`
+                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                        accept('error', errorMsg, {
+                            node: node.value,
+                        });
+                    }
+                }
             }
         }
     }
@@ -405,111 +632,20 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     // ========================================================================
 
     /**
-     * Check if a class implements all methods required by an interface.
-     * 
-     * Validates:
-     * - All interface methods are present in the class
-     * - Method signatures match (parameters and return type)
-     * - Handles method overloading (multiple names per method)
-     * 
-     * Example:
-     * ```
-     * type Drawable = interface {
-     *     fn draw() -> void
-     * }
-     * type Circle = class { ... }
-     * let d: Drawable = new Circle()  // Check Circle implements draw()
-     * ```
-     */
-    private checkInterfaceCompatibility(
-        classType: ClassTypeDescription,
-        interfaceType: InterfaceTypeDescription,
-        node: AstNode,
-        accept: ValidationAcceptor
-    ): void {
-        // Check each method required by the interface
-        for (const requiredMethod of interfaceType.methods) {
-            // Find a matching method in the class
-            const matchingMethod = this.findMatchingMethod(classType.methods, requiredMethod);
-
-            if (!matchingMethod) {
-                // Method not found
-                const methodName = requiredMethod.names[0] || '<unnamed>';
-                accept('error',
-                    `Class '${classType.toString()}' does not implement interface method '${methodName}' from '${interfaceType.toString()}'`,
-                    { node }
-                );
-                continue;
-            }
-
-            // Check method signature compatibility
-            this.checkMethodSignatureCompatibility(matchingMethod, requiredMethod, node, accept);
-        }
-    }
-
-    /**
-     * Find a method in the class that matches one of the interface method's names.
-     */
-    private findMatchingMethod(
-        classMethods: readonly MethodType[],
-        interfaceMethod: MethodType
-    ): MethodType | undefined {
-        // Check if any class method has a name that matches any of the interface method's names
-        return classMethods.find(classMethod =>
-            classMethod.names.some(className =>
-                interfaceMethod.names.some(interfaceName => className === interfaceName)
-            )
-        );
-    }
-
-    /**
-     * Check if a class method's signature is compatible with the interface requirement.
-     */
-    private checkMethodSignatureCompatibility(
-        classMethod: MethodType,
-        interfaceMethod: MethodType,
-        node: AstNode,
-        accept: ValidationAcceptor
-    ): void {
-        const methodName = interfaceMethod.names[0] || '<unnamed>';
-
-        // Check parameter count
-        if (classMethod.parameters.length !== interfaceMethod.parameters.length) {
-            accept('error',
-                `Method '${methodName}' has wrong number of parameters: expected ${interfaceMethod.parameters.length}, got ${classMethod.parameters.length}`,
-                { node }
-            );
-            return;
-        }
-
-        // Check each parameter type
-        for (let i = 0; i < interfaceMethod.parameters.length; i++) {
-            const classParam = classMethod.parameters[i];
-            const interfaceParam = interfaceMethod.parameters[i];
-
-            if (!this.isTypeCompatible(classParam.type, interfaceParam.type)) {
-                accept('error',
-                    `Method '${methodName}' parameter ${i + 1} '${interfaceParam.name}': expected '${interfaceParam.type.toString()}', got '${classParam.type.toString()}'`,
-                    { node }
-                );
-            }
-        }
-
-        // Check return type
-        if (!this.isTypeCompatible(classMethod.returnType, interfaceMethod.returnType)) {
-            accept('error',
-                `Method '${methodName}' has incompatible return type: expected '${interfaceMethod.returnType.toString()}', got '${classMethod.returnType.toString()}'`,
-                { node }
-            );
-        }
-    }
-
-    /**
      * Check if a type is compatible with an expected type.
      *
      * Delegates to the type-utils isAssignable function for consistent type checking.
+     * This handles ALL compatibility checks including:
+     * - Interface implementation (via isClassAssignableToInterface in type-utils.ts)
+     * - Numeric promotions
+     * - Struct compatibility
+     * - Variant constructor assignability
+     * - Generic type substitution
+     * - And more...
+     *
+     * Returns the detailed error message if types are incompatible.
      */
-    private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): boolean {
+    private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): { success: boolean; message?: string } {
         const actual = isReferenceType(actual_) ? this.typeProvider.resolveReference(actual_) : actual_;
         const expected = isReferenceType(expected_) ? this.typeProvider.resolveReference(expected_) : expected_;
 

@@ -1,6 +1,6 @@
 /**
  * Type Utilities for Type-C Type System
- * 
+ *
  * This module provides utilities for working with types:
  * - Type comparison and equality
  * - Type compatibility and assignability
@@ -8,6 +8,35 @@
  * - Type substitution (for generics)
  * - Type simplification and normalization
  */
+
+// ============================================================================
+// Type Check Result
+// ============================================================================
+
+/**
+ * Result of a type checking operation.
+ * Contains success status and optional error message.
+ */
+export interface TypeCheckResult {
+    /** Whether the type check succeeded */
+    success: boolean;
+    /** Optional error message explaining why the check failed */
+    message?: string;
+}
+
+/**
+ * Creates a successful type check result.
+ */
+export function success(): TypeCheckResult {
+    return { success: true };
+}
+
+/**
+ * Creates a failed type check result with an error message.
+ */
+export function failure(message: string): TypeCheckResult {
+    return { success: false, message };
+}
 
 import {
     TypeDescription,
@@ -48,7 +77,12 @@ import {
     InterfaceTypeDescription,
     VariantTypeDescription,
     isEnumType,
+    isStringEnumType,
+    isStringLiteralType,
+    StringEnumTypeDescription,
+    StringLiteralTypeDescription,
 } from "./type-c-types.js";
+import * as factory from "./type-factory.js";
 
 // ============================================================================
 // Type Equality
@@ -56,17 +90,19 @@ import {
 
 /**
  * Checks if two types are exactly equal (structural equality).
- * 
+ *
  * @param a First type
  * @param b Second type
- * @returns true if types are structurally equal
+ * @returns TypeCheckResult with success status and optional error message
  */
-export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
+export function areTypesEqual(a: TypeDescription, b: TypeDescription): TypeCheckResult {
     // Quick reference equality check
-    if (a === b) return true;
+    if (a === b) return success();
 
     // Different kinds are never equal
-    if (a.kind !== b.kind) return false;
+    if (a.kind !== b.kind) {
+        return failure(`expected '${b.toString()}', got '${a.toString()}'`);
+    }
 
     // Handle each type kind
     switch (a.kind) {
@@ -84,22 +120,60 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
         case TypeKind.Bool:
         case TypeKind.Void:
         case TypeKind.String:
+        case TypeKind.StringLiteral:
         case TypeKind.Null:
         case TypeKind.Never:
         case TypeKind.Any:
-            return true;
+            return success();
+        
+        case TypeKind.StringEnum: {
+            const aEnum = a as StringEnumTypeDescription;
+            const bEnum = b as StringEnumTypeDescription;
             
-        case TypeKind.Array:
-            return areTypesEqual(
+            // String enums are equal if they have the same values
+            if (aEnum.values.length !== bEnum.values.length) {
+                return failure(`String enum value count mismatch: ${aEnum.values.length} vs ${bEnum.values.length}`);
+            }
+            
+            // Check all values match (order doesn't matter for structural equality)
+            const aSet = new Set(aEnum.values);
+            const bSet = new Set(bEnum.values);
+            
+            for (const val of aEnum.values) {
+                if (!bSet.has(val)) {
+                    return failure(`String enum value "${val}" not found in target enum`);
+                }
+            }
+            for (const val of bEnum.values) {
+                if (!aSet.has(val)) {
+                    return failure(`String enum value "${val}" not found in source enum`);
+                }
+            }
+            
+            return success();
+        }
+            
+        case TypeKind.Array: {
+            const result = areTypesEqual(
                 (a as ArrayTypeDescription).elementType,
                 (b as ArrayTypeDescription).elementType
             );
+            if (!result.success) {
+                return failure(`Array element types differ: ${result.message}`);
+            }
+            return success();
+        }
             
-        case TypeKind.Nullable:
-            return areTypesEqual(
+        case TypeKind.Nullable: {
+            const result = areTypesEqual(
                 (a as NullableTypeDescription).baseType,
-                (b as NullableTypeDescription).baseType,
+                (b as NullableTypeDescription).baseType
             );
+            if (!result.success) {
+                return failure(`Nullable base types differ: ${result.message}`);
+            }
+            return success();
+        }
 
         /**
          * - Unions are only used for generic constraints, so they are never equal to other types
@@ -109,7 +183,7 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
         case TypeKind.Union:
         case TypeKind.Tuple:
         case TypeKind.Join:
-            return false;
+            return failure(`Type ${a.toString()} cannot be compared for equality`);
             
             
         case TypeKind.Struct:
@@ -130,68 +204,120 @@ export function areTypesEqual(a: TypeDescription, b: TypeDescription): boolean {
         // For other complex types, fall back to string comparison
         // (This is a simplified approach; real implementation would need deeper comparison)
         default:
-            return a.toString() === b.toString();
+            if (a.toString() === b.toString()) {
+                return success();
+            }
+            return failure(`Types differ: ${a.toString()} vs ${b.toString()}`);
     }
 }
 
-function areVariantTypesEqual(a: VariantTypeDescription, b: VariantTypeDescription): boolean {
+function areVariantTypesEqual(a: VariantTypeDescription, b: VariantTypeDescription): TypeCheckResult {
     // Variants are equal if they have the same constructors with the same parameter types
-    if (a.constructors.length !== b.constructors.length) return false;
+    if (a.constructors.length !== b.constructors.length) {
+        return failure(`Variant constructor count mismatch: ${a.constructors.length} vs ${b.constructors.length}`);
+    }
 
-    return a.constructors.every(aConstructor => {
+    for (const aConstructor of a.constructors) {
         const bConstructor = b.constructors.find(c => c.name === aConstructor.name);
-        if (!bConstructor) return false;
+        if (!bConstructor) {
+            return failure(`Constructor '${aConstructor.name}' not found in target variant`);
+        }
 
-        if (aConstructor.parameters.length !== bConstructor.parameters.length) return false;
+        if (aConstructor.parameters.length !== bConstructor.parameters.length) {
+            return failure(`Constructor '${aConstructor.name}' parameter count mismatch`);
+        }
 
-        return aConstructor.parameters.every((aParam, i) => {
+        for (let i = 0; i < aConstructor.parameters.length; i++) {
+            const aParam = aConstructor.parameters[i];
             const bParam = bConstructor.parameters[i];
-            return aParam.name === bParam.name && areTypesEqual(aParam.type, bParam.type);
-        });
-    });
+            if (aParam.name !== bParam.name) {
+                return failure(`Constructor '${aConstructor.name}' parameter name mismatch: ${aParam.name} vs ${bParam.name}`);
+            }
+            const typeResult = areTypesEqual(aParam.type, bParam.type);
+            if (!typeResult.success) {
+                return failure(`Constructor '${aConstructor.name}' parameter '${aParam.name}' type mismatch: ${typeResult.message}`);
+            }
+        }
+    }
+
+    return success();
 }
 
-function areStructTypesEqual(a: StructTypeDescription, b: StructTypeDescription): boolean {
-    if (a.fields.length !== b.fields.length) return false;
+function areStructTypesEqual(a: StructTypeDescription, b: StructTypeDescription): TypeCheckResult {
+    if (a.fields.length !== b.fields.length) {
+        return failure(`Struct field count mismatch: ${a.fields.length} vs ${b.fields.length}`);
+    }
     
     // Structs are equal if they have the same fields with the same types
-    return a.fields.every(aField => {
+    for (const aField of a.fields) {
         const bField = b.fields.find(f => f.name === aField.name);
-        return bField && areTypesEqual(aField.type, bField.type);
-    });
+        if (!bField) {
+            return failure(`Field '${aField.name}' not found in target struct`);
+        }
+        const typeResult = areTypesEqual(aField.type, bField.type);
+        if (!typeResult.success) {
+            return failure(`Field '${aField.name}' type mismatch: ${typeResult.message}`);
+        }
+    }
+    
+    return success();
 }
 
-function areFunctionTypesEqual(a: FunctionTypeDescription, b: FunctionTypeDescription): boolean {
-    if (a.fnType !== b.fnType) return false;
-    if (a.parameters.length !== b.parameters.length) return false;
+function areFunctionTypesEqual(a: FunctionTypeDescription, b: FunctionTypeDescription): TypeCheckResult {
+    if (a.fnType !== b.fnType) {
+        return failure(`Function type mismatch: ${a.fnType} vs ${b.fnType}`);
+    }
+    if (a.parameters.length !== b.parameters.length) {
+        return failure(`Parameter count mismatch: ${a.parameters.length} vs ${b.parameters.length}`);
+    }
     
     // Check parameter types
-    if (!a.parameters.every((aParam, i) => 
-        areTypesEqual(aParam.type, b.parameters[i].type)
-    )) {
-        return false;
+    for (let i = 0; i < a.parameters.length; i++) {
+        const aParam = a.parameters[i];
+        const bParam = b.parameters[i];
+        const typeResult = areTypesEqual(aParam.type, bParam.type);
+        if (!typeResult.success) {
+            return failure(`parameter ${i + 1} type mismatch: ${typeResult.message}`);
+        }
     }
     
     // Check return type
-    return areTypesEqual(a.returnType, b.returnType);
+    const returnResult = areTypesEqual(a.returnType, b.returnType);
+    if (!returnResult.success) {
+        return failure(`return type mismatch: ${returnResult.message}`);
+    }
+    
+    return success();
 }
 
-function areReferenceTypesEqual(a: ReferenceTypeDescription, b: ReferenceTypeDescription): boolean {
+function areReferenceTypesEqual(a: ReferenceTypeDescription, b: ReferenceTypeDescription): TypeCheckResult {
     // References are equal if they point to the same declaration
-    if (a.declaration !== b.declaration) return false;
+    if (a.declaration !== b.declaration) {
+        return failure(`References point to different declarations: ${a.declaration.name} vs ${b.declaration.name}`);
+    }
     
     // And have the same generic arguments
-    if (a.genericArgs.length !== b.genericArgs.length) return false;
+    if (a.genericArgs.length !== b.genericArgs.length) {
+        return failure(`Generic argument count mismatch: ${a.genericArgs.length} vs ${b.genericArgs.length}`);
+    }
     
-    return a.genericArgs.every((aArg, i) => 
-        areTypesEqual(aArg, b.genericArgs[i])
-    );
+    for (let i = 0; i < a.genericArgs.length; i++) {
+        const result = areTypesEqual(a.genericArgs[i], b.genericArgs[i]);
+        if (!result.success) {
+            return failure(`Generic argument ${i + 1} mismatch: ${result.message}`);
+        }
+    }
+    
+    return success();
 }
 
-function areGenericTypesEqual(a: GenericTypeDescription, b: GenericTypeDescription): boolean {
+function areGenericTypesEqual(a: GenericTypeDescription, b: GenericTypeDescription): TypeCheckResult {
     // Generics are equal if they have the same name
     // (assuming they're from the same scope context)
-    return a.name === b.name;
+    if (a.name === b.name) {
+        return success();
+    }
+    return failure(`Generic type name mismatch: ${a.name} vs ${b.name}`);
 }
 
 // ============================================================================
@@ -201,32 +327,33 @@ function areGenericTypesEqual(a: GenericTypeDescription, b: GenericTypeDescripti
 /**
  * Checks if a value of type 'from' can be assigned to a variable of type 'to'.
  * This implements subtyping rules for Type-C.
- * 
+ *
  * @param from Source type
  * @param to Target type
- * @returns true if assignment is valid
+ * @returns TypeCheckResult with success status and optional error message
  */
-export function isAssignable(from: TypeDescription, to: TypeDescription): boolean {
+export function isAssignable(from: TypeDescription, to: TypeDescription): TypeCheckResult {
     // Exact equality
-    if (areTypesEqual(from, to)) {
-        return true;
+    const equalityResult = areTypesEqual(from, to);
+    if (equalityResult.success) {
+        return success();
     }
     
     // Any type accepts everything, everything is assignable to Any
-    if (isAnyType(to)) return true;
-    if (isAnyType(from)) return true;
+    if (isAnyType(to)) return success();
+    if (isAnyType(from)) return success();
     
     // Never type is assignable to everything
-    if (isNeverType(from)) return true;
+    if (isNeverType(from)) return success();
     
     // Nothing is assignable to Never
-    if (isNeverType(to)) return false;
+    if (isNeverType(to)) return failure(`Cannot assign ${from.toString()} to never type`);
     
     // Error types propagate
-    if (isErrorType(from) || isErrorType(to)) return true;
+    if (isErrorType(from) || isErrorType(to)) return success();
     
     // Unset types - treat as assignable for now (they should be resolved)
-    if (isUnsetType(from) || isUnsetType(to)) return true;
+    if (isUnsetType(from) || isUnsetType(to)) return success();
     
     // Numeric promotions
     if (isNumericType(from) && isNumericType(to)) {
@@ -235,15 +362,41 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
 
     // Int + Enum or Enum + Int should be assignable
     if (isIntegerType(from) && isEnumType(to)) {
-        return true;
+        return success();
     }
     if (isEnumType(from) && isIntegerType(to)) {
-        return true;
+        return success();
+    }
+    
+    // String literal to string enum: check if literal value is in enum
+    if (isStringLiteralType(from) && isStringEnumType(to)) {
+        const literal = from as StringLiteralTypeDescription;
+        const stringEnum = to as StringEnumTypeDescription;
+        if (stringEnum.values.includes(literal.value)) {
+            return success();
+        }
+        return failure(`String literal "${literal.value}" is not assignable to ${stringEnum.values.map(v => `"${v}"`).join(' | ')}`);
+    }
+    
+    // String literal to string: always valid (string literal is a subtype of string)
+    if (isStringLiteralType(from) && to.kind === TypeKind.String) {
+        return success();
+    }
+    
+    // String enum to string literal: only if enum has exactly that value
+    if (isStringEnumType(from) && isStringLiteralType(to)) {
+        const stringEnum = from as StringEnumTypeDescription;
+        const literal = to as StringLiteralTypeDescription;
+        // This is generally not assignable unless the enum is a single-value enum
+        if (stringEnum.values.length === 1 && stringEnum.values[0] === literal.value) {
+            return success();
+        }
+        return failure(`String enum ${stringEnum.values.map(v => `"${v}"`).join(' | ')} is not assignable to literal "${literal.value}"`);
     }
     
     // Null can be assigned to nullable types
     if (from.kind === TypeKind.Null && isNullableType(to)) {
-        return true;
+        return success();
     }
     
     // T can be assigned to T?
@@ -253,15 +406,25 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     
     // Array covariance (for now, arrays are invariant in element type)
     if (isArrayType(from) && isArrayType(to)) {
-        return areTypesEqual(from.elementType, to.elementType);
+        const elementResult = areTypesEqual(from.elementType, to.elementType);
+        if (!elementResult.success) {
+            return failure(`Array element types are not compatible: ${elementResult.message}`);
+        }
+        return success();
     }
     
     // Tuple assignability
     if (isTupleType(from) && isTupleType(to)) {
-        if (from.elementTypes.length !== to.elementTypes.length) return false;
-        return from.elementTypes.every((fromType, i) => 
-            isAssignable(fromType, to.elementTypes[i])
-        );
+        if (from.elementTypes.length !== to.elementTypes.length) {
+            return failure(`Tuple length mismatch: ${from.elementTypes.length} vs ${to.elementTypes.length}`);
+        }
+        for (let i = 0; i < from.elementTypes.length; i++) {
+            const result = isAssignable(from.elementTypes[i], to.elementTypes[i]);
+            if (!result.success) {
+                return failure(`Tuple element ${i + 1} is not assignable: ${result.message}`);
+            }
+        }
+        return success();
     }
     
     // Struct assignability (structural typing)
@@ -275,7 +438,7 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
         // We need a type provider to resolve the reference, but we don't have access to it here
         // For now, we'll just return true and let the validator handle it
         // TODO: This should properly resolve the reference and check structural compatibility
-        return true;
+        return success();
     }
 
     // Function assignability (contravariant in parameters, covariant in return type)
@@ -286,28 +449,72 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     // Union type handling
     if (isUnionType(from)) {
         // All union members must be assignable to target
-        return from.types.every(t => isAssignable(t, to));
+        for (const t of from.types) {
+            const result = isAssignable(t, to);
+            if (!result.success) {
+                return failure(`Union member ${t.toString()} is not assignable to ${to.toString()}: ${result.message}`);
+            }
+        }
+        return success();
     }
     
     if (isUnionType(to)) {
         // Source must be assignable to at least one union member
-        return to.types.some(t => isAssignable(from, t));
+        for (const t of to.types) {
+            const result = isAssignable(from, t);
+            if (result.success) {
+                return success();
+            }
+        }
+        return failure(`${from.toString()} is not assignable to any member of union ${to.toString()}`);
+    }
+    
+    // String enum to string enum: check if all values in 'from' are in 'to'
+    if (isStringEnumType(from) && isStringEnumType(to)) {
+        const fromEnum = from as StringEnumTypeDescription;
+        const toEnum = to as StringEnumTypeDescription;
+        
+        // All values in 'from' must be present in 'to'
+        for (const value of fromEnum.values) {
+            if (!toEnum.values.includes(value)) {
+                return failure(`String enum value "${value}" from ${from.toString()} is not in target enum ${to.toString()}`);
+            }
+        }
+        return success();
     }
     
     // Join (intersection) type handling
     if (isJoinType(from)) {
         // At least one join member must be assignable to target
-        return from.types.some(t => isAssignable(t, to));
+        for (const t of from.types) {
+            const result = isAssignable(t, to);
+            if (result.success) {
+                return success();
+            }
+        }
+        return failure(`No member of intersection ${from.toString()} is assignable to ${to.toString()}`);
     }
     
     if (isJoinType(to)) {
         // Source must be assignable to all join members
-        return to.types.every(t => isAssignable(from, t));
+        for (const t of to.types) {
+            const result = isAssignable(from, t);
+            if (!result.success) {
+                return failure(`${from.toString()} is not assignable to intersection member ${t.toString()}: ${result.message}`);
+            }
+        }
+        return success();
     }
     
     // Class/Interface subtyping
-    if (isClassType(from) && (isClassType(to) || isInterfaceType(to))) {
-        return isClassAssignableToType(from, to);
+    if (isClassType(from) && isClassType(to)) {
+        if (from === to) {
+            return success();
+        }
+        return failure(`Class types differ: ${from.toString()} vs ${to.toString()}`);
+    }
+    else if (isClassType(from) && isInterfaceType(to)) {
+        return isClassAssignableToInterface(from, to);
     }
 
     if (isInterfaceType(from) && isInterfaceType(to)) {
@@ -346,78 +553,109 @@ export function isAssignable(from: TypeDescription, to: TypeDescription): boolea
     }
 
     // Default: not assignable
-    return false;
+    return failure(`${from.toString()} is not assignable to ${to.toString()}`);
 }
 
-function isNumericPromotionValid(from: IntegerTypeDescription | FloatTypeDescription, to: IntegerTypeDescription | FloatTypeDescription): boolean {
+function isNumericPromotionValid(from: IntegerTypeDescription | FloatTypeDescription, to: IntegerTypeDescription | FloatTypeDescription): TypeCheckResult {
     // Float types
     if (isFloatType(from) && isFloatType(to)) {
         // f32 can be promoted to f64
-        return from.bits <= to.bits;
+        if (from.bits <= to.bits) {
+            return success();
+        }
+        return failure(`Cannot narrow ${from.toString()} to ${to.toString()}`);
     }
     
     // Integer types
     if (isIntegerType(from) && isIntegerType(to)) {
         // Same signedness: can promote to larger size
         if (from.signed === to.signed) {
-            return from.bits <= to.bits;
+            if (from.bits <= to.bits) {
+                return success();
+            }
+            return failure(`Cannot narrow ${from.toString()} to ${to.toString()}`);
         }
         // Unsigned to signed: need extra bit
         if (!from.signed && to.signed) {
-            return from.bits < to.bits;
+            if (from.bits < to.bits) {
+                return success();
+            }
+            return failure(`Cannot convert unsigned ${from.toString()} to signed ${to.toString()} without extra bits`);
         }
         // Signed to unsigned: not allowed
-        return false;
+        return failure(`Cannot convert signed ${from.toString()} to unsigned ${to.toString()}`);
     }
     
     // Integer to float: generally allowed (with potential precision loss)
     if (isIntegerType(from) && isFloatType(to)) {
-        return true; // Could add more sophisticated checks
+        return success();
     }
     
     // Float to integer: not allowed implicitly
-    return false;
+    return failure(`Cannot implicitly convert ${from.toString()} to ${to.toString()}`);
 }
 
-function isStructAssignable(from: StructTypeDescription, to: StructTypeDescription): boolean {
+function isStructAssignable(from: StructTypeDescription, to: StructTypeDescription): TypeCheckResult {
     // Structural typing: 'from' must have all fields of 'to' with compatible types
-    return to.fields.every(toField => {
+    for (const toField of to.fields) {
         const fromField = from.fields.find(f => f.name === toField.name);
-        return fromField && isAssignable(fromField.type, toField.type);
-    });
+        if (!fromField) {
+            return failure(`Field '${toField.name}' missing in source struct`);
+        }
+        const result = isAssignable(fromField.type, toField.type);
+        if (!result.success) {
+            return failure(`Field '${toField.name}' type mismatch: ${result.message}`);
+        }
+    }
+    return success();
 }
 
-function isFunctionAssignable(from: FunctionTypeDescription, to: FunctionTypeDescription): boolean {
+function isFunctionAssignable(from: FunctionTypeDescription, to: FunctionTypeDescription): TypeCheckResult {
     // Function types must match in arity and type style
-    if (from.fnType !== to.fnType) return false;
-    if (from.parameters.length !== to.parameters.length) return false;
+    if (from.fnType !== to.fnType) {
+        return failure(`Function type mismatch: ${from.fnType} vs ${to.fnType}`);
+    }
+    if (from.parameters.length !== to.parameters.length) {
+        return failure(`Parameter count mismatch: ${from.parameters.length} vs ${to.parameters.length}`);
+    }
     
     // Parameters are contravariant
-    if (!to.parameters.every((toParam, i) => 
-        isAssignable(toParam.type, from.parameters[i].type)
-    )) {
-        return false;
+    for (let i = 0; i < to.parameters.length; i++) {
+        const result = isAssignable(to.parameters[i].type, from.parameters[i].type);
+        if (!result.success) {
+            return failure(`Parameter ${i + 1} is not contravariant: ${result.message}`);
+        }
     }
     
     // Return type is covariant
-    return isAssignable(from.returnType, to.returnType);
+    const returnResult = isAssignable(from.returnType, to.returnType);
+    if (!returnResult.success) {
+        return failure(`Return type is not covariant: ${returnResult.message}`);
+    }
+    
+    return success();
 }
 
-function isClassAssignableToType(from: ClassTypeDescription, to: ClassTypeDescription | InterfaceTypeDescription): boolean {
-    // Check if 'to' is in the supertype chain of 'from'
-    // This is a simplified version - real implementation needs full type resolution
-    return from.superTypes.some(superType => 
-        areTypesEqual(superType, to) || 
-        (isClassType(superType) && isClassAssignableToType(superType, to))
-    ) || from.implementations.some(impl => areTypesEqual(impl, to));
+function isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
+    // All interface methods must be implemented by the class
+    for (const method of to.methods) {
+        const classMethod = from.methods.find(m => m.names.some(name => method.names.includes(name)));
+        if (!classMethod) {
+            return failure(`class does not implement required method '${method.names[0]}'`);
+        }
+        const result = areFunctionTypesEqual(
+            factory.createFunctionType(classMethod.parameters, classMethod.returnType, 'fn', classMethod.genericParameters, undefined),
+            factory.createFunctionType(method.parameters, method.returnType, 'fn', method.genericParameters, undefined)
+        );
+        if (!result.success) {
+            return failure(`method '${method.names[0]}' signature mismatch: ${result.message}`);
+        }
+    }
+    return success();
 }
 
-function isInterfaceAssignableToInterface(from: InterfaceTypeDescription, to: InterfaceTypeDescription): boolean {
-    // Check if 'to' is in the supertype chain of 'from'
-    return from.superTypes.some(superType =>
-        areTypesEqual(superType, to) ||
-        (isInterfaceType(superType) && isInterfaceAssignableToInterface(superType, to))
-    );
+function isInterfaceAssignableToInterface(from: InterfaceTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
+    return failure(`Interface to interface assignment not yet implemented`);
 }
 
 /**
@@ -435,23 +673,22 @@ function isInterfaceAssignableToInterface(from: InterfaceTypeDescription, to: In
 function isVariantConstructorAssignableToVariant(
     from: VariantConstructorTypeDescription,
     to: VariantTypeDescription
-): boolean {
+): TypeCheckResult {
     // Find the constructor in the target variant
     const toConstructor = to.constructors.find(c => c.name === from.constructorName);
     if (!toConstructor) {
-        // Constructor doesn't exist in target variant
-        return false;
+        return failure(`Constructor '${from.constructorName}' not found in target variant`);
     }
 
     // Find the constructor in the source's base variant
     const fromConstructor = from.baseVariant.constructors.find(c => c.name === from.constructorName);
     if (!fromConstructor) {
-        return false;
+        return failure(`Constructor '${from.constructorName}' not found in source variant`);
     }
 
     // Check that parameter counts match
     if (fromConstructor.parameters.length !== toConstructor.parameters.length) {
-        return false;
+        return failure(`Constructor '${from.constructorName}' parameter count mismatch`);
     }
 
     // The from constructor has genericArgs that represent the inferred types (e.g., [struct{x: u32}])
@@ -484,12 +721,13 @@ function isVariantConstructorAssignableToVariant(
             continue;
         }
 
-        if (!isAssignable(resolvedFromParamType, toParamType)) {
-            return false;
+        const result = isAssignable(resolvedFromParamType, toParamType);
+        if (!result.success) {
+            return failure(`Constructor '${from.constructorName}' parameter ${i + 1} type mismatch: ${result.message}`);
         }
     }
 
-    return true;
+    return success();
 }
 
 /**
@@ -507,16 +745,19 @@ function isVariantConstructorAssignableToVariant(
 function isVariantConstructorAssignableToVariantConstructor(
     from: VariantConstructorTypeDescription,
     to: VariantConstructorTypeDescription
-): boolean {
+): TypeCheckResult {
     // Constructors must have the same name
     if (from.constructorName !== to.constructorName) {
-        return false;
+        return failure(`Constructor names differ: ${from.constructorName} vs ${to.constructorName}`);
     }
 
     // Generic arguments must be compatible
     // If lengths don't match, not compatible
     if (from.genericArgs.length !== to.genericArgs.length) {
-        return from.genericArgs.length === 0; // Allow if from has no generics
+        if (from.genericArgs.length === 0) {
+            return success(); // Allow if from has no generics
+        }
+        return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
     }
 
     // Check each generic argument
@@ -531,12 +772,13 @@ function isVariantConstructorAssignableToVariantConstructor(
         }
 
         // Otherwise, check normal assignability
-        if (!isAssignable(fromArg, toArg)) {
-            return false;
+        const result = isAssignable(fromArg, toArg);
+        if (!result.success) {
+            return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
         }
     }
 
-    return true;
+    return success();
 }
 
 /**
@@ -549,7 +791,7 @@ function isVariantConstructorAssignableToVariantConstructor(
 function isVariantConstructorAssignableToVariantRef(
     from: VariantConstructorTypeDescription,
     to: ReferenceTypeDescription
-): boolean {
+): TypeCheckResult {
     // Check if from's baseVariant matches the target reference
     // Use the variantDeclaration if available, otherwise fall back to comparing AST nodes
     const fromBaseMatches = from.variantDeclaration
@@ -557,7 +799,7 @@ function isVariantConstructorAssignableToVariantRef(
         : from.baseVariant.node === to.declaration;
 
     if (!fromBaseMatches) {
-        return false;
+        return failure(`Variant constructor does not match target reference`);
     }
 
     // Check generic arguments compatibility
@@ -565,9 +807,9 @@ function isVariantConstructorAssignableToVariantRef(
     if (from.genericArgs.length !== to.genericArgs.length) {
         // If lengths don't match, allow if from has no generics (will be inferred)
         if (from.genericArgs.length === 0) {
-            return true;
+            return success();
         }
-        return false;
+        return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
     }
 
     // Check each generic argument
@@ -582,12 +824,13 @@ function isVariantConstructorAssignableToVariantRef(
         }
 
         // Otherwise, check normal assignability
-        if (!isAssignable(fromArg, toArg)) {
-            return false;
+        const result = isAssignable(fromArg, toArg);
+        if (!result.success) {
+            return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
         }
     }
 
-    return true;
+    return success();
 }
 
 /**
@@ -606,20 +849,20 @@ function isVariantConstructorAssignableToVariantRef(
 function isReferenceAssignableToReference(
     from: ReferenceTypeDescription,
     to: ReferenceTypeDescription
-): boolean {
+): TypeCheckResult {
     // Must reference the same declaration
     if (from.declaration !== to.declaration) {
-        return false;
+        return failure(`References point to different declarations: ${from.declaration.name} vs ${to.declaration.name}`);
     }
 
     // If no generic arguments, they're compatible
     if (from.genericArgs.length === 0 && to.genericArgs.length === 0) {
-        return true;
+        return success();
     }
 
     // Generic argument counts must match
     if (from.genericArgs.length !== to.genericArgs.length) {
-        return false;
+        return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
     }
 
     // Check each generic argument
@@ -634,12 +877,13 @@ function isReferenceAssignableToReference(
         }
 
         // Otherwise, check normal assignability
-        if (!isAssignable(fromArg, toArg)) {
-            return false;
+        const result = isAssignable(fromArg, toArg);
+        if (!result.success) {
+            return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
         }
     }
 
-    return true;
+    return success();
 }
 
 // ============================================================================
@@ -829,6 +1073,51 @@ export function substituteGenerics(
         };
         return variantType;
     }
+    if (isClassType(type)) {
+        const substitutedAttributes = type.attributes.map(a => ({
+            name: a.name,
+            type: substituteGenerics(a.type, substitutions),
+            isStatic: a.isStatic,
+            isConst: a.isConst,
+            isLocal: a.isLocal
+        }));
+        const substitutedMethods = type.methods.filter(m => !m.isStatic).map(m => ({
+            ...m,
+            parameters: m.parameters.map(p => ({
+                name: p.name,
+                type: substituteGenerics(p.type, substitutions),
+                isMut: p.isMut
+            })),
+            returnType: substituteGenerics(m.returnType, substitutions)
+        }));
+        const substitutedImplementations = type.implementations.map(i => substituteGenerics(i, substitutions));
+        const substitutedSuperTypes = type.superTypes.map(t => substituteGenerics(t, substitutions));
+        const classType: ClassTypeDescription = {
+            kind: type.kind,
+            attributes: substitutedAttributes,
+            methods: substitutedMethods,
+            superTypes: substitutedSuperTypes,
+            implementations: substitutedImplementations,    
+            node: type.node,
+            toString: () => {
+                const attributeStrs = substitutedAttributes.map(a => `${a.name}: ${a.type.toString()}`).join(', ');
+                const methodStrs = substitutedMethods.map(m => `${m.names}(${m.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${m.returnType.toString()}`).join(', ');
+                const implementationStrs = substitutedImplementations.map(i => i.toString()).join(', ');
+                const superTypeStrs = substitutedSuperTypes.map(t => t.toString()).join(', ');
+                return `class { ${attributeStrs} } { ${methodStrs} } implements ${implementationStrs} super { ${superTypeStrs} }`;
+            }
+        };
+        return classType;
+    }
+    if(isInterfaceType(type)) {
+        const substitutedMethods = type.methods.map(m => factory.createMethodType(m.names, m.parameters.map(p => ({
+            name: p.name,
+            type: substituteGenerics(p.type, substitutions),
+            isMut: p.isMut
+        })), substituteGenerics(m.returnType, substitutions), m.genericParameters, m.isStatic, m.isOverride, m.isLocal));
+        
+        return factory.createInterfaceType(substitutedMethods, type.superTypes.map(t => substituteGenerics(t, substitutions)), type.node);
+    }
 
     // For other types, return as-is
     return type;
@@ -876,7 +1165,7 @@ function simplifyUnion(type: UnionTypeDescription): TypeDescription {
     // Remove duplicates
     const uniqueTypes: TypeDescription[] = [];
     for (const t of flatTypes) {
-        if (!uniqueTypes.some(existing => areTypesEqual(existing, t))) {
+        if (!uniqueTypes.some(existing => areTypesEqual(existing, t).success)) {
             uniqueTypes.push(t);
         }
     }
@@ -909,7 +1198,7 @@ function simplifyJoin(type: JoinTypeDescription): TypeDescription {
     // Remove duplicates
     const uniqueTypes: TypeDescription[] = [];
     for (const t of flatTypes) {
-        if (!uniqueTypes.some(existing => areTypesEqual(existing, t))) {
+        if (!uniqueTypes.some(existing => areTypesEqual(existing, t).success)) {
             uniqueTypes.push(t);
         }
     }
@@ -942,18 +1231,20 @@ function simplifyJoin(type: JoinTypeDescription): TypeDescription {
  */
 export function narrowType(type: TypeDescription, narrowTo: TypeDescription): TypeDescription {
     // If types are equal, narrowing succeeds
-    if (areTypesEqual(type, narrowTo)) {
+    if (areTypesEqual(type, narrowTo).success) {
         return type;
     }
     
     // Can't narrow to a broader type
-    if (!isAssignable(narrowTo, type) && !isAssignable(type, narrowTo)) {
+    const narrowToTypeCheck = isAssignable(narrowTo, type);
+    const typeToNarrowCheck = isAssignable(type, narrowTo);
+    if (!narrowToTypeCheck.success && !typeToNarrowCheck.success) {
         // Return never type to indicate impossible narrowing
         return { kind: TypeKind.Never, toString: () => 'never' };
     }
     
     // If narrowing to a subtype, return the subtype
-    if (isAssignable(narrowTo, type)) {
+    if (narrowToTypeCheck.success) {
         return narrowTo;
     }
     

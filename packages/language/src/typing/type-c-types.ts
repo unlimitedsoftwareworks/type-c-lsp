@@ -47,6 +47,7 @@ export enum TypeKind {
     Bool = 'bool',
     Void = 'void',
     String = 'string',
+    StringLiteral = 'string-literal',
     Null = 'null',
     
     // Composite types
@@ -119,16 +120,22 @@ export interface StringTypeDescription extends TypeDescription {
     readonly kind: TypeKind.String;
 }
 
+export interface StringLiteralTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.StringLiteral;
+    readonly value: string;
+}
+
 export interface NullTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Null;
 }
 
-export type PrimitiveTypeDescription = 
-    | IntegerTypeDescription 
-    | FloatTypeDescription 
-    | BoolTypeDescription 
-    | VoidTypeDescription 
-    | StringTypeDescription 
+export type PrimitiveTypeDescription =
+    | IntegerTypeDescription
+    | FloatTypeDescription
+    | BoolTypeDescription
+    | VoidTypeDescription
+    | StringTypeDescription
+    | StringLiteralTypeDescription
     | NullTypeDescription;
 
 // ============================================================================
@@ -318,15 +325,38 @@ export interface FunctionTypeDescription extends TypeDescription {
     readonly genericParameters: readonly GenericTypeDescription[];
 }
 
-/** 
- * TODO: Fix this. fn -> FunctionTypeDescription
- * WE do not need returnType for coroutine, because they yield.
+/**
+ * Represents a coroutine instance type: `coroutine<fn(params) -> YieldType>`
+ *
+ * A coroutine instance wraps a coroutine function (cfn) and can be called multiple times.
+ * Each call accepts the function's parameters and yields the yield type.
+ *
+ * Note: Coroutine instances can ONLY be created from cfn functions, not regular fn.
+ * The type representation is always `coroutine<fn(...)>`, never `coroutine<cfn(...)>`.
+ *
+ * Example:
+ * ```
+ * cfn loop(x: u32[]) -> u32 {     // Function type: cfn(u32[]) -> u32
+ *     yield x[0]
+ *     yield x[1]
+ * }
+ *
+ * let co = coroutine loop          // co type: coroutine<fn(u32[]) -> u32>
+ * let x = co([1, 2, 3])            // Calls co, yields u32
+ * let y = co([4, 5, 6])            // Calls again, yields u32
+ * ```
+ *
+ * The coroutine instance:
+ * - Is callable with the wrapped function's parameters
+ * - Each call yields the yield type
+ * - Can be called multiple times with same or different arguments
+ * - Has builtin prototype methods (alive, state, reset, finish)
  */
 export interface CoroutineTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Coroutine;
-    readonly fnType: 'fn' | 'cfn';
+    /** Parameters required when calling the coroutine instance */
     readonly parameters: readonly FunctionParameterType[];
-    readonly returnType: TypeDescription;
+    /** The type that gets yielded when the coroutine is called */
     readonly yieldType: TypeDescription;
 }
 
@@ -548,4 +578,8 @@ export function isUnsetType(type: TypeDescription): type is UnsetTypeDescription
 
 export function isStringType(type: TypeDescription): type is StringTypeDescription {
     return type.kind === TypeKind.String;
+}
+
+export function isStringLiteralType(type: TypeDescription): type is StringLiteralTypeDescription {
+    return type.kind === TypeKind.StringLiteral;
 }

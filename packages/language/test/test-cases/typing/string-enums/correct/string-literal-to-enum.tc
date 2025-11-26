@@ -1,0 +1,20 @@
+type Colors = "red" | "green" | "blue"
+
+fn test(color: Colors) {
+    
+}
+
+fn main() -> void {
+    let color1: Colors = "red"
+    let color2: Colors = "green"
+    let color3: Colors = "blue"
+    
+    // String literals should have string methods
+    let len: u64 = "red".length()
+    let upper: string = "red".toUpperCase()
+
+    test(color1)
+
+    let color4: "green" | "red" = "green"
+    test(color4)
+}

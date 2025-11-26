@@ -31,6 +31,13 @@ typing/
 │   └── incorrect/         # Invalid function tests that should fail validation
 │       └── return-type-errors.tc
 │
+├── coroutines/
+│   ├── correct/           # Valid coroutine tests that should pass
+│   │   ├── coroutine-yield-inference.tc (yield type inference)
+│   │   └── coroutine-instance-types.tc (coroutine instances)
+│   └── incorrect/         # Invalid coroutine tests that should fail validation
+│       └── coroutine-yield-errors.tc
+│
 ├── primitives/
 │   ├── correct/           # Valid primitive type tests that should pass
 │   │   └── basic-types.tc

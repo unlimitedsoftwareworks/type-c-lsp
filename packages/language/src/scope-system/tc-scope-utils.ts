@@ -12,6 +12,8 @@ type ReferencableSymbol =
     ast.ExternFFIDecl |
     ast.SubModule |
     ast.BuiltinDefinition |
+    ast.ClassAttributeDecl |
+    ast.MethodHeader |
     ast.VariantConstructor;  // TODO: Make this context-sensitive later
 
 
@@ -118,6 +120,13 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         if (container.init) {
             declarations.push(...getDeclarationsFromContainer(container.init));
         }
+    }
+    else if (ast.isClassType(container)) {
+        // Add class attributes and methods
+        declarations.push(...container?.attributes ?? []);
+        declarations.push(
+            ...container?.methods.map(e => e.method) ?? []
+        );
     }
     return declarations;
 }

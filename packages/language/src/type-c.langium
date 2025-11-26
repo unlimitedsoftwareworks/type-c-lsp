@@ -85,8 +85,18 @@ interface FunctionHeader {
     returnType: DataType;
 }
 
+
+interface FunctionTypeHeader {
+    args: FunctionTypeParameter[];
+    returnType: DataType;
+}
+
 FnHeader returns FunctionHeader:
     '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' ('->' returnType=DataType<true>)?;
+
+FnTypeHeader returns FunctionTypeHeader:
+    '(' ((args+=FnTypeParam) (',' args+=FnTypeParam)*)? ')' ('->' returnType=DataType<true>)?;
+
 
 interface FunctionParameter {
     isMut: boolean;
@@ -95,6 +105,16 @@ interface FunctionParameter {
 }
 FnParam returns FunctionParameter:
     (isMut?='mut')? name=ID ':' type=DataType<false>;
+
+
+interface FunctionTypeParameter {
+    isMut: boolean;
+    name?: string;
+    type: DataType;
+}
+
+FnTypeParam returns FunctionTypeParameter:
+    (isMut?='mut')? (name=ID ':')? type=DataType<false>;
 
 
 fragment GenericDecl:
@@ -506,7 +526,7 @@ InterfaceType:
 
 ClassType:
     'class' (superTypes+=DataType<false> (',' superTypes+=(DataType<false>))*)? '{' 
-        (ClassAttributesDecl|ClassMethodDecl|ClassStaticBlock|ClassImplementation|ClassMethodDelegations)* 
+        (ClassAttributesDecl|ClassMethodDecl|ClassStaticBlock|ClassImplementation)* 
     '}';
 
 
@@ -525,7 +545,7 @@ ImplementationMethodDecl:
 
 
 FunctionType:
-    fnType=('fn'|'cfn') header=FnHeader;
+    fnType=('fn'|'cfn') header=(FnHeader|FnTypeHeader);
 
 CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader '>';
@@ -534,7 +554,7 @@ ReturnType:
     'ReturnType' '(' returnType=DataType<false> ')';
 
 StringEnumType:
-    cases+=STRING (',' cases+=STRING)*;
+    cases+=STRING ('|' cases+=STRING)*;
 
 PrimitiveType:
     integerType=('u8' | 'u16' | 'u32' | 'u64' | 'i8' | 'i16' | 'i32' | 'i64') |
@@ -568,13 +588,6 @@ fragment ClassMethodDecl:
 
 ClassMethod:
     isOverride?='override'? isLocal?='local'?  isStatic?='static'? method=MethodHeader<true> (body=BlockStatement | '=' expr=TupleExpression);
-
-fragment ClassMethodDelegations:
-    delegations+=ClassMethodDelegation (',' delegations+=ClassMethodDelegation)*;
-
-ClassMethodDelegation:
-    'delegate' 'fn' name=ID '=' functions+=[ClassMethod:ID] ('|' functions+=[ClassMethod:ID])*;
-
 /**
  * TODO: allow keywords as segments
  */

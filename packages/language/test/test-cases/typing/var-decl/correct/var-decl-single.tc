@@ -1,0 +1,12 @@
+fn main() {
+    let c: u32 = 1
+    let d: i32 = -1
+    let e: f32 = 1.0f
+    let f: f64 = 1.0
+    let g: bool = true
+    let h: string = "hello"
+    let i: string? = null
+    let j: string[] = ["hello", "world"]
+    let x = {a: 1, b: "hello"}
+    let d = (1 as i32)
+}

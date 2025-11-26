@@ -1,7 +1,5 @@
-namespace kiisu
-{
-    type Animal<U, V> = variant {
-        Kiisu(name: U),
-        Neutsu(name: V),
+type  String = class {
+    static fn fromBytes(bytes: u8[]) -> string {
+
     }
 }

@@ -188,6 +188,7 @@ fn testMultipleGenerics() -> void {
     let pair: Pair<string, i32> = new Pair<string, i32>("answer", 42)
     let firstVal = pair.getFirst()
     let secondVal = pair.getSecond()
+    let cat = firstVal + secondVal
     let swapped = pair.swap()
     let swappedFirst = swapped.getFirst()
     let swappedSecond = swapped.getSecond()

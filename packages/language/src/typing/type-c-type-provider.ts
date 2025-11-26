@@ -11,7 +11,7 @@
  * - Integration with Langium: uses Langium's linking and scoping
  */
 
-import { AstNode, AstUtils, URI } from 'langium';
+import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
@@ -23,6 +23,7 @@ import {
     isArrayType,
     isClassType,
     isEnumType,
+    isErrorType,
     isFFIType,
     isFunctionType,
     isGenericType,
@@ -36,6 +37,8 @@ import {
     isNullableType,
     isPrototypeType,
     isReferenceType,
+    isStringEnumType,
+    isStringLiteralType,
     isStringType,
     isStructType,
     isTupleType,
@@ -58,12 +61,14 @@ import { areTypesEqual, isAssignable, simplifyType, substituteGenerics } from '.
  */
 export class TypeCTypeProvider {
     /** Cache for computed types, keyed by AST node */
-    private readonly typeCache = new WeakMap<AstNode, TypeDescription>();
+    private readonly typeCache: DocumentCache<AstNode, TypeDescription>;
 
+    /** Cache for expected types, keyed by AST node */
+    private readonly expectedTypeCache: DocumentCache<AstNode, TypeDescription | undefined>;
 
     /**
      * Tracks functions currently being inferred to prevent infinite recursion.
-     * 
+     *
      * When inferring recursive functions like `fn fib(n) = fib(n-1) + fib(n-2)`,
      * we need to detect when we're already inferring the same function to avoid
      * stack overflow.
@@ -78,6 +83,8 @@ export class TypeCTypeProvider {
 
     constructor(services: TypeCServices) {
         this.services = services;
+        this.typeCache = new DocumentCache(services.shared);
+        this.expectedTypeCache = new DocumentCache(services.shared);
     }
 
     // ========================================================================
@@ -116,19 +123,10 @@ export class TypeCTypeProvider {
             return factory.createErrorType('Node is undefined');
         }
 
-        // Check cache first
-        const cached = this.typeCache.get(node);
-        if (cached) {
-            return cached;
-        }
-
-        // Compute type based on node type
-        const type = this.computeType(node);
-
-        // Cache result
-        this.typeCache.set(node, type);
-
-        return type;
+        const documentUri = AstUtils.getDocument(node).uri;
+        
+        // Get from cache or compute if not cached
+        return this.typeCache.get(documentUri, node, () => this.computeType(node));
     }
 
     /**
@@ -136,11 +134,9 @@ export class TypeCTypeProvider {
      * Call this when an AST node changes.
      */
     invalidateCache(node: AstNode): void {
-        this.typeCache.delete(node);
-        // Also invalidate children
-        for (const child of AstUtils.streamAllContents(node)) {
-            this.typeCache.delete(child);
-        }
+        const documentUri = AstUtils.getDocument(node).uri;
+        this.typeCache.clear(documentUri);
+        this.expectedTypeCache.clear(documentUri);
     }
 
     /**
@@ -182,6 +178,17 @@ export class TypeCTypeProvider {
      * ```
      */
     getExpectedType(node: AstNode): TypeDescription | undefined {
+        const documentUri = AstUtils.getDocument(node).uri;
+        
+        // Get from cache or compute if not cached
+        return this.expectedTypeCache.get(documentUri, node, () => this.computeExpectedType(node));
+    }
+
+    /**
+     * Computes the expected type for an expression based on its context.
+     * This is the internal implementation that actually performs the computation.
+     */
+    private computeExpectedType(node: AstNode): TypeDescription | undefined {
         const parent = node.$container;
 
         // Variable declaration with annotation
@@ -307,8 +314,8 @@ export class TypeCTypeProvider {
             return (type.baseEnum.node as ast.EnumType).cases;
         }
 
-        // Array types - get prototype methods (length, push, pop, etc.)
-        if (isArrayType(type) || isStringType(type)) {
+        // Array types, string types, and string literals - get prototype methods (length, push, pop, etc.)
+        if (isArrayType(type) || isStringType(type) || isStringLiteralType(type)) {
             const prototypeType = isArrayType(type) ? this.getArrayPrototype() : this.getStringPrototype();
             if (prototypeType.node && ast.isBuiltinDefinition(prototypeType.node)) {
                 // check if attribute or method
@@ -338,11 +345,17 @@ export class TypeCTypeProvider {
                 nodes.push(...type.node.methods.filter(m => !m.isStatic));
             }
 
+            // A class must implement all methods of its super types
+            // Therefor supertypes will not be added to the nodes list.
+            /*for(const superType of type.superTypes) {
+                nodes.push(...this.getIdentifiableFields(superType));
+            }*/
+
             return nodes;
         }
         else if (isMetaClassType(type)) {
-            nodes.push(...((type?.baseClass?.node as ast.ClassType)?.attributes.filter(a => !a.isStatic) ?? []));
-            nodes.push(...((type?.baseClass?.node as ast.ClassType)?.methods.filter(m => !m.isStatic) ?? []));
+            nodes.push(...((type?.baseClass?.node as ast.ClassType)?.attributes.filter(a => a.isStatic) ?? []));
+            nodes.push(...((type?.baseClass?.node as ast.ClassType)?.methods.filter(m => m.isStatic) ?? []));
             return nodes;
         }
 
@@ -365,6 +378,9 @@ export class TypeCTypeProvider {
         // Interface methods
         if (isInterfaceType(type) && type.node && ast.isInterfaceType(type.node)) {
             nodes.push(...type.node.methods);
+            for(const superType of type.superTypes) {
+                nodes.push(...this.getIdentifiableFields(superType));
+            }
         }
 
         // Prototype methods (for direct prototype access, though usually accessed via array/coroutine)
@@ -489,6 +505,7 @@ export class TypeCTypeProvider {
         if (ast.isVariantConstructorField(node)) return this.inferVariantConstructorField(node);
         if (ast.isStructFieldKeyValuePair(node)) return this.inferStructFieldKeyValuePair(node);
         if (ast.isStructField(node)) return this.inferStructField(node);
+        if (ast.isFFIMethodHeader(node)) return this.inferFFIMethodHeader(node);
 
         return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
@@ -605,9 +622,8 @@ export class TypeCTypeProvider {
     }
 
     private inferStringEnumType(node: ast.StringEnumType): TypeDescription {
-        // Remove quotes from string literals
-        const values = node.cases.map(c => c.substring(1, c.length - 1));
-        return factory.createStringEnumType(values, node);
+        // Langium parser already strips quotes from STRING terminals, use values directly
+        return factory.createStringEnumType(node.cases, node);
     }
 
     private inferInterfaceType(node: ast.InterfaceType): TypeDescription {
@@ -705,7 +721,7 @@ export class TypeCTypeProvider {
 
     private inferFunctionType(node: ast.FunctionType): TypeDescription {
         const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
-            arg.name,
+            arg?.name ?? '[anonymous]',
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
@@ -722,15 +738,13 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
-        const returnType = node.header?.returnType
+        // For coroutine type annotations: coroutine<fn(params) -> YieldType>
+        // The "returnType" in the header actually represents the yield type
+        const yieldType = node.header?.returnType
             ? this.getType(node.header.returnType)
             : factory.createVoidType(node);
 
-        // For coroutines, we need to infer the yield type
-        // This would require flow analysis - for now, use 'any'
-        const yieldType = factory.createAnyType(node);
-
-        return factory.createCoroutineType(params, returnType, yieldType, 'fn', node);
+        return factory.createCoroutineType(params, yieldType, node);
     }
 
     private inferReturnType(node: ast.ReturnType): TypeDescription {
@@ -930,17 +944,24 @@ export class TypeCTypeProvider {
 
     /**
      * Infers the type of a function declaration.
-     * 
+     *
      * **For recursive functions:**
      * - If return type is explicitly annotated → use it
      * - If not annotated → try to infer from non-recursive paths (base cases)
      * - If inference fails (no base cases) → ERROR
-     * 
+     *
+     * **For coroutines:**
+     * - Return type represents the yield type (what the coroutine yields)
+     * - Inferred from yield expressions instead of return statements
+     *
      * Examples:
      * ```
      * fn fib(n: u32) -> u32 = ...        // ✅ Explicit type
      * fn fib(n: u32) = if n < 2 => n ... // ✅ Can infer u32 from base case
      * fn fib(n: u32) = fib(n-1)          // ❌ Error: no base case to infer from
+     *
+     * cfn gen() -> u32 { yield 1; yield 2; } // ✅ Yields u32
+     * cfn gen() { yield 1; yield 2; }        // ✅ Can infer u32 from yields
      * ```
      */
     private inferFunctionDeclaration(node: ast.FunctionDeclaration): TypeDescription {
@@ -950,6 +971,8 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
+
+        const isCoroutine = node.fnType === 'cfn';
 
         // For recursive functions: use explicit type if available
         if (this.inferringFunctions.has(node)) {
@@ -975,9 +998,21 @@ export class TypeCTypeProvider {
         this.inferringFunctions.add(node);
 
         try {
-            const returnType = node.header?.returnType
-                ? this.getType(node.header.returnType)
-                : this.inferReturnTypeFromBody(node.body, node.expr);
+            let returnType: TypeDescription;
+            
+            if (node.header?.returnType) {
+                // Explicit return/yield type provided
+                returnType = this.getType(node.header.returnType);
+            } else {
+                // Infer type from body
+                if (isCoroutine) {
+                    // For coroutines: infer from yield expressions
+                    returnType = this.inferYieldTypeFromBody(node.body, node.expr);
+                } else {
+                    // For regular functions: infer from return statements
+                    returnType = this.inferReturnTypeFromBody(node.body, node.expr);
+                }
+            }
 
             return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
         } finally {
@@ -988,7 +1023,7 @@ export class TypeCTypeProvider {
 
     /**
      * Infer return type from function body or expression.
-     * 
+     *
      * Strategy:
      * 1. If expression-body function: use expression type
      * 2. If block-body function: collect all return statements (only from this function!)
@@ -1037,6 +1072,56 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Infer yield type from coroutine body or expression.
+     *
+     * Strategy:
+     * 1. If expression-body coroutine: use expression type (treating it as a yield)
+     * 2. If block-body coroutine: collect all yield expressions (only from this coroutine!)
+     * 3. Find common type of all yields
+     * 4. If no yields → void
+     */
+    private inferYieldTypeFromBody(body?: ast.BlockStatement, expr?: ast.Expression): TypeDescription {
+        // Expression-body coroutine: cfn foo() = expr (expression is implicitly yielded)
+        if (expr) {
+            return this.getType(expr);
+        }
+
+        // Block-body coroutine: cfn foo() { ... }
+        if (body) {
+            const yieldExpressions = this.collectYieldExpressions(body);
+
+            if (yieldExpressions.length === 0) {
+                return factory.createVoidType();
+            }
+
+            // Get types of all yield expressions
+            const allYieldTypes = yieldExpressions
+                .map(yieldExpr => yieldExpr.expr ? this.getType(yieldExpr.expr) : factory.createVoidType());
+
+            // Filter out recursion placeholders (error types with specific message)
+            const nonPlaceholderTypes = allYieldTypes.filter(type => {
+                if (type.kind === TypeKind.Error) {
+                    const errorType = type as ErrorTypeDescription;
+                    return errorType.message !== '__recursion_placeholder__';
+                }
+                return true; // Keep non-error types
+            });
+
+            // Use non-placeholder types if available, otherwise all types
+            const yieldTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allYieldTypes;
+
+            if (yieldTypes.length === 0) {
+                return factory.createVoidType();
+            }
+
+            // Find common type
+            return this.getCommonType(yieldTypes);
+        }
+
+        return factory.createVoidType();
+    }
+
+    /**
      * Collect all return statements from a block, but ONLY from this function level.
      * Does NOT collect returns from nested functions!
      */
@@ -1065,6 +1150,37 @@ export class TypeCTypeProvider {
         }
 
         return returns;
+    }
+
+    /**
+     * Collect all yield expressions from a block, but ONLY from this coroutine level.
+     * Does NOT collect yields from nested coroutines!
+     */
+    private collectYieldExpressions(block: ast.BlockStatement): ast.YieldExpression[] {
+        const yields: ast.YieldExpression[] = [];
+
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function/coroutine - don't collect its yields!
+            if (ast.isFunctionDeclaration(node)) {
+                return; // Don't traverse into nested functions
+            }
+
+            if (ast.isYieldExpression(node)) {
+                yields.push(node);
+            }
+
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+
+        return yields;
     }
 
     /**
@@ -1421,10 +1537,34 @@ export class TypeCTypeProvider {
     // ========================================================================
 
     private inferExpression(node: ast.Expression): TypeDescription {
+        // References
+        if (ast.isQualifiedReference(node)) {
+            const res = this.inferQualifiedReference(node);
+            return res;
+        }
         // Literals
         if (ast.isIntegerLiteral(node)) return this.inferIntegerLiteral(node);
         if (ast.isFloatingPointLiteral(node)) return this.inferFloatLiteral(node);
-        if (ast.isStringLiteralExpression(node)) return factory.createStringType(node);
+        if (ast.isStringLiteralExpression(node)) {
+            // STRING terminal includes quotes, so we need to strip them
+            // node.value = "red" (with quotes) -> we want "red" (without quotes)
+            const stringValue = node.value.startsWith('"') && node.value.endsWith('"')
+                ? node.value.substring(1, node.value.length - 1)
+                : node.value;
+            
+            // Use contextual typing to determine if we should keep as literal or widen to string
+            let expectedType = this.getExpectedType(node);
+            expectedType = expectedType && isReferenceType(expectedType)? this.resolveReference(expectedType) : expectedType;
+            
+            // If expected type is a string enum, keep as literal for validation
+            if (expectedType && isStringEnumType(expectedType)) {
+                return factory.createStringLiteralType(stringValue, node);
+            }
+            
+            // Otherwise, widen to string type (for better compatibility with generic inference)
+            // This includes: expected type is string, expected type is generic, or no expected type
+            return factory.createStringType(node);
+        }
         if (ast.isBinaryStringLiteralExpression(node)) {
             return factory.createArrayType(factory.createU8Type(node), node);
         }
@@ -1433,11 +1573,6 @@ export class TypeCTypeProvider {
         }
         if (ast.isNullLiteralExpression(node)) return factory.createNullType(node);
 
-        // References
-        if (ast.isQualifiedReference(node)) {
-            const res = this.inferQualifiedReference(node);
-            return res;
-        }
 
         // Operations
         if (ast.isBinaryExpression(node)) return this.inferBinaryExpression(node);
@@ -1558,6 +1693,7 @@ export class TypeCTypeProvider {
 
         // Type assertion needed because Langium references are dynamically typed
         let type = this.getType(ref.ref as AstNode);
+        const originalType = type;
         if(isReferenceType(type)) {
             type = this.resolveReference(type);
         }
@@ -1572,7 +1708,11 @@ export class TypeCTypeProvider {
             return factory.createMetaEnumType(type, node);
         }
 
-        return type;
+        if(isClassType(type) && ast.isTypeDeclaration(node.reference.ref)) {
+            return factory.createMetaClassType(type, node);
+        }
+
+        return originalType;
     }
 
     private inferBinaryExpression(node: ast.BinaryExpression): TypeDescription {
@@ -1990,20 +2130,25 @@ export class TypeCTypeProvider {
     }
 
     private inferIndexAccess(node: ast.IndexAccess): TypeDescription {
-        const baseType = this.inferExpression(node.expr);
+        let baseType = this.inferExpression(node.expr);
+        if(isReferenceType(baseType)) {
+            baseType = this.resolveReference(baseType);
+        }
 
         if (isArrayType(baseType)) {
             return baseType.elementType;
         }
 
-        if (isTupleType(baseType) && node.indexes.length === 1) {
-            const index = this.evalIntegerLiteral(node.indexes[0] as ast.IntegerLiteral);
-            if (index !== undefined && index < baseType.elementTypes.length) {
-                return baseType.elementTypes[index];
+        if (isClassType(baseType)) {
+            // TODO: find the method with the name '[]'
+            const method = baseType.methods.find(m => m.names.includes('[]'));
+            if (method) {
+                return method.returnType;
             }
+            return factory.createErrorType('Class does not implement index access operator `[]`', undefined, node);
         }
 
-        return factory.createErrorType('Invalid index access', undefined, node);
+        return factory.createErrorType('Invalid index access on type ' + baseType.toString(), undefined, node);
     }
 
     private inferIndexSet(node: ast.IndexSet): TypeDescription {
@@ -2077,9 +2222,23 @@ export class TypeCTypeProvider {
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
-        const returnType = node.header.returnType
-            ? this.getType(node.header.returnType)
-            : this.inferReturnTypeFromBody(node.body, node.expr);
+        
+        const isCoroutine = node.fnType === 'cfn';
+        
+        let returnType: TypeDescription;
+        if (node.header.returnType) {
+            // Explicit return/yield type provided
+            returnType = this.getType(node.header.returnType);
+        } else {
+            // Infer type from body
+            if (isCoroutine) {
+                // For coroutine lambdas: infer from yield expressions
+                returnType = this.inferYieldTypeFromBody(node.body, node.expr);
+            } else {
+                // For regular function lambdas: infer from return statements
+                returnType = this.inferReturnTypeFromBody(node.body, node.expr);
+            }
+        }
 
         return factory.createFunctionType(params, returnType, node.fnType, [], node);
     }
@@ -2194,11 +2353,11 @@ export class TypeCTypeProvider {
         const fnType = this.inferExpression(node.fn);
 
         if (isFunctionType(fnType)) {
+            // The coroutine expression wraps a function and creates a coroutine instance
+            // For coroutines, the function's returnType is actually the yieldType
             return factory.createCoroutineType(
                 fnType.parameters,
-                fnType.returnType,
-                factory.createAnyType(node), // TODO: infer yield type
-                fnType.fnType,
+                fnType.returnType,  // This is the yield type for coroutines
                 node
             );
         }
@@ -2309,6 +2468,21 @@ export class TypeCTypeProvider {
     private inferStructField(node: ast.StructField): TypeDescription {
         return this.getType(node.type);
     }
+    
+    private inferFFIMethodHeader(node: ast.FFIMethodHeader): TypeDescription {
+        return factory.createFunctionType(
+            node.header.args?.map(arg => factory.createFunctionParameterType(
+                arg.name,
+                this.getType(arg.type),
+                arg.isMut
+            )) ?? [],
+            node.header.returnType ? this.getType(node.header.returnType) : factory.createVoidType(node),
+            'fn',
+            [],
+            node
+        );
+    }
+
 
     // ========================================================================
     // Built-in Prototypes
@@ -2368,7 +2542,7 @@ export class TypeCTypeProvider {
         const finalCandidates = [];
         // First prio is exact match
         for (const fn of functions) {
-            if (fn.parameters.every((param, index) => areTypesEqual(expressionTypes[index], param.type))) {
+            if (fn.parameters.every((param, index) => areTypesEqual(expressionTypes[index], param.type).success)) {
                 finalCandidates.push(fn);
             }
         }
@@ -2376,7 +2550,7 @@ export class TypeCTypeProvider {
         // Second prio is assignable match
         if (finalCandidates.length === 0) {
             for (const fn of argBasedCandidates) {
-                if (fn.parameters.every((param, index) => isAssignable(expressionTypes[index], param.type))) {
+                if (fn.parameters.every((param, index) => isAssignable(expressionTypes[index], param.type).success)) {
                     finalCandidates.push(fn);
                 }
             }
@@ -2472,6 +2646,11 @@ export class TypeCTypeProvider {
 
         const resolvedParameterType = isReferenceType(parameterType) ? this.resolveReference(parameterType) : parameterType;
         const resolvedArgumentType = isReferenceType(argumentType) ? this.resolveReference(argumentType) : argumentType;
+
+        // Ignore error types
+        if (isErrorType(resolvedParameterType) || isErrorType(resolvedArgumentType)) {
+            return;
+        }
         
         if (isStructType(resolvedParameterType) && isStructType(resolvedArgumentType)) {
             for (const field of resolvedParameterType.fields) {
@@ -2480,6 +2659,14 @@ export class TypeCTypeProvider {
                     this.extractGenericArgsFromTypeDescription(field.type, fieldInArgumentType.type, genericMap);
                 }
             }
+        }
+
+        if (isArrayType(resolvedParameterType) && isArrayType(resolvedArgumentType)) {
+            this.extractGenericArgsFromTypeDescription(resolvedParameterType.elementType, resolvedArgumentType.elementType, genericMap);
+        }
+
+        if(isNullableType(resolvedParameterType) && isNullableType(resolvedArgumentType)) {
+            this.extractGenericArgsFromTypeDescription(resolvedParameterType.baseType, resolvedArgumentType.baseType, genericMap);
         }
 
         if(isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {

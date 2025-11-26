@@ -1,0 +1,86 @@
+// Test cases for valid class method overloads
+
+// Case 1: Different parameter types
+type Calculator = class {
+    fn add(a: u32, b: u32) -> u32 {
+        return a + b
+    }
+    
+    fn add(a: f64, b: f64) -> f64 {
+        return a + b
+    }
+    
+    fn add(a: string, b: string) -> string {
+        return a + b
+    }
+}
+
+// Case 2: Different parameter counts
+type Logger = class {
+    fn log(msg: string) {
+        // log message
+    }
+    
+    fn log(level: u32, msg: string) {
+        // log with level
+    }
+    
+    fn log(level: u32, category: string, msg: string) {
+        // log with level and category
+    }
+}
+
+// Case 3: Operator overloading (multiple names for same method)
+type Vec2 = class {
+    let x: f64
+    let y: f64
+    
+    fn +|add(other: Vec2) -> Vec2 {
+        return new Vec2(x + other.x, y + other.y)
+    }
+    
+    fn -|subtract(other: Vec2) -> Vec2 {
+        return new Vec2(x - other.x, y - other.y)
+    }
+    
+    fn *(scalar: f64) -> Vec2 {
+        return new Vec2(x * scalar, y * scalar)
+    }
+}
+
+// Case 4: Static method overloads
+type Factory = class {
+    static fn create(id: u32) -> Factory {
+        return new Factory()
+    }
+    
+    static fn create(name: string) -> Factory {
+        return new Factory()
+    }
+    
+    static fn create(id: u32, name: string) -> Factory {
+        return new Factory()
+    }
+}
+
+// Case 5: Mix of instance and static methods with same name
+type DataStore = class {
+    fn load(id: u32) -> string {
+        return "data"
+    }
+    
+    static fn load(filename: string) -> DataStore {
+        return new DataStore()
+    }
+}
+
+// Case 6: Methods with struct parameters
+type Processor = class {
+    fn process(data: struct { x: u32, y: u32 }) -> u32 {
+        return data.x + data.y
+    }
+    
+    fn process(data: struct { value: string }) -> string {
+        return data.value
+    }
+}

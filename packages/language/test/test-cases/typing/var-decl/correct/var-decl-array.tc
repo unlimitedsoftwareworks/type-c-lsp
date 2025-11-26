@@ -1,0 +1,7 @@
+fn getValues() -> u32[] {
+    return [1u32, 2u32, 3u32]
+}
+
+fn main() {
+    let [a, b, ...c?] = getValues()
+}

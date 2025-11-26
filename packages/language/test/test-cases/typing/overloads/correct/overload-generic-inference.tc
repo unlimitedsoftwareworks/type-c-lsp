@@ -1,0 +1,30 @@
+// Test overload resolution with generic inference
+
+fn overloadedFn(a: u32) -> i32 {
+    return 0i32
+}
+
+fn overloadedFn(a: u16) -> i16 {
+    return 0i16
+}
+
+fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
+    let result: V[] = []
+    result.resize(xs.length)
+    for let i = 0u32; i < xs.length; i++ {
+        result[i] = f(xs[i])
+    }
+    return result
+}
+
+fn main() {
+    let c: u32[] = [1u32, 2u32, 3u32]
+
+    // This should work now with constraint-based overload resolution
+    // Expected: U = u32 (from c), V = i32 (from overloadedFn)
+    let d = map(c, fn(x: u32) -> i32 = overloadedFn(x))
+
+    // d should have type i32[]
+    // To verify, try assigning to explicitly typed variable:
+    let e: i32[] = d  // Should compile without error
+}

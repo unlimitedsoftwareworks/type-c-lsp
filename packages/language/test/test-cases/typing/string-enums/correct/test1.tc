@@ -1,0 +1,10 @@
+type Colors = "red" | "green" | "blue"
+
+fn main() -> void {
+    let color1: Colors = "red"
+    let color2: Colors = "green"
+    let color3: Colors = "blue"
+
+    // The following line would cause a type error
+    // let invalidColor: Colors = "yellow"
+}

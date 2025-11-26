@@ -7,7 +7,8 @@ import { TypeCBaseValidation } from './base-validation.js';
 export function registerValidationChecks(services: TypeCServices) {
     const registry = services.validation.ValidationRegistry;
     const validations: TypeCBaseValidation[] = [
-        services.validation.TypeSystemValidator
+        services.validation.TypeSystemValidator,
+        services.validation.FunctionOverloadValidator
     ]
 
     for (const validation of validations) {

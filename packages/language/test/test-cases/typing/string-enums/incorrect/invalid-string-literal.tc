@@ -1,0 +1,6 @@
+type Colors = "red" | "green" | "blue"
+
+fn main() -> void {
+    // This should cause an error: "yellow" is not in the enum
+    let invalidColor: Colors = "yellow"
+}

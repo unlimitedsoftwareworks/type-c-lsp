@@ -1,0 +1,11 @@
+
+fn overloadedFn(a: u32) -> f32 {}
+fn overloadedFn(a: f32) -> u32{}
+
+fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
+}
+
+fn main() {
+    let c: u32[] = [1u32,2u32,3u32]
+    let e = map(c, fn (x: u32) = overloadedFn(x)) // <- The issue is here
+}

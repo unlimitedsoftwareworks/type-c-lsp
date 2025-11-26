@@ -1,6 +1,6 @@
 /**
  * Type Factory Functions
- * 
+ *
  * This module provides factory functions for creating type descriptions.
  * All type creation should go through these factories to ensure consistency.
  */
@@ -15,6 +15,7 @@ import {
     BoolTypeDescription,
     VoidTypeDescription,
     StringTypeDescription,
+    StringLiteralTypeDescription,
     NullTypeDescription,
     ArrayTypeDescription,
     NullableTypeDescription,
@@ -177,6 +178,15 @@ export function createStringType(node?: AstNode): StringTypeDescription {
         kind: TypeKind.String,
         node,
         toString: () => 'string'
+    };
+}
+
+export function createStringLiteralType(value: string, node?: AstNode): StringLiteralTypeDescription {
+    return {
+        kind: TypeKind.StringLiteral,
+        value,
+        node,
+        toString: () => JSON.stringify(value)
     };
 }
 
@@ -542,25 +552,31 @@ export function createFunctionType(
     };
 }
 
+/**
+ * Creates a coroutine instance type: `coroutine<fn(params) -> YieldType>`
+ *
+ * A coroutine instance wraps a coroutine function (cfn) and can be called multiple times.
+ * The type representation is always `coroutine<fn(...)>`, never `coroutine<cfn(...)>`.
+ *
+ * @param parameters Parameters required when calling the coroutine instance
+ * @param yieldType The type that gets yielded when the coroutine is called
+ * @param node Optional AST node for source tracking
+ */
 export function createCoroutineType(
     parameters: readonly FunctionParameterType[],
-    returnType: TypeDescription,
     yieldType: TypeDescription,
-    fnType: 'fn' | 'cfn' = 'fn',
     node?: AstNode
 ): CoroutineTypeDescription {
     return {
         kind: TypeKind.Coroutine,
-        fnType,
         parameters,
-        returnType,
         yieldType,
         node,
         toString: () => {
-            const paramStrs = parameters.map(p => 
+            const paramStrs = parameters.map(p =>
                 `${p.isMut ? 'mut ' : ''}${p.name}: ${p.type.toString()}`
             ).join(', ');
-            return `coroutine<${fnType}(${paramStrs}) -> ${returnType.toString()}>`;
+            return `coroutine<fn(${paramStrs}) -> ${yieldType.toString()}>`;
         }
     };
 }

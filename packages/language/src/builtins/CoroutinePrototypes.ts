@@ -1,3 +1,4 @@
+export const coroutinePrototype = `
 /**
  * @file CoroutinePrototypes.tc
  * @brief: Provides builtin prototypes for coroutines, used only by the LSP.
@@ -44,3 +45,4 @@ prototype for coroutine {
 
     fn finish() -> void
 }
+`;

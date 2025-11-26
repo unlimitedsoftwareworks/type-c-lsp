@@ -1,0 +1,6 @@
+fn f(x: u32) {}
+
+fn main() {
+    let f = fn(x: u32) {}
+    f(1)
+}

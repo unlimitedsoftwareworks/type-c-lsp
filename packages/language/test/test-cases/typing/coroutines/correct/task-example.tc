@@ -1,0 +1,16 @@
+// Exact example from the task - should work correctly
+
+cfn loop(x: u32[]) -> u32 {
+    yield x[0]
+    yield x[1]
+}
+
+fn main() {
+    // co has type: coroutine<fn(x: u32[]) -> u32>
+    let co = coroutine loop
+    
+    // Calling the coroutine instance multiple times
+    let x = co([1u32, 2u32, 3u32])  // yields u32
+    let y = co([4u32, 5u32, 6u32])  // yields u32
+    let z = co([7u32, 8u32, 9u32])  // yields u32
+}

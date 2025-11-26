@@ -234,4 +234,153 @@ describe('Coroutine Validation', () => {
             expect(diagnostics).toHaveLength(0);
         });
     });
+
+    describe('Coroutine Call Validation', () => {
+        test('should validate correct coroutine call arguments', async () => {
+            const code = `
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                    yield x[1]
+                }
+
+                fn main() {
+                    let co = coroutine loop
+                    let x = co([1u32, 2u32, 3u32])  // Correct: u32[]
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            expect(diagnostics).toHaveLength(0);
+        });
+
+        test('should infer correct return type from coroutine call', async () => {
+            const code = `
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                }
+
+                fn main() {
+                    let co = coroutine loop
+                    let result: u32 = co([1u32, 2u32])  // Return type should be u32
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            expect(diagnostics).toHaveLength(0);
+        });
+
+        test('should error on wrong argument type', async () => {
+            const code = `
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                }
+
+                fn main() {
+                    let co = coroutine loop
+                    let x = co([1, 2, 3])  // Error: i32[] instead of u32[]
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors.some(d => d.message.includes('Argument') || d.message.includes('expected'))).toBe(true);
+        });
+
+        test('should error on wrong number of arguments', async () => {
+            const code = `
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                }
+
+                fn main() {
+                    let co = coroutine loop
+                    let x = co()  // Error: expects 1 argument
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors.some(d => d.message.includes('Expected 1 argument'))).toBe(true);
+        });
+
+        test('should error on too many arguments', async () => {
+            const code = `
+                cfn loop(x: u32[]) -> u32 {
+                    yield x[0]
+                }
+
+                fn main() {
+                    let co = coroutine loop
+                    let x = co([1u32], [2u32])  // Error: expects 1 argument, got 2
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors.some(d => d.message.includes('Expected 1 argument') && d.message.includes('got 2'))).toBe(true);
+        });
+
+        test('should validate multiple parameter coroutines', async () => {
+            const code = `
+                cfn stringGen(prefix: string, count: u32) -> string {
+                    yield prefix
+                }
+
+                fn main() {
+                    let co = coroutine stringGen
+                    let a = co("hello", 5u32)  // Correct
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            expect(diagnostics).toHaveLength(0);
+        });
+
+        test('should error on arguments in wrong order', async () => {
+            const code = `
+                cfn stringGen(prefix: string, count: u32) -> string {
+                    yield prefix
+                }
+
+                fn main() {
+                    let co = coroutine stringGen
+                    let a = co(5u32, "hello")  // Error: arguments in wrong order
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
+            expect(errors.length).toBeGreaterThan(0);
+        });
+
+        test('should handle coroutines with no parameters', async () => {
+            const code = `
+                cfn simpleGen() -> u32 {
+                    yield 1u32
+                    yield 2u32
+                }
+
+                fn testNoParams() {
+                    let co = coroutine simpleGen
+                    let x = co()  // Correct: no arguments
+                    let result: u32 = co()  // Return type should be u32
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            expect(diagnostics).toHaveLength(0);
+        });
+
+        test('should error when calling no-param coroutine with arguments', async () => {
+            const code = `
+                cfn simpleGen() -> u32 {
+                    yield 1u32
+                }
+
+                fn testNoParams() {
+                    let co = coroutine simpleGen
+                    let x = co(42u32)  // Error: expects 0 arguments
+                }
+            `;
+            const diagnostics = await parseAndGetDiagnostics(code);
+            const errors = diagnostics.filter(d => d.severity === DiagnosticSeverity.Error);
+            expect(errors.length).toBeGreaterThan(0);
+            expect(errors.some(d => d.message.includes('Expected 0 argument'))).toBe(true);
+        });
+    });
 });

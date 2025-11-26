@@ -1,0 +1,49 @@
+// Test coroutine call validation with correct arguments
+
+cfn loop(x: u32[]) -> u32 {
+    yield x[0]
+    yield x[1]
+}
+
+fn main() {
+    // co has type: coroutine<fn(x: u32[]) -> u32>
+    let co = coroutine loop
+    
+    // Calling the coroutine instance multiple times with correct arguments
+    let x = co([1u32, 2u32, 3u32])  // yields u32 ✅
+    let y = co([4u32, 5u32, 6u32])  // yields u32 ✅
+    let z = co([7u32, 8u32, 9u32])  // yields u32 ✅
+    
+    // Verify return type is u32
+    let result: u32 = co([10u32, 11u32])
+}
+
+// Test with different parameter types
+cfn stringGen(prefix: string, count: u32) -> string {
+    yield prefix
+}
+
+fn testStrings() {
+    let co = coroutine stringGen
+    // Correct calls
+    let a = co("hello", 5u32)
+    let b = co("world", 10u32)
+    
+    // Verify return type is string
+    let result: string = co("test", 1u32)
+}
+
+// Test with no parameters
+cfn simpleGen() -> u32 {
+    yield 1u32
+    yield 2u32
+}
+
+fn testNoParams() {
+    let co = coroutine simpleGen
+    // Correct call with no arguments
+    let x = co()
+    
+    // Verify return type is u32
+    let result: u32 = co()
+}

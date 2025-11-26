@@ -721,6 +721,31 @@ describe('Type Provider', async () => {
                         'stringGen': 'cfn(prefix: string, count: u32) -> string',
                     });
                 });
+
+                test('should infer coroutine instance type correctly', async () => {
+                    await assertType('coroutines/correct/task-example.tc', {
+                        'co': 'coroutine<fn(x: u32[]) -> u32>',
+                        'x': 'u32',
+                        'y': 'u32',
+                        'z': 'u32',
+                    });
+                });
+            });
+
+            describe('Coroutine Call Validation', () => {
+                test('should validate correct coroutine calls with proper arguments', async () => {
+                    await assertType('coroutines/correct/coroutine-call-validation.tc', {
+                        'loop': 'cfn(x: u32[]) -> u32',
+                        'result': 'u32',
+                    });
+                });
+
+                test('should validate calls with multiple parameters', async () => {
+                    await assertType('coroutines/correct/coroutine-call-validation.tc', {
+                        'a': 'string',
+                        'b': 'string',
+                    });
+                });
             });
     
             describe('Coroutine Validation Errors', () => {
@@ -749,6 +774,25 @@ describe('Type Provider', async () => {
                     
                     const errors = document.diagnostics?.filter(d => d.severity === 1) || [];
                     expect(errors.some(d => d.message.includes('must use') && d.message.includes('yield'))).toBe(true);
+                });
+
+                test('should error on coroutine call with wrong argument types', async () => {
+                    const content = await readFile(path.join(testFilesDir, 'coroutines/incorrect/coroutine-call-errors.tc'), 'utf-8');
+                    const document = await parseAndValidate(content);
+                    
+                    const errors = document.diagnostics?.filter(d => d.severity === 1) || [];
+                    expect(errors.length).toBeGreaterThan(0);
+                    // Should have errors about argument type mismatches
+                    expect(errors.some(d => d.message.includes('Argument') || d.message.includes('expected'))).toBe(true);
+                });
+
+                test('should error on coroutine call with wrong number of arguments', async () => {
+                    const content = await readFile(path.join(testFilesDir, 'coroutines/incorrect/coroutine-call-errors.tc'), 'utf-8');
+                    const document = await parseAndValidate(content);
+                    
+                    const errors = document.diagnostics?.filter(d => d.severity === 1) || [];
+                    // Should have errors about argument count
+                    expect(errors.some(d => d.message.includes('Expected') && d.message.includes('argument'))).toBe(true);
                 });
             });
         });

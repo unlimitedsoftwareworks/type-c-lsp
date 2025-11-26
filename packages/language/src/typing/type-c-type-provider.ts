@@ -22,6 +22,7 @@ import {
     GenericTypeDescription,
     isArrayType,
     isClassType,
+    isCoroutineType,
     isEnumType,
     isErrorType,
     isFFIType,
@@ -1912,6 +1913,13 @@ export class TypeCTypeProvider {
         // Resolve reference types first
         if (isReferenceType(fnType)) {
             fnType = this.resolveReference(fnType);
+        }
+
+        // Handle coroutine types - calling a coroutine instance yields its yieldType
+        if (isCoroutineType(fnType)) {
+            // Coroutine instances are callable and yield their yieldType
+            // No need to apply generic substitutions here - already done in coroutine creation
+            return fnType.yieldType;
         }
 
         // Handle regular function types

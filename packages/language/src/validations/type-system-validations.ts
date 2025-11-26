@@ -4,11 +4,13 @@ import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
     ArrayTypeDescription,
+    CoroutineTypeDescription,
     ErrorTypeDescription,
     TypeDescription,
     TypeKind,
     isArrayType,
     isClassType,
+    isCoroutineType,
     isFunctionType,
     isInterfaceType,
     isReferenceType,
@@ -241,10 +243,46 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * generic inference from arguments. The type provider handles this correctly.
      */
     checkFunctionCall = (node: ast.FunctionCall, accept: ValidationAcceptor): void => {
-        const fnType = this.typeProvider.getType(node.expr);
+        let fnType = this.typeProvider.getType(node.expr);
+
+        // Resolve reference types first
+        if (isReferenceType(fnType)) {
+            fnType = this.typeProvider.resolveReference(fnType);
+        }
+
+        // Handle coroutine instance calls
+        if (isCoroutineType(fnType)) {
+            const coroutineType = fnType as CoroutineTypeDescription;
+            const args = node.args || [];
+            
+            // Check argument count
+            if (args.length !== coroutineType.parameters.length) {
+                accept('error', `Expected ${coroutineType.parameters.length} argument(s), but got ${args.length}`, {
+                    node,
+                });
+                return;
+            }
+            
+            // Check each argument type
+            args.forEach((arg, index) => {
+                const expectedType = coroutineType.parameters[index].type;
+                const actualType = this.typeProvider.getType(arg);
+                
+                const compatResult = this.isTypeCompatible(actualType, expectedType);
+                if (!compatResult.success) {
+                    const errorMsg = compatResult.message
+                        ? `Argument ${index + 1}: ${compatResult.message}`
+                        : `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`;
+                    accept('error', errorMsg, {
+                        node: arg,
+                    });
+                }
+            });
+            return;
+        }
 
         if (!isFunctionType(fnType)) {
-            // Not a function - let another validation handle this
+            // Not a function or coroutine - let another validation handle this
             return;
         }
 

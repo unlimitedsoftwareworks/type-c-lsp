@@ -8,8 +8,9 @@
 import type { TypeCServices } from '../type-c-module.js';
 import type { AstNode } from 'langium';
 import { TypeDescription } from './type-c-types.js';
-import { areTypesEqual, isAssignable, narrowType, simplifyType, substituteGenerics, TypeCheckResult } from './type-utils.js';
 import * as factory from './type-factory.js';
+import { TypeCTypeProvider } from './type-c-type-provider.js';
+import { TypeCheckResult, TypeCTypeUtils } from './type-utils.js';
 
 /**
  * Main type system facade.
@@ -17,9 +18,13 @@ import * as factory from './type-factory.js';
  */
 export class TypeCTypeSystem {
     protected readonly services: TypeCServices;
+    private readonly typeProvider: TypeCTypeProvider;
+    private readonly typeUtils: TypeCTypeUtils;
 
     constructor(services: TypeCServices) {
         this.services = services;
+        this.typeProvider = services.typing.TypeProvider;
+        this.typeUtils = services.typing.TypeUtils;
     }
 
     // ========================================================================
@@ -31,14 +36,14 @@ export class TypeCTypeSystem {
      * This is the main entry point for type information.
      */
     getType(node: AstNode | undefined): TypeDescription {
-        return this.services.typing.TypeProvider.getType(node);
+        return this.typeProvider.getType(node);
     }
 
     /**
      * Resolves a reference type to its actual definition.
      */
     resolveReference(type: TypeDescription): TypeDescription {
-        return this.services.typing.TypeProvider.resolveReference(type);
+        return this.typeProvider.resolveReference(type);
     }
 
     /**
@@ -46,7 +51,7 @@ export class TypeCTypeSystem {
      * Call this when the AST changes.
      */
     invalidateCache(node: AstNode): void {
-        this.services.typing.TypeProvider.invalidateCache(node);
+        this.typeProvider.invalidateCache(node);
     }
 
     // ========================================================================
@@ -58,7 +63,7 @@ export class TypeCTypeSystem {
      * @returns TypeCheckResult with success status and optional error message
      */
     areEqual(a: TypeDescription, b: TypeDescription): TypeCheckResult {
-        return areTypesEqual(a, b);
+        return this.typeUtils.areTypesEqual(a, b);
     }
 
     /**
@@ -66,7 +71,7 @@ export class TypeCTypeSystem {
      * @returns TypeCheckResult with success status and optional error message
      */
     isAssignable(from: TypeDescription, to: TypeDescription): TypeCheckResult {
-        return isAssignable(from, to);
+        return this.typeUtils.isAssignable(from, to);
     }
 
     // ========================================================================
@@ -77,21 +82,21 @@ export class TypeCTypeSystem {
      * Simplifies a type by removing redundancies.
      */
     simplify(type: TypeDescription): TypeDescription {
-        return simplifyType(type);
+        return this.typeUtils.simplifyType(type);
     }
 
     /**
      * Narrows a type based on a type check.
      */
     narrow(type: TypeDescription, narrowTo: TypeDescription): TypeDescription {
-        return narrowType(type, narrowTo);
+        return this.typeUtils.narrowType(type, narrowTo);
     }
 
     /**
      * Substitutes generic type parameters with concrete types.
      */
     substitute(type: TypeDescription, substitutions: Map<string, TypeDescription>): TypeDescription {
-        return substituteGenerics(type, substitutions);
+        return this.typeUtils.substituteGenerics(type, substitutions);
     }
 
     // ========================================================================

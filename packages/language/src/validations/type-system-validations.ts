@@ -16,10 +16,10 @@ import {
     isStructType,
     isVariantConstructorType
 } from "../typing/type-c-types.js";
-import { isAssignable, substituteGenerics } from "../typing/type-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
 import { ErrorCode } from "../codes/errors.js";
+import { TypeCTypeUtils } from "../typing/type-utils.js";
 
 /**
  * Type system validator for Type-C.
@@ -32,10 +32,12 @@ import { ErrorCode } from "../codes/errors.js";
  */
 export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     private readonly typeProvider: TypeCTypeProvider;
+    private readonly typeUtils: TypeCTypeUtils;
 
     constructor(services: TypeCServices) {
         super();
         this.typeProvider = services.typing.TypeProvider;
+        this.typeUtils = services.typing.TypeUtils;
     }
 
     getChecks(): ValidationChecks<ast.TypeCAstType> {
@@ -361,7 +363,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const finalSubstitutions = substitutions; // Ensure TypeScript knows it's defined
             paramTypes = paramTypes.map(param => ({
                 name: param.name,
-                type: substituteGenerics(param.type, finalSubstitutions),
+                type: this.typeUtils.substituteGenerics(param.type, finalSubstitutions),
                 isMut: param.isMut
             }));
         }
@@ -992,7 +994,6 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // - Struct compatibility
         // - Variant constructor assignability
         // - And more...
-        return isAssignable(actual, expected);
+        return this.typeUtils.isAssignable(actual, expected);
     }
-
 }

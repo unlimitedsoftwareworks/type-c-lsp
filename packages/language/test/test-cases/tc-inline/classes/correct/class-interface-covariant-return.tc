@@ -1,0 +1,16 @@
+// Test class-to-interface assignment with covariant return types
+// This tests that a class method returning a more specific type (Array)
+// can satisfy an interface expecting a more general type (Container)
+
+type Container = interface {
+    fn slice(end: u64) -> Container
+}
+
+type Array = class {
+    fn slice(end: u64) -> Array {}
+}
+
+fn main() -> void {
+    // @no-error - Class with covariant return type should satisfy interface
+    let arr2: Container = new Array()
+}

@@ -53,7 +53,7 @@ import {
     VariantConstructorTypeDescription
 } from './type-c-types.js';
 import * as factory from './type-factory.js';
-import { areTypesEqual, isAssignable, simplifyType, substituteGenerics } from './type-utils.js';
+import { TypeCTypeUtils } from './type-utils.js';
 
 /**
  * Main type provider service.
@@ -66,6 +66,8 @@ export class TypeCTypeProvider {
     /** Cache for expected types, keyed by AST node */
     private readonly expectedTypeCache: DocumentCache<AstNode, TypeDescription | undefined>;
 
+    /** Type Utils service */
+    private readonly typeUtils: TypeCTypeUtils;
     /**
      * Tracks functions currently being inferred to prevent infinite recursion.
      *
@@ -85,6 +87,7 @@ export class TypeCTypeProvider {
         this.services = services;
         this.typeCache = new DocumentCache(services.shared);
         this.expectedTypeCache = new DocumentCache(services.shared);
+        this.typeUtils = services.typing.TypeUtils;
     }
 
     // ========================================================================
@@ -548,7 +551,7 @@ export class TypeCTypeProvider {
             types.push(right);
         }
 
-        return simplifyType(factory.createUnionType(types, node));
+        return this.typeUtils.simplifyType(factory.createUnionType(types, node));
     }
 
     private inferJoinType(node: ast.JoinType): TypeDescription {
@@ -568,7 +571,7 @@ export class TypeCTypeProvider {
             types.push(right);
         }
 
-        return simplifyType(factory.createJoinType(types, node));
+        return this.typeUtils.simplifyType(factory.createJoinType(types, node));
     }
 
     private inferTupleTypeFromDataType(node: ast.TupleType): TypeDescription {
@@ -836,7 +839,7 @@ export class TypeCTypeProvider {
                 }
             });
 
-            return substituteGenerics(actualType, substitutions);
+            return this.typeUtils.substituteGenerics(actualType, substitutions);
         }
 
         return actualType;
@@ -1894,7 +1897,7 @@ export class TypeCTypeProvider {
 
         // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
         if (genericSubstitutions) {
-            memberType = substituteGenerics(targetType, genericSubstitutions);
+            memberType = this.typeUtils.substituteGenerics(targetType, genericSubstitutions);
         } else {
             memberType = targetType;
         }
@@ -1979,7 +1982,7 @@ export class TypeCTypeProvider {
 
             // Apply substitutions to return type if we have any
             if (substitutions && substitutions.size > 0) {
-                return substituteGenerics(fnType.returnType, substitutions);
+                return this.typeUtils.substituteGenerics(fnType.returnType, substitutions);
             }
 
             return fnType.returnType;
@@ -2577,7 +2580,7 @@ export class TypeCTypeProvider {
         const finalCandidates = [];
         // First prio is exact match
         for (const fn of functions) {
-            if (fn.parameters.every((param, index) => areTypesEqual(expressionTypes[index], param.type).success)) {
+            if (fn.parameters.every((param, index) => this.typeUtils.areTypesEqual(expressionTypes[index], param.type).success)) {
                 finalCandidates.push(fn);
             }
         }
@@ -2585,7 +2588,7 @@ export class TypeCTypeProvider {
         // Second prio is assignable match
         if (finalCandidates.length === 0) {
             for (const fn of argBasedCandidates) {
-                if (fn.parameters.every((param, index) => isAssignable(expressionTypes[index], param.type).success)) {
+                if (fn.parameters.every((param, index) => this.typeUtils.isAssignable(expressionTypes[index], param.type).success)) {
                     finalCandidates.push(fn);
                 }
             }

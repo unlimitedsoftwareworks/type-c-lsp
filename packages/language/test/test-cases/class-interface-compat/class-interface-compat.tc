@@ -1,0 +1,11 @@
+type Container<T> = interface {
+    fn slice(end: u64) -> Container<T>
+}
+
+type Array<T> = class {
+    fn slice(end: u64) -> Array<T> {}
+}
+
+fn main() -> void {
+    let arr2: Container = new Array()
+}

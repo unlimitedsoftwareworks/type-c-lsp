@@ -12,6 +12,7 @@ import { TypeCVariableUsageValidator } from './validations/variable-usage-valida
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
+import { TypeCTypeUtils } from './typing/type-utils.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -24,6 +25,7 @@ export type TypeCAddedServices = {
     },
     typing: {
         TypeProvider: TypeCTypeProvider
+        TypeUtils: TypeCTypeUtils
     },
     validation: {
         TypeSystemValidator: TypeCTypeSystemValidator,
@@ -58,7 +60,8 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         Linker: (services: TypeCServices) => new TypeCLinker(services)
     },
     typing: {
-        TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services)
+        TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services),
+        TypeUtils: (services: TypeCServices) => new TypeCTypeUtils(services)
     },
     documentation: {
         DocumentationProvider: (services: TypeCServices) => new TypeCDocumentationProvider(services)

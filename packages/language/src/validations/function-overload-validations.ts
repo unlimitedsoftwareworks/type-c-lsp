@@ -4,6 +4,7 @@ import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import { TypeDescription } from "../typing/type-c-types.js";
 import { TypeCBaseValidation } from "./base-validation.js";
+import { ErrorCode } from "../codes/errors.js";
 
 /**
  * Method signature for overload detection.
@@ -171,11 +172,13 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             if (functions.length > 1) {
                 for (const fn of functions) {
                     if (fn.genericParameters && fn.genericParameters.length > 0) {
+                        const errorCode = ErrorCode.TC_GENERIC_FUNCTION_CANNOT_OVERLOAD;
                         accept('error',
-                            `Generic function '${name}' cannot be overloaded`,
+                            `Generic function overload error: Generic function '${name}' cannot be overloaded. Generic functions use type inference and cannot have multiple signatures.`,
                             {
                                 node: fn,
-                                property: 'name'
+                                property: 'name',
+                                code: errorCode
                             }
                         );
                     }
@@ -197,11 +200,13 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
 
             if (duplicate) {
                 // Report error on the current function
+                const errorCode = ErrorCode.TC_DUPLICATE_FUNCTION_OVERLOAD;
                 accept('error',
-                    `Duplicate function overload: '${name}' with signature ${this.formatSignature(signature)} already exists`,
+                    `Duplicate function overload: Function '${name}' with signature ${this.formatSignature(signature)} is already defined. Each overload must have a unique parameter signature.`,
                     {
                         node: fn,
-                        property: 'name'
+                        property: 'name',
+                        code: errorCode
                     }
                 );
             } else {
@@ -229,11 +234,15 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             if (methods.length > 1) {
                 for (const method of methods) {
                     if (method.genericParameters && method.genericParameters.length > 0) {
+                        const errorCode = context === 'class'
+                            ? ErrorCode.TC_GENERIC_CLASS_METHOD_CANNOT_OVERLOAD
+                            : ErrorCode.TC_GENERIC_INTERFACE_METHOD_CANNOT_OVERLOAD;
                         accept('error',
-                            `Generic ${context} method '${name}' cannot be overloaded`,
+                            `Generic ${context} method overload error: Generic method '${name}' cannot be overloaded. Generic methods use type inference and cannot have multiple signatures.`,
                             {
                                 node: method,
-                                property: 'names'
+                                property: 'names',
+                                code: errorCode
                             }
                         );
                     }
@@ -255,11 +264,15 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
 
             if (duplicate) {
                 // Report error on the current method
+                const errorCode = context === 'class'
+                    ? ErrorCode.TC_DUPLICATE_CLASS_METHOD_OVERLOAD
+                    : ErrorCode.TC_DUPLICATE_INTERFACE_METHOD_OVERLOAD;
                 accept('error',
-                    `Duplicate ${context} method overload: '${name}' with signature ${this.formatSignature(signature)} already exists`,
+                    `Duplicate ${context} method overload: Method '${name}' with signature ${this.formatSignature(signature)} is already defined in this ${context}. Each overload must have a unique parameter signature.`,
                     {
                         node: method,
-                        property: 'names'
+                        property: 'names',
+                        code: errorCode
                     }
                 );
             } else {

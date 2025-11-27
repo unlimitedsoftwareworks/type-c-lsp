@@ -11,12 +11,15 @@ import {
     isErrorType,
     isFunctionType,
     isInterfaceType,
+    isJoinType,
     isReferenceType,
+    isStructType,
     isVariantConstructorType
 } from "../typing/type-c-types.js";
 import { isAssignable, substituteGenerics } from "../typing/type-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
+import { ErrorCode } from "../codes/errors.js";
 
 /**
  * Type system validator for Type-C.
@@ -45,6 +48,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             FunctionDeclaration: this.checkFunctionDeclaration,
             IndexSet: this.checkIndexSet,
             ReverseIndexSet: this.checkReverseIndexSet,
+            JoinType: this.checkJoinType,
+            InterfaceType: this.checkInterfaceInheritance,
         };
     }
 
@@ -81,21 +86,26 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if (!compatResult.success) {
             // Build context-aware error message
             let errorMsg: string;
+            let errorCode: ErrorCode;
+            
             if (isInterfaceType(expectedType) && isClassType(inferredType)) {
                 // Special formatting for interface implementation errors
-                errorMsg = `Variable '${node.name}' requires that '${inferredType.toString()}' implements '${expectedType.toString()}'`;
+                errorCode = ErrorCode.TC_VARIABLE_INTERFACE_IMPLEMENTATION_ERROR;
+                errorMsg = `Variable '${node.name}' type error: Class '${inferredType.toString()}' must implement interface '${expectedType.toString()}'`;
                 if (compatResult.message) {
-                    errorMsg += `. ${compatResult.message}`;
+                    errorMsg += `. Implementation issue: ${compatResult.message}`;
                 }
             } else {
                 // General type mismatch
+                errorCode = ErrorCode.TC_VARIABLE_TYPE_MISMATCH;
                 errorMsg = compatResult.message
-                    ? `Type mismatch: ${compatResult.message}`
-                    : `Type mismatch: expected '${expectedType.toString()}' but got '${inferredType.toString()}'`;
+                    ? `Variable '${node.name}' type mismatch: ${compatResult.message}`
+                    : `Variable '${node.name}' type mismatch: Expected type '${expectedType.toString()}', but got '${inferredType.toString()}'`;
             }
             accept('error', errorMsg, {
                 node: node.initializer,
                 property: 'initializer',
+                code: errorCode
             });
         }
     }
@@ -136,11 +146,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if (assignmentOps.includes(node.op)) {
             const compatResult = this.isTypeCompatible(rightType, leftType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
-                    ? `Cannot assign: ${compatResult.message}`
-                    : `Cannot assign '${rightType.toString()}' to '${leftType.toString()}'`;
+                    ? `Assignment error: ${compatResult.message}`
+                    : `Cannot assign type '${rightType.toString()}' to type '${leftType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.right,
+                    code: errorCode
                 });
             }
             return;
@@ -166,8 +178,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 ];
 
                 if (!convertibleTypes.includes(leftType.kind) || !convertibleTypes.includes(rightType.kind)) {
-                    accept('error', `Cannot concatenate '${leftType.toString()}' and '${rightType.toString()}'`, {
+                    const errorCode = ErrorCode.TC_CONCATENATION_ERROR;
+                    accept('error', `String concatenation error: Cannot concatenate incompatible types '${leftType.toString()}' and '${rightType.toString()}'. Types must be convertible to string.`, {
                         node,
+                        code: errorCode
                     });
                 }
                 return;
@@ -179,8 +193,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 return;
             }
 
-            accept('error', `Operator '+' requires numeric or string operands`, {
+            const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
+            accept('error', `Binary operator '+' error: Requires numeric or string operands, but got '${leftType.toString()}' and '${rightType.toString()}'`, {
                 node,
+                code: errorCode
             });
             return;
         }
@@ -192,8 +208,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const rightIsNumeric = valUtils.isNumericType(rightType);
 
             if (!leftIsNumeric || !rightIsNumeric) {
-                accept('error', `Operator '${node.op}' requires numeric operands`, {
+                const errorCode = ErrorCode.TC_NUMERIC_OP_REQUIRES_NUMERIC;
+                accept('error', `Arithmetic operator '${node.op}' error: Requires numeric operands, but got '${leftType.toString()}' and '${rightType.toString()}'`, {
                     node,
+                    code: errorCode
                 });
                 return;
             }
@@ -227,8 +245,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const rightToLeft = this.isTypeCompatible(rightType, leftType);
             const leftToRight = this.isTypeCompatible(leftType, rightType);
             if (!rightToLeft.success && !leftToRight.success) {
-                accept('warning', `Comparing incompatible types '${leftType.toString()}' and '${rightType.toString()}'`, {
+                const errorCode = ErrorCode.TC_COMPARISON_INCOMPATIBLE_TYPES;
+                accept('warning', `Comparison warning: Comparing potentially incompatible types '${leftType.toString()}' and '${rightType.toString()}'. This may not behave as expected.`, {
                     node,
+                    code: errorCode
                 });
             }
         }
@@ -255,8 +275,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             
             // Check argument count
             if (args.length !== coroutineType.parameters.length) {
-                accept('error', `Expected ${coroutineType.parameters.length} argument(s), but got ${args.length}`, {
+                const errorCode = ErrorCode.TC_COROUTINE_CALL_ARG_COUNT_MISMATCH;
+                accept('error', `Coroutine call argument count mismatch: Expected ${coroutineType.parameters.length} argument(s), but got ${args.length}`, {
                     node,
+                    code: errorCode
                 });
                 return;
             }
@@ -268,11 +290,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 
                 const compatResult = this.isTypeCompatible(actualType, expectedType);
                 if (!compatResult.success) {
+                    const errorCode = ErrorCode.TC_COROUTINE_CALL_ARG_TYPE_MISMATCH;
                     const errorMsg = compatResult.message
-                        ? `Argument ${index + 1}: ${compatResult.message}`
-                        : `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`;
+                        ? `Coroutine call argument ${index + 1} type mismatch: ${compatResult.message}`
+                        : `Coroutine call argument ${index + 1} type mismatch: Expected '${expectedType.toString()}', but got '${actualType.toString()}'`;
                     accept('error', errorMsg, {
                         node: arg,
+                        code: errorCode
                     });
                 }
             });
@@ -300,8 +324,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if (node.genericArgs && node.genericArgs.length > 0) {
             // Check generic argument count
             if (node.genericArgs.length !== genericParams.length) {
-                accept('error', `Expected ${genericParams.length} type argument(s), but got ${node.genericArgs.length}`, {
+                const errorCode = ErrorCode.TC_FUNCTION_GENERIC_ARG_COUNT_MISMATCH;
+                accept('error', `Generic type argument count mismatch: Expected ${genericParams.length} type argument(s), but got ${node.genericArgs.length}`, {
                     node,
+                    code: errorCode
                 });
                 return;
             }
@@ -342,8 +368,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // Check argument count
         if (args.length !== paramTypes.length) {
-            accept('error', `Expected ${paramTypes.length} argument(s), but got ${args.length}`, {
+            const errorCode = ErrorCode.TC_FUNCTION_CALL_ARG_COUNT_MISMATCH;
+            accept('error', `Function call argument count mismatch: Expected ${paramTypes.length} argument(s), but got ${args.length}`, {
                 node,
+                code: errorCode
             });
             return;
         }
@@ -355,11 +383,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
             const compatResult = this.isTypeCompatible(actualType, expectedType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_FUNCTION_CALL_ARG_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
-                    ? `Argument ${index + 1}: ${compatResult.message}`
-                    : `Argument ${index + 1}: expected '${expectedType.toString()}' but got '${actualType.toString()}'`;
+                    ? `Function call argument ${index + 1} type mismatch: ${compatResult.message}`
+                    : `Function call argument ${index + 1} type mismatch: Expected '${expectedType.toString()}', but got '${actualType.toString()}'`;
                 accept('error', errorMsg, {
                     node: arg,
+                    code: errorCode
                 });
             }
         });
@@ -389,8 +419,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // Check if this is a coroutine - return statements not allowed in coroutines
         if (fnType === 'cfn') {
-            accept('error', `Coroutines must use 'yield' instead of 'return'`, {
+            const errorCode = ErrorCode.TC_RETURN_IN_COROUTINE;
+            accept('error', `Return statement in coroutine: Coroutines must use 'yield' instead of 'return' to produce values`, {
                 node,
+                code: errorCode
             });
             return;
         }
@@ -409,18 +441,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const actualType = this.typeProvider.getType(node.expr);
             const compatResult = this.isTypeCompatible(actualType, expectedReturnType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_RETURN_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
                     ? `Return type mismatch: ${compatResult.message}`
-                    : `Return type mismatch: expected '${expectedReturnType.toString()}' but got '${actualType.toString()}'`;
+                    : `Return type mismatch: Expected '${expectedReturnType.toString()}', but got '${actualType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.expr,
+                    code: errorCode
                 });
             }
         } else {
             // Return with no value
             if (expectedReturnType.kind !== TypeKind.Void) {
-                accept('error', `Function must return a value of type '${expectedReturnType.toString()}'`, {
+                const errorCode = ErrorCode.TC_RETURN_MISSING_VALUE;
+                accept('error', `Missing return value: Function declared to return '${expectedReturnType.toString()}', but return statement has no value`, {
                     node,
+                    code: errorCode
                 });
             }
         }
@@ -437,8 +473,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         if (!current) {
-            accept('error', `Yield expression must be inside a coroutine function`, {
+            const errorCode = ErrorCode.TC_YIELD_OUTSIDE_COROUTINE;
+            accept('error', `Yield outside coroutine: Yield expressions can only be used inside coroutine functions (cfn)`, {
                 node,
+                code: errorCode
             });
             return;
         }
@@ -448,16 +486,20 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                        ast.isLambdaExpression(current) ? current.fnType : undefined;
 
         if (!fnType) {
-            accept('error', `Yield expression must be inside a coroutine function`, {
+            const errorCode = ErrorCode.TC_YIELD_OUTSIDE_COROUTINE;
+            accept('error', `Yield outside coroutine: Yield expressions can only be used inside coroutine functions (cfn)`, {
                 node,
+                code: errorCode
             });
             return;
         }
 
         // Check if this is a regular function - yield not allowed
         if (fnType !== 'cfn') {
-            accept('error', `Yield expression can only be used in coroutines (cfn). Use 'return' in regular functions.`, {
+            const errorCode = ErrorCode.TC_YIELD_IN_FUNCTION;
+            accept('error', `Yield in regular function: Yield can only be used in coroutines (cfn). Use 'return' in regular functions instead.`, {
                 node,
+                code: errorCode
             });
             return;
         }
@@ -476,18 +518,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const actualType = this.typeProvider.getType(node.expr);
             const compatResult = this.isTypeCompatible(actualType, expectedYieldType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_YIELD_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
                     ? `Yield type mismatch: ${compatResult.message}`
-                    : `Yield type mismatch: expected '${expectedYieldType.toString()}' but got '${actualType.toString()}'`;
+                    : `Yield type mismatch: Expected '${expectedYieldType.toString()}', but got '${actualType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.expr,
+                    code: errorCode
                 });
             }
         } else {
             // Yield with no value
             if (expectedYieldType.kind !== TypeKind.Void) {
+                const errorCode = ErrorCode.TC_YIELD_MISSING_VALUE;
                 accept('error', `Coroutine must yield a value of type '${expectedYieldType.toString()}'`, {
                     node,
+                    code: errorCode
                 });
             }
         }
@@ -539,8 +585,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
 
             // Highlight the entire function declaration for visibility
+            const errorCode = isCoroutine ? ErrorCode.TC_COROUTINE_YIELD_TYPE_INFERENCE_FAILED : ErrorCode.TC_FUNCTION_RETURN_TYPE_INFERENCE_FAILED;
             accept('error', message, {
                 node: node,
+                code: errorCode
             });
             return;
         }
@@ -552,11 +600,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
             if (!compatResult.success) {
                 const typeKind = isCoroutine ? 'yield' : 'return';
+                const errorCode = isCoroutine ? ErrorCode.TC_COROUTINE_YIELD_TYPE_MISMATCH : ErrorCode.TC_FUNCTION_RETURN_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
                     ? `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: ${compatResult.message}`
-                    : `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: declared '${declaredReturnType.toString()}' but inferred '${inferredReturnType.toString()}'`;
+                    : `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: Declared '${declaredReturnType.toString()}', but inferred '${inferredReturnType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.header.returnType,
+                    code: errorCode
                 });
             }
         }
@@ -582,11 +632,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const arrayType = baseType;
             const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_INDEX_SET_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
-                    ? `Cannot assign to array: ${compatResult.message}`
-                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                    ? `Array index assignment type mismatch: ${compatResult.message}`
+                    : `Array index assignment type mismatch: Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.value,
+                    code: errorCode
                 });
             }
             return;
@@ -601,11 +653,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 if (valueParam) {
                     const compatResult = this.isTypeCompatible(valueType, valueParam.type);
                     if (!compatResult.success) {
+                        const errorCode = ErrorCode.TC_INDEX_SET_TYPE_MISMATCH;
                         const errorMsg = compatResult.message
-                            ? `Cannot assign to index: ${compatResult.message}`
-                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                            ? `Index operator assignment type mismatch: ${compatResult.message}`
+                            : `Index operator assignment type mismatch: Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
                         accept('error', errorMsg, {
                             node: node.value,
+                            code: errorCode
                         });
                     }
                 }
@@ -632,11 +686,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const arrayType = baseType;
             const compatResult = this.isTypeCompatible(valueType, arrayType.elementType);
             if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_REVERSE_INDEX_SET_TYPE_MISMATCH;
                 const errorMsg = compatResult.message
-                    ? `Cannot assign to array: ${compatResult.message}`
-                    : `Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
+                    ? `Reverse array index assignment type mismatch: ${compatResult.message}`
+                    : `Reverse array index assignment type mismatch: Cannot assign '${valueType.toString()}' to array of '${arrayType.elementType.toString()}'`;
                 accept('error', errorMsg, {
                     node: node.value,
+                    code: errorCode
                 });
             }
             return;
@@ -651,13 +707,256 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 if (valueParam) {
                     const compatResult = this.isTypeCompatible(valueType, valueParam.type);
                     if (!compatResult.success) {
+                        const errorCode = ErrorCode.TC_REVERSE_INDEX_SET_TYPE_MISMATCH;
                         const errorMsg = compatResult.message
-                            ? `Cannot assign to reverse index: ${compatResult.message}`
-                            : `Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
+                            ? `Reverse index operator assignment type mismatch: ${compatResult.message}`
+                            : `Reverse index operator assignment type mismatch: Cannot assign '${valueType.toString()}' to '${valueParam.type.toString()}'`;
                         accept('error', errorMsg, {
                             node: node.value,
+                            code: errorCode
                         });
                     }
+                }
+            }
+        }
+    }
+
+    /**
+     * Check join type (intersection type) validations.
+     *
+     * Requirements:
+     * 1. Only interfaces and structs can be joined
+     * 2. Cannot mix interfaces with structs
+     * 3. Struct combination must have unique fields (no duplicate field names)
+     * 4. Interface combination must have unique method signatures (overloading is allowed)
+     */
+    checkJoinType = (node: ast.JoinType, accept: ValidationAcceptor): void => {
+        // Get the joined types
+        const leftType = this.typeProvider.getType(node.left);
+        const rightType = this.typeProvider.getType(node.right);
+
+        // Resolve references
+        const resolvedLeft = isReferenceType(leftType) ? this.typeProvider.resolveReference(leftType) : leftType;
+        const resolvedRight = isReferenceType(rightType) ? this.typeProvider.resolveReference(rightType) : rightType;
+
+        // Collect all types from nested joins
+        const allTypes: TypeDescription[] = [];
+        this.collectJoinTypes(resolvedLeft, allTypes);
+        this.collectJoinTypes(resolvedRight, allTypes);
+
+        // Validate that all types are either interfaces or structs
+        const hasInterface = allTypes.some(t => isInterfaceType(t));
+        const hasStruct = allTypes.some(t => isStructType(t));
+        const hasOther = allTypes.some(t => !isInterfaceType(t) && !isStructType(t));
+
+        // Check rule 1: Only interfaces and structs allowed
+        if (hasOther) {
+            const invalidType = allTypes.find(t => !isInterfaceType(t) && !isStructType(t));
+            const errorCode = ErrorCode.TC_JOIN_TYPE_INVALID_MEMBER;
+            accept('error',
+                `Join type invalid member: Join types can only combine interfaces and structs. Found invalid type: ${invalidType?.toString()}`,
+                { node, code: errorCode },
+            );
+            return;
+        }
+
+        // Check rule 2: Cannot mix interfaces with structs
+        if (hasInterface && hasStruct) {
+            const errorCode = ErrorCode.TC_JOIN_TYPE_MIXING_KINDS;
+            accept('error',
+                `Join type mixing error: Cannot combine interfaces with structs in the same join type. All members must be either interfaces or structs.`,
+                { node, code: errorCode }
+            );
+            return;
+        }
+
+        // Check rule 3: Struct fields must have compatible types
+        // Allow duplicate fields with the same type (inheritance), but error on conflicting types
+        if (hasStruct) {
+            const structs = allTypes.filter(isStructType);
+            const fieldTypeMap = new Map<string, { type: TypeDescription; sources: string[] }>();
+
+            for (const struct of structs) {
+                const structName = struct.toString();
+                for (const field of struct.fields) {
+                    const existing = fieldTypeMap.get(field.name);
+                    if (existing) {
+                        // Check if types are compatible
+                        if (existing.type.toString() !== field.type.toString()) {
+                            const errorCode = ErrorCode.TC_JOIN_STRUCT_FIELD_TYPE_CONFLICT;
+                            accept('error',
+                                `Join struct field type conflict: Field '${field.name}' has conflicting types: '${existing.type.toString()}' in ${existing.sources.join(', ')} vs '${field.type.toString()}' in ${structName}`,
+                                { node, code: errorCode }
+                            );
+                        }
+                        existing.sources.push(structName);
+                    } else {
+                        fieldTypeMap.set(field.name, {
+                            type: field.type,
+                            sources: [structName]
+                        });
+                    }
+                }
+            }
+        }
+
+        // Check rule 4: Interface methods must have compatible signatures
+        // Allow duplicate methods with the same signature (inheritance), but error on conflicting signatures
+        if (hasInterface) {
+            const interfaces = allTypes.filter(isInterfaceType);
+            this.validateInterfaceMethodCompatibility(interfaces, node, accept);
+        }
+    }
+
+    /**
+     * Validate that interface methods have compatible signatures.
+     * Allow duplicate methods with the same signature (inheritance),
+     * but report errors for conflicting signatures with the same name.
+     */
+    private validateInterfaceMethodCompatibility(
+        interfaces: TypeDescription[],
+        node: ast.JoinType,
+        accept: ValidationAcceptor
+    ): void {
+        interface MethodSignature {
+            name: string;
+            parameterTypes: string[];
+            returnType: string;
+            sources: string[];
+        }
+
+        const methodMap = new Map<string, MethodSignature>();
+
+        for (const iface of interfaces) {
+            if (!isInterfaceType(iface)) continue;
+            
+            const ifaceName = iface.toString();
+
+            for (const method of iface.methods) {
+                for (const name of method.names) {
+                    const paramTypes = method.parameters.map(p => p.type.toString());
+                    const returnType = method.returnType.toString();
+                    const signatureKey = `${name}(${paramTypes.join(',')})`;
+
+                    const existing = methodMap.get(signatureKey);
+                    if (existing) {
+                        // Check if return types match
+                        if (existing.returnType !== returnType) {
+                            const errorCode = ErrorCode.TC_JOIN_INTERFACE_METHOD_SIGNATURE_CONFLICT;
+                            accept('error',
+                                `Join interface method conflict: Method '${name}(${paramTypes.join(', ')})' has conflicting return types: '${existing.returnType}' in ${existing.sources.join(', ')} vs '${returnType}' in ${ifaceName}`,
+                                { node, code: errorCode }
+                            );
+                        }
+                        existing.sources.push(ifaceName);
+                    } else {
+                        methodMap.set(signatureKey, {
+                            name,
+                            parameterTypes: paramTypes,
+                            returnType,
+                            sources: [ifaceName]
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Recursively collect all types from a join type.
+     * Resolves reference types to get the actual interface/struct definitions.
+     */
+    private collectJoinTypes(type: TypeDescription, result: TypeDescription[]): void {
+        // Resolve reference types first
+        let resolvedType = type;
+        if (isReferenceType(type)) {
+            const resolved = this.typeProvider.resolveReference(type);
+            if (resolved) {
+                resolvedType = resolved;
+            }
+        }
+
+        if (isJoinType(resolvedType)) {
+            // Recursively flatten nested joins
+            for (const t of resolvedType.types) {
+                this.collectJoinTypes(t, result);
+            }
+        } else {
+            result.push(resolvedType);
+        }
+    }
+
+
+    /**
+     * Check interface inheritance for method conflicts.
+     *
+     * When an interface extends another interface, it cannot override methods with
+     * different return types (same parameters, different return type).
+     */
+    checkInterfaceInheritance = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
+        if (!node.superTypes || node.superTypes.length === 0) {
+            return; // No inheritance to check
+        }
+
+        // Get the type description for this interface
+        const interfaceType = this.typeProvider.getType(node);
+        if (!isInterfaceType(interfaceType)) {
+            return;
+        }
+
+        // Collect all methods from parent interfaces
+        interface ParentMethod {
+            name: string;
+            parameterTypes: string[];
+            returnType: string;
+            parentInterface: string;
+        }
+        const parentMethods = new Map<string, ParentMethod>();
+
+        for (const extendedRef of node.superTypes) {
+            const parentType = this.typeProvider.getType(extendedRef);
+            const resolvedParent = isReferenceType(parentType)
+                ? this.typeProvider.resolveReference(parentType)
+                : parentType;
+
+            if (!isInterfaceType(resolvedParent)) {
+                continue;
+            }
+
+            const parentName = resolvedParent.toString();
+
+            for (const method of resolvedParent.methods) {
+                for (const name of method.names) {
+                    const paramTypes = method.parameters.map(p => p.type.toString());
+                    const signatureKey = `${name}(${paramTypes.join(',')})`;
+                    
+                    parentMethods.set(signatureKey, {
+                        name,
+                        parameterTypes: paramTypes,
+                        returnType: method.returnType.toString(),
+                        parentInterface: parentName
+                    });
+                }
+            }
+        }
+
+        // Check if any methods in this interface conflict with parent methods
+        for (const method of interfaceType.methods) {
+            for (const name of method.names) {
+                const paramTypes = method.parameters.map(p => p.type.toString());
+                const signatureKey = `${name}(${paramTypes.join(',')})`;
+                const returnType = method.returnType.toString();
+
+                const parentMethod = parentMethods.get(signatureKey);
+                if (parentMethod && parentMethod.returnType !== returnType) {
+                    const errorCode = ErrorCode.TC_INTERFACE_INHERITANCE_METHOD_CONFLICT;
+                    accept('error',
+                        `Interface inheritance method conflict: Method '${name}(${paramTypes.join(', ')})' in interface cannot override parent method with different return type. Parent returns '${parentMethod.returnType}', but this interface returns '${returnType}'`,
+                        {
+                            node: node,
+                            code: errorCode
+                        }
+                    );
                 }
             }
         }

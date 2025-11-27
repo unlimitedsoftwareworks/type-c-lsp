@@ -1,0 +1,11 @@
+// Error: Duplicate fields in joined structs
+type Point2D = struct { x: f64, y: f64 }
+type Point3D = struct { x: f64, y: f64, z: f64 }
+
+// Invalid: both have 'x' and 'y' fields
+type InvalidJoin = Point2D & Point3D
+
+type Location = struct { x: f64 }
+
+// Invalid: duplicate 'x' field
+type AlsoInvalid = Point2D & Location

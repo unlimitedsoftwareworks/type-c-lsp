@@ -1,0 +1,30 @@
+// Error: Duplicate method signatures in joined interfaces
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Renderable = interface {
+    fn draw() -> void  // Same signature as Drawable.draw()
+    fn render() -> void
+}
+
+// Invalid: both have 'draw() -> void' with same signature
+type InvalidInterface = Drawable & Renderable
+
+// Valid overloading (different signatures)
+type ValidOverload1 = interface {
+    fn process(x: u32) -> void
+}
+
+type ValidOverload2 = interface {
+    fn process(x: u32, y: u32) -> void  // Different signature - OK
+}
+
+// This is valid because signatures differ
+type ValidJoin = ValidOverload1 & ValidOverload2
+
+// But this is invalid (exact duplicate)
+type DuplicateProcess = interface {
+    fn compute(x: u32) -> void
+    fn compute(x: u32) -> void  // Exact duplicate - ERROR
+}

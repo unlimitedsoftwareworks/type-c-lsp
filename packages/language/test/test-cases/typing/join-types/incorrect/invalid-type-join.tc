@@ -1,0 +1,11 @@
+// Error: Cannot join types other than interfaces and structs
+type Point = struct { x: f64, y: f64 }
+
+// Invalid: trying to join with primitive type
+type Invalid1 = Point & u32
+
+// Invalid: trying to join with array type
+type Invalid2 = Point & u32[]
+
+// Invalid: trying to join with function type
+type Invalid3 = Point & fn(u32) -> void

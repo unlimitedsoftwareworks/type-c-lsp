@@ -8,6 +8,7 @@ import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
 import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
 import { FunctionOverloadValidator } from './validations/function-overload-validations.js';
+import { TypeCVariableUsageValidator } from './validations/variable-usage-validation.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
@@ -26,7 +27,8 @@ export type TypeCAddedServices = {
     },
     validation: {
         TypeSystemValidator: TypeCTypeSystemValidator,
-        FunctionOverloadValidator: FunctionOverloadValidator
+        FunctionOverloadValidator: FunctionOverloadValidator,
+        VariableUsageValidator: TypeCVariableUsageValidator
     },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
@@ -47,7 +49,8 @@ export type TypeCServices = LangiumServices & TypeCAddedServices
 export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAddedServices> = {
     validation: {
         TypeSystemValidator: (services: TypeCServices) => new TypeCTypeSystemValidator(services),
-        FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services)
+        FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services),
+        VariableUsageValidator: () => new TypeCVariableUsageValidator()
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),

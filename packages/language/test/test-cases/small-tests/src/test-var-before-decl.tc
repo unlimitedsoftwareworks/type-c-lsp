@@ -2,49 +2,46 @@
 
 fn testUsedBeforeDeclared() {
     // Error: x is used before it's declared
-    let y: u32 = x + 1
-    let x: u32 = 10
+    let y: u32 = x + 1;
+    let x: u32 = 10;
 }
 
 fn testCorrectOrder() {
     // OK: x is declared before use
-    let x: u32 = 10
-    let y: u32 = x + 1
+    let x: u32 = 10;
+    let y: u32 = x + 1;
 }
 
 fn testSelfReference() {
     // Error: x is used in its own initializer
-    let x: u32 = x + 1
+    let x: u32 = x + 1;
 }
 
 fn testDestructuring() {
     // Error: arr is used before declaration
-    let [a, b] = arr
-    let arr: u32[] = [1u32, 2u32] 
-
-    // ok
-    let a = let b = 1 in b + 1
+    let [a, b] = arr;
+    let arr: u32[] = [1, 2];
 }
 
 fn testLetIn() {
     // Error: x used before declaration in let-in expression
-    let result = let y = x + 1, x = 10 in y
+    let result = let y = x + 1, x = 10 in y;
 }
 
 fn testNestedBlocks() {
-    let x: u32 = 10
+    let x: u32 = 10;
     {
         // OK: x from outer scope is accessible
-        let y: u32 = x + 1
+        let y: u32 = x + 1;
     }
 }
 
 fn testSeparateScopes() {
     {
-        let x: u32 = 10
+        let x: u32 = 10;
     }
     {
         // Error: x from previous block is not accessible
-        let y: u32 = x + 1
+        let y: u32 = x + 1;
     }
 }

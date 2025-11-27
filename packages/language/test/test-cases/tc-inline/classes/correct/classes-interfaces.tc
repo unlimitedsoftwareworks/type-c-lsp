@@ -27,10 +27,15 @@ type Person = class {
 }
 
 fn testSimpleClass() -> void {
+    /// @Type(person): Person
     let person: Person = new Person("Alice", 30)
+    /// @Type(personName): string
     let personName = person.name
+    /// @Type(personAge): u32
     let personAge = person.age
+    /// @Type(greeting): string
     let greeting = person.greet()
+    /// @Type(age): u32
     let age = person.getAge()
 }
 
@@ -52,12 +57,18 @@ type Box<T> = class {
 }
 
 fn testGenericClass() -> void {
+    /// @Type(intBox): Box<i32>
     let intBox: Box<i32> = new Box<i32>(42)
+    /// @Type(boxValue): i32
     let boxValue = intBox.value
+    /// @Type(retrieved): i32
     let retrieved = intBox.get()
     
+    /// @Type(strBox): Box<string>
     let strBox: Box<string> = new Box<string>("hello")
+    /// @Type(strValue): string
     let strValue = strBox.value
+    /// @Type(strRetrieved): string
     let strRetrieved = strBox.get()
 }
 
@@ -83,9 +94,13 @@ type Counter = class {
 }
 
 fn testClassWithOperators() -> void {
+    /// @Type(counter1): Counter
     let counter1: Counter = new Counter(0)
+    /// @Type(counter2): Counter
     let counter2: Counter = new Counter(5)
+    /// @Type(combined): Counter
     let combined = counter1 + counter2
+    /// @Type(finalCount): i32
     let finalCount = combined.getCount()
 }
 
@@ -130,8 +145,11 @@ fn makeCircle(radius: f64, x: f64, y: f64) -> Circle {
 }
 
 fn testInterface() -> void {
+    /// @Type(circle): Circle
     let circle: Circle = makeCircle(5.0, 0.0, 0.0)
+    /// @Type(drawable): Drawable
     let drawable: Drawable = circle
+    /// @Type(radius): f64
     let radius = circle.getRadius()
 }
 
@@ -155,9 +173,13 @@ type Container<T> = class {
 }
 
 fn testNestedGenerics() -> void {
+    /// @Type(container): Container<Box<i32>>
     let container: Container<Box<i32> > = new Container<Box<i32> >()
+    /// @Type(box1): Box<i32>
     let box1: Box<i32> = new Box<i32>(10)
+    /// @Type(retrievedBox): Box<i32>
     let retrievedBox = container.get(0u64)
+    /// @Type(innerValue): i32
     let innerValue = retrievedBox.value
 }
 
@@ -185,12 +207,18 @@ type Pair<A, B> = class {
 }
 
 fn testMultipleGenerics() -> void {
+    /// @Type(pair): Pair<string, i32>
     let pair: Pair<string, i32> = new Pair<string, i32>("answer", 42)
+    /// @Type(firstVal): string
     let firstVal = pair.getFirst()
+    /// @Type(secondVal): i32
     let secondVal = pair.getSecond()
     let cat = firstVal + secondVal
+    /// @Type(swapped): Pair<i32, string>
     let swapped = pair.swap()
+    /// @Type(swappedFirst): i32
     let swappedFirst = swapped.getFirst()
+    /// @Type(swappedSecond): string
     let swappedSecond = swapped.getSecond()
 }
 

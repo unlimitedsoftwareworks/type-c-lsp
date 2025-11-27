@@ -8,4 +8,5 @@ type ColoredPoint = Point2D & Color
 // Should work fine
 let cp: ColoredPoint = { x: 1.0, y: 2.0, r: 255, g: 0, b: 0 }
 
+// Duplicate field with identical type is valid
 type Cool = {x: u32, y: u32} & {y: u32}

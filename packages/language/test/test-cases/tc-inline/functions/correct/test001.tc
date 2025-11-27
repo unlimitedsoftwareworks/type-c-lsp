@@ -3,7 +3,8 @@
  * - typing
  */
 
-fn fib(n: u32) -> u32 = 
+/// @Type(fib): fn(n: u32) -> u32
+fn fib(n: u32) -> u32 =
 	match n {
 		0u32 => 0u32,
 		1u32 => 1u32,
@@ -12,6 +13,7 @@ fn fib(n: u32) -> u32 =
 
 
 fn main () -> void {
+	/// @Type(x): u32
 	let x = fib(10u32)
 	test(null)
 	let y: {x: u32}? = {x: 5u32}

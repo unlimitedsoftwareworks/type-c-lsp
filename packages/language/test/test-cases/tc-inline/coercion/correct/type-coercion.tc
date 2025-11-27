@@ -9,9 +9,13 @@
  */
 
 // Integer literals should coerce to any numeric type
+/// @Type(takesF32): fn(x: f32) -> f32
 fn takesF32(x: f32) -> f32 { return x }
+/// @Type(takesF64): fn(x: f64) -> f64
 fn takesF64(x: f64) -> f64 { return x }
+/// @Type(takesI32): fn(x: i32) -> i32
 fn takesI32(x: i32) -> i32 { return x }
+/// @Type(takesU64): fn(x: u64) -> u64
 fn takesU64(x: u64) -> u64 { return x }
 
 fn testLiteralCoercion() -> void {
@@ -53,11 +57,13 @@ fn testMixedExpressions() -> void {
 }
 
 // Function call coercion
+/// @Type(multiply): fn(a: f64, b: f64) -> f64
 fn multiply(a: f64, b: f64) -> f64 {
     return a * b
 }
 
 fn testFunctionCallCoercion() -> void {
+    /// @Type(area): f64
     let area = multiply(5, 10)       // Both i32 literals → f64
     let mixed = multiply(5, 3.14)    // i32 literal + f64 literal
 }

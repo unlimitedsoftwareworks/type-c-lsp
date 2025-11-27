@@ -5,6 +5,7 @@
  */
 
 // Valid: All arms have common fields with exact types
+/// @Type(getPoint): fn(n: u32) -> struct { x: u32, y: u32 }
 fn getPoint(n: u32) {
     return match n {
         0 => {x: 1u32, y: 2u32},
@@ -14,6 +15,7 @@ fn getPoint(n: u32) {
 }
 
 // Valid: All fields present in all arms
+/// @Type(getAllFields): fn(n: u32) -> struct { a: u32, b: u32 }
 fn getAllFields(n: u32) {
     return match n {
         0 => {a: 1u32, b: 2u32},
@@ -22,6 +24,7 @@ fn getAllFields(n: u32) {
 }
 
 // Valid: Single field common across all arms
+/// @Type(getSingleField): fn(n: u32) -> struct { value: u32 }
 fn getSingleField(n: u32) {
     return match n {
         0 => {value: 10u32},
@@ -31,8 +34,11 @@ fn getSingleField(n: u32) {
 }
 
 fn main() -> void {
+    /// @Type(p): struct { x: u32, y: u32 }
     let p = getPoint(0)
+    /// @Type(all): struct { a: u32, b: u32 }
     let all = getAllFields(0)
+    /// @Type(single): struct { value: u32 }
     let single = getSingleField(0)
 }
 

@@ -53,7 +53,9 @@ describe('TC Inline Tests - Comprehensive', () => {
             const relativePath = path.relative(testCasesDir, filePath);
             
             test(relativePath, async () => {
-                const result = await runInlineTestFile(setup, filePath);
+                const result = await runInlineTestFile(setup, filePath, {
+                    checkTypes: true  // Enable type checking
+                });
                 
                 // Correct files MUST have zero diagnostics
                 const doc = await setup.parseAndValidate(
@@ -67,7 +69,14 @@ describe('TC Inline Tests - Comprehensive', () => {
                 expect(errors).toHaveLength(0);
                 
                 // If there are annotations, they should all pass
-                if (result.totalAnnotations > 0) {
+                if (result.totalAnnotations > 0 && result.failed > 0) {
+                    // Show which tests failed
+                    const failedTests = result.results.filter(r => !r.passed);
+                    const failureDetails = failedTests.map(r =>
+                        `Line ${r.annotation.line + 1}: ${r.message}`
+                    ).join('\n');
+                    expect(result.failed, `Failed tests:\n${failureDetails}`).toBe(0);
+                } else if (result.totalAnnotations > 0) {
                     expect(result.failed).toBe(0);
                 }
             });
@@ -80,7 +89,9 @@ describe('TC Inline Tests - Comprehensive', () => {
             
             test(relativePath, async () => {
                 // Incorrect files must have annotations and all should pass
-                await expectInlineTestsPass(setup, filePath);
+                await expectInlineTestsPass(setup, filePath, {
+                    checkTypes: true  // Enable type checking
+                });
             });
         }
     });

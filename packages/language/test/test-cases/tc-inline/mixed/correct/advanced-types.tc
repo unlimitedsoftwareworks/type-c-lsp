@@ -5,14 +5,19 @@ type Option<T> = variant {
 }
 
 fn testVariants() -> void {
+    /// @Type(someValue): Option<i32>
     let someValue: Option<i32> = Option.Some(42)
+    /// @Type(noneValue): Option<string>
     let noneValue: Option<string> = Option.None()
 }
 
 // Array operations
 fn testArrayOps() -> void {
+    /// @Type(numbers): i32[]
     let numbers: i32[] = [1, 2, 3, 4, 5]
+    /// @Type(len): u64
     let len = numbers.length
+    /// @Type(first): i32
     let first = numbers[0]
 }
 
@@ -28,13 +33,18 @@ type LinkedNode<T> = class {
 }
 
 fn testNullableChains() -> void {
+    /// @Type(node1): LinkedNode<i32>
     let node1: LinkedNode<i32> = new LinkedNode<i32>(1)
+    /// @Type(nextNode): LinkedNode<i32>?
     let nextNode = node1.next
+    /// @Type(nextValue): i32?
     let nextValue = node1.next?.value
 }
 
 // Type casting
 fn testTypeCasting() -> void {
+    /// @Type(num): i32
     let num: i32 = 42
+    /// @Type(bigNum): i64
     let bigNum = num as i64
 }

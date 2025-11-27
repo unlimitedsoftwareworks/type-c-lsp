@@ -9,15 +9,19 @@ type Result<T, E> = variant {
 
 // Test 1: Full generic inference from explicit types
 fn testFullInference() -> Result<i32, string> {
+    /// @Type(okValue): Result<i32, string>
     let okValue: Result<i32, string> = Result.Ok(42)
+    /// @Type(errValue): Result<i32, string>
     let errValue: Result<i32, string> = Result.Err("error")
     return okValue
 }
 
 // Test 2: Partial inference - T inferred, E cannot be inferred (becomes never)
+/// @Type(testPartialInferenceOk): fn() -> Result<i32, string>
 fn testPartialInferenceOk() -> Result<i32, string> {
     // okResponse should have type Result<i32, never>.Ok
     // T is inferred as i32, but E is uninferrable -> never
+    /// @Type(okResponse): Result.Ok<i32, never>
     let okResponse = Result.Ok(200)
 
     // This should work because Result.Ok is a subtype of Result<i32, E> for any E
@@ -25,9 +29,11 @@ fn testPartialInferenceOk() -> Result<i32, string> {
 }
 
 // Test 3: Partial inference - E inferred, T cannot be inferred (becomes never)
+/// @Type(testPartialInferenceErr): fn() -> Result<i32, string>
 fn testPartialInferenceErr() -> Result<i32, string> {
     // errResponse should have type Result<never, string>.Err
     // E is inferred as string, but T is uninferrable -> never
+    /// @Type(errResponse): Result.Err<never, string>
     let errResponse = Result.Err("Connection failed")
 
     // This should work because Result.Err is a subtype of Result<T, string> for any T
@@ -35,8 +41,11 @@ fn testPartialInferenceErr() -> Result<i32, string> {
 }
 
 // Test 4: Both inferred from usage context (return type unification)
+/// @Type(testReturnUnification): fn() -> Result<i32, string>
 fn testReturnUnification() -> Result<i32, string> {
+    /// @Type(ok): Result.Ok<i32, never>
     let ok = Result.Ok(100)
+    /// @Type(err): Result.Err<never, string>
     let err = Result.Err("timeout")
 
     let condition = true
@@ -46,8 +55,11 @@ fn testReturnUnification() -> Result<i32, string> {
 
 // Test 5: Variant constructors with different generic instantiations
 fn testDifferentInstantiations() -> void {
+    /// @Type(intResult): Result<i32, string>
     let intResult: Result<i32, string> = Result.Ok(42)
+    /// @Type(strResult): Result<string, i32>
     let strResult: Result<string, i32> = Result.Ok("success")
+    /// @Type(boolResult): Result<bool, string>
     let boolResult: Result<bool, string> = Result.Err("failure")
 }
 
@@ -57,18 +69,23 @@ type Option<T> = variant {
     None
 }
 
+/// @Type(testNestedVariants): fn() -> Result<Option<i32>, string>
 fn testNestedVariants() -> Result<Option<i32>, string> {
+    /// @Type(nested): Result.Ok<Option.Some<i32>, never>
     let nested = Result.Ok(Option.Some(42))
     return nested
 }
 
 // Test 7: Variant with single type parameter
+/// @Type(testSingleParamVariant): fn() -> Option<i32>
 fn testSingleParamVariant() -> Option<i32> {
     // someVal should have type Option<i32>.Some
+    /// @Type(someVal): Option.Some<i32>
     let someVal = Option.Some(42)
 
     // noneVal should have type Option<never>.None
     // None has no parameters, so all type params are uninferrable
+    /// @Type(noneVal): Option.None<never>
     let noneVal = Option.None()
 
     let condition = true
@@ -76,23 +93,30 @@ fn testSingleParamVariant() -> Option<i32> {
 }
 
 // Test 8: Complex generic inference with function calls
+/// @Type(processResult): fn(r: Result<i32, string>) -> i32
 fn processResult(r: Result<i32, string>) -> i32 {
     return 0
 }
 
 fn testFunctionCallInference() -> void {
     // Should infer from parameter type of processResult
+    /// @Type(result): Result.Ok<i32, never>
     let result = Result.Ok(42)
     let x = processResult(result)
 }
 
 // Test 9: Multiple variant variables with partial inference
 fn testMultiplePartialInferences() -> Result<i32, string> {
+    /// @Type(ok1): Result.Ok<i32, never>
     let ok1 = Result.Ok(10)
+    /// @Type(ok2): Result.Ok<i32, never>
     let ok2 = Result.Ok(20)
+    /// @Type(ok3): Result.Ok<i32, never>
     let ok3 = Result.Ok(30)
 
+    /// @Type(err1): Result.Err<never, string>
     let err1 = Result.Err("error1")
+    /// @Type(err2): Result.Err<never, string>
     let err2 = Result.Err("error2")
 
     // All should unify at return
@@ -107,11 +131,13 @@ type Response<T> = struct {
 }
 
 fn testVariantInStruct() -> void {
+    /// @Type(response): Response<i32>
     let response: Response<i32> = {
         status: 200u32,
         data: Result.Ok(42)
     }
 
+    /// @Type(errorResponse): Response<i32>
     let errorResponse: Response<i32> = {
         status: 500u32,
         data: Result.Err("Server error")
@@ -120,6 +146,7 @@ fn testVariantInStruct() -> void {
 
 // Test 11: Array of variants
 fn testArrayOfVariants() -> void {
+    /// @Type(results): Result<i32, string>[]
     let results: Result<i32, string>[] = [
         Result.Ok(1),
         Result.Ok(2),
@@ -128,12 +155,15 @@ fn testArrayOfVariants() -> void {
 }
 
 // Test 12: Chained variant operations
+/// @Type(divide): fn(a: f64, b: f64) -> Result<f64, string>
 fn divide(a: f64, b: f64) -> Result<f64, string> {
     return if b == 0.0 => Result.Err("Division by zero") else Result.Ok(a / b)
 }
 
 fn testVariantChaining() -> void {
+    /// @Type(result1): Result<f64, string>
     let result1 = divide(10.0, 2.0)
+    /// @Type(result2): Result<f64, string>
     let result2 = divide(10.0, 0.0)
 }
 
@@ -143,8 +173,11 @@ type Value<T> = variant {
     Complex(real: T, imaginary: T)
 }
 
+/// @Type(testComplexVariant): fn() -> Value<f64>
 fn testComplexVariant() -> Value<f64> {
+    /// @Type(simple): Value.Primitive<f64>
     let simple = Value.Primitive(3.14)
+    /// @Type(complex): Value.Complex<f64>
     let complex = Value.Complex(1.0, 2.0)
 
     let condition = true
@@ -158,10 +191,14 @@ type Triple<A, B, C> = variant {
     Third(c: C)
 }
 
+/// @Type(testThreeParams): fn() -> Triple<i32, string, bool>
 fn testThreeParams() -> Triple<i32, string, bool> {
     // Each constructor infers one param, others become never
+    /// @Type(first): Triple.First<i32, never, never>
     let first = Triple.First(42)        // Triple<i32, never, never>.First
+    /// @Type(second): Triple.Second<never, string, never>
     let second = Triple.Second("test")  // Triple<never, string, never>.Second
+    /// @Type(third): Triple.Third<never, never, bool>
     let third = Triple.Third(true)      // Triple<never, never, bool>.Third
 
     let condition = 0
@@ -170,23 +207,32 @@ fn testThreeParams() -> Triple<i32, string, bool> {
 
 // Test 15: Main function to tie everything together
 fn main() -> void {
+    /// @Type(r1): Result<i32, string>
     let r1 = testFullInference()
+    /// @Type(r2): Result<i32, string>
     let r2 = testPartialInferenceOk()
+    /// @Type(r3): Result<i32, string>
     let r3 = testPartialInferenceErr()
+    /// @Type(r4): Result<i32, string>
     let r4 = testReturnUnification()
 
     testDifferentInstantiations()
 
+    /// @Type(r6): Result<Option<i32>, string>
     let r6 = testNestedVariants()
+    /// @Type(r7): Option<i32>
     let r7 = testSingleParamVariant()
 
     testFunctionCallInference()
 
+    /// @Type(r9): Result<i32, string>
     let r9 = testMultiplePartialInferences()
     testVariantInStruct()
     testArrayOfVariants()
     testVariantChaining()
 
+    /// @Type(r13): Value<f64>
     let r13 = testComplexVariant()
+    /// @Type(r14): Triple<i32, string, bool>
     let r14 = testThreeParams()
 }

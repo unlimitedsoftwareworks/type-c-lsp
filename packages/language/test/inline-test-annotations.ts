@@ -70,6 +70,7 @@ export interface DiagnosticAnnotation extends Annotation {
 export interface TypeAnnotation extends Annotation {
     type: 'type';
     expectedType: string;   // Expected type string
+    substring?: string;     // Optional substring to find in the target line
 }
 
 /**
@@ -209,16 +210,17 @@ function parseAnnotationLine(line: string, lineNumber: number): TestAnnotation |
         };
     }
 
-    // @Type annotation: /// @Type[range]: expectedType
-    const typeMatch = content.match(/^@Type(?:(\[[^\]]+\]))?:\s*(.+)$/);
+    // @Type annotation: /// @Type(substring): expectedType OR /// @Type[range]: expectedType
+    const typeMatch = content.match(/^@Type(?:\(([^)]+)\))?(?:(\[[^\]]+\]))?:\s*(.+)$/);
     if (typeMatch) {
-        const [, rangeSpec, expectedType] = typeMatch;
+        const [, substring, rangeSpec, expectedType] = typeMatch;
         return {
             type: 'type',
             line: lineNumber,
             targetLine: lineNumber + 1,
             range: rangeSpec ? parseRangeSpec(rangeSpec, lineNumber) : undefined,
             expectedType: expectedType.trim(),
+            substring: substring?.trim(),
             sourceLine: line
         };
     }
@@ -392,18 +394,21 @@ export function validateDiagnosticAnnotations(
  */
 export function validateTypeAnnotations(
     annotations: TypeAnnotation[],
-    typeGetter: (line: number, range?: Range) => string | undefined
+    typeGetter: (line: number, range?: Range, substring?: string) => string | undefined
 ): AnnotationTestResult[] {
     const results: AnnotationTestResult[] = [];
 
     for (const annotation of annotations) {
-        const actualType = typeGetter(annotation.targetLine, annotation.range);
+        const actualType = typeGetter(annotation.targetLine, annotation.range, annotation.substring);
         
         if (actualType === undefined) {
+            const location = annotation.substring
+                ? `for substring "${annotation.substring}"`
+                : `at line ${annotation.targetLine}`;
             results.push({
                 annotation,
                 passed: false,
-                message: `✗ Could not determine type at line ${annotation.targetLine}`,
+                message: `✗ Could not determine type ${location}`,
                 actual: undefined
             });
             continue;
@@ -473,7 +478,7 @@ function isNoErrorAnnotation(annotation: TestAnnotation): annotation is NoErrorA
 export function validateAllAnnotations(
     parsed: ParsedTestFile,
     diagnostics: Diagnostic[],
-    typeGetter: (line: number, range?: Range) => string | undefined
+    typeGetter: (line: number, range?: Range, substring?: string) => string | undefined
 ): FileTestResults {
     const errorAnnotations = parsed.annotations.filter((a): a is DiagnosticAnnotation => a.type === 'error');
     const warningAnnotations = parsed.annotations.filter((a): a is DiagnosticAnnotation => a.type === 'warning');

@@ -1,11 +1,10 @@
 /**
  * Inline Test Runner for Type-C
- * 
+ *
  * Provides utilities to run tests based on inline annotations in .tc files
  */
 
-import { AstNode, LangiumDocument } from 'langium';
-import { isAstNode } from 'langium';
+import { AstNode, AstUtils, CstUtils, LangiumDocument } from 'langium';
 import type { Diagnostic } from 'vscode-languageserver-types';
 import {
     parseTestAnnotations,
@@ -50,21 +49,30 @@ export async function runInlineTestOnSource(
 ): Promise<Omit<InlineTestResult, 'filePath'>> {
     const parsed = parseTestAnnotations(source);
     const diagnostics: Diagnostic[] = document.diagnostics ?? [];
+    const lines = source.split('\n');
 
     // Create type getter if type checking is enabled and type provider is available
     const typeGetter = options.checkTypes && typeProvider
-        ? (line: number, range?: Range): string | undefined => {
-            if (!range) {
+        ? (line: number, range?: Range, substring?: string): string | undefined => {
+            let actualRange = range;
+            
+            // If substring is provided but no range, search for identifier nodes with that name
+            if (substring && !range && line < lines.length) {
+                // Find the identifier node semantically (like VSCode's "Find All References")
+                actualRange = findIdentifierInLine(document, line, substring);
+            }
+            
+            if (!actualRange) {
                 return undefined;
             }
             
             // Find AST node at the specified range
-            const node = findNodeAtRange(document, range);
+            const node = findNodeAtRange(document, actualRange);
             if (!node) return undefined;
 
             return typeProvider.getType(node).toString();
         }
-        : (_line: number, _range?: Range) => undefined;
+        : (_line: number, _range?: Range, _substring?: string) => undefined;
 
     // Validate all annotations
     const results = validateAllAnnotations(parsed, diagnostics, typeGetter);
@@ -77,51 +85,102 @@ export async function runInlineTestOnSource(
 }
 
 /**
- * Find AST node at a specific range
+ * Find AST node at a specific range using Langium's CstUtils
  */
 function findNodeAtRange(document: LangiumDocument, range: Range): AstNode | undefined {
     const rootNode = document.parseResult.value;
-    if (!rootNode) return undefined;
+    if (!rootNode || !rootNode.$cstNode) return undefined;
 
-    // Simple implementation - you may want to enhance this
-    // by doing a proper tree traversal
+    // Calculate offset from the range start position
     const offset = document.textDocument.offsetAt({
         line: range.start.line,
         character: range.start.character
     });
 
-    return findNodeAtOffset(rootNode, offset);
+    // Use Langium's built-in utility to find the leaf node at the offset
+    const leafNode = CstUtils.findLeafNodeAtOffset(rootNode.$cstNode, offset);
+    if (!leafNode) return undefined;
+
+    // Return the AST node associated with the leaf CST node
+    return leafNode.astNode;
 }
 
 /**
- * Find AST node at a specific offset
+ * Find an identifier with the given name in a specific line
+ * Searches semantically through AST nodes (like VSCode's whole-word search)
  */
-function findNodeAtOffset(node: AstNode, offset: number): AstNode | undefined {
-    if (!node.$cstNode) return undefined;
+function findIdentifierInLine(document: LangiumDocument, targetLine: number, identifierName: string): Range | undefined {
+    const rootNode = document.parseResult.value;
+    if (!rootNode) return undefined;
 
-    const nodeStart = node.$cstNode.offset;
-    const nodeEnd = node.$cstNode.end;
+    const lineText = document.textDocument.getText({
+        start: { line: targetLine, character: 0 },
+        end: { line: targetLine + 1, character: 0 }
+    });
 
-    if (offset < nodeStart || offset > nodeEnd) {
-        return undefined;
-    }
-
-    // Check children
-    for (const [, value] of Object.entries(node)) {
-        if (Array.isArray(value)) {
-            for (const item of value) {
-                if (isAstNode(item)) {
-                    const child = findNodeAtOffset(item, offset);
-                    if (child) return child;
-                }
+    // Find all identifier-like nodes in the AST that are on the target line
+    const candidates: Array<{ node: AstNode; range: Range }> = [];
+    
+    AstUtils.streamAllContents(rootNode).forEach(node => {
+        if (!node.$cstNode) return;
+        
+        const nodeRange = node.$cstNode.range;
+        // Check if node is on the target line
+        if (nodeRange.start.line === targetLine || nodeRange.end.line === targetLine) {
+            // Check if this node represents an identifier
+            // Look for nodes with a 'name' property or reference-like properties
+            const nodeName = getNodeIdentifierName(node);
+            if (nodeName === identifierName) {
+                candidates.push({
+                    node,
+                    range: nodeRange
+                });
             }
-        } else if (isAstNode(value)) {
-            const child = findNodeAtOffset(value, offset);
-            if (child) return child;
         }
+    });
+
+    // Return the LAST match (like old tests)
+    if (candidates.length > 0) {
+        return candidates[candidates.length - 1].range;
     }
 
-    return node;
+    // Fallback to text-based search if no semantic match found
+    const regex = new RegExp(`\\b${identifierName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+    const matches = Array.from(lineText.matchAll(regex));
+    if (matches.length > 0) {
+        const lastMatch = matches[matches.length - 1];
+        const index = lastMatch.index!;
+        return {
+            start: { line: targetLine, character: index },
+            end: { line: targetLine, character: index + identifierName.length }
+        };
+    }
+
+    return undefined;
+}
+
+/**
+ * Extract the identifier name from an AST node
+ */
+function getNodeIdentifierName(node: AstNode): string | undefined {
+    // Try common identifier properties using proper type checking
+    
+    // Direct name property
+    if ('name' in node && typeof node.name === 'string') {
+        return node.name;
+    }
+    
+    // Reference to another node ($refText for unresolved references)
+    if ('$refText' in node && typeof node.$refText === 'string') {
+        return node.$refText;
+    }
+    
+    // Variable reference (resolved reference)
+    if ('ref' in node && node.ref && typeof node.ref === 'object' && 'name' in node.ref && typeof node.ref.name === 'string') {
+        return node.ref.name;
+    }
+    
+    return undefined;
 }
 
 

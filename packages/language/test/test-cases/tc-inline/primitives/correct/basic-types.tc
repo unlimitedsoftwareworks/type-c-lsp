@@ -7,26 +7,38 @@
 
 // Primitive integer types
 fn testIntegers() -> void {
+    /// @Type(a): u8
     let a: u8 = 255u8
+    /// @Type(b): u16
     let b: u16 = 65535u16
+    /// @Type(c): u32
     let c: u32 = 4294967295u32
+    /// @Type(d): u64
     let d: u64 = 18446744073709551615u64
     
+    /// @Type(e): i8
     let e: i8 = -128i8
+    /// @Type(f): i16
     let f: i16 = -32768i16
+    /// @Type(g): i32
     let g: i32 = -2147483648i32
+    /// @Type(h): i64
     let h: i64 = -9223372036854775808i64
 }
 
 // Primitive float types
 fn testFloats() -> void {
+    /// @Type(floatX): f32
     let floatX = 3.14f
+    /// @Type(floatY): f64
     let floatY: f64 = 2.718281828
 }
 
 // Primitive bool and string
 fn testBoolString() -> void {
+    /// @Type(flag): bool
     let flag: bool = true
+    /// @Type(message): string
     let message: string = "hello"
 }
 
@@ -37,28 +49,39 @@ type Point = struct {
 }
 
 fn testStruct() -> void {
+    /// @Type(origin): Point
     let origin: Point = { x: 0.0, y: 0.0 }
+    /// @Type(px): f64
     let px = origin.x
 }
 
 // Type inference with primitives
 fn testInference() -> void {
+    /// @Type(inferredU32): i32
     let inferredU32 = 42
+    /// @Type(inferredF64): f64
     let inferredF64 = 3.14
+    /// @Type(inferredBool): bool
     let inferredBool = false
+    /// @Type(inferredString): string
     let inferredString = "test"
 }
 
 // Type inference with struct via duck typing
 fn testStructInference() -> void {
+    /// @Type(point): struct { x: f64, y: f64 }
     let point = { x: 1.0, y: 2.0 }
+    /// @Type(xCoord): f64
     let xCoord = point.x
 }
 
 // Binary operations preserve types
 fn testBinaryOps() -> void {
+    /// @Type(sum): u32
     let sum = 10u32 + 20u32
+    /// @Type(product): i32
     let product = 5i32 * 3i32
+    /// @Type(quotient): f64
     let quotient = 100.0 / 4.0
 }
 

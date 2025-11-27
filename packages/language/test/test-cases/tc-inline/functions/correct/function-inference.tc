@@ -1,12 +1,16 @@
 // Recursive functions with contextual type inference for integer literals
+/// @Type(fib): fn(n: u32) -> u32
 fn fib(n: u32) -> u32 = if n < 2 => n else fib(n - 1) + fib(n - 2)
 
 // Mutually recursive functions
+/// @Type(f1): fn(x: u32) -> u32
 fn f1(x: u32) -> u32 = if x < 1 => 1 else f2(x - 1)
+/// @Type(f2): fn(x: u32) -> u32
 fn f2(x: u32) -> u32 = if x < 2 => 2 else f1(x - 1) + f2(x - 2)
 
 fn f3() = 3u32
-fn anotherFib(n: u32) = 
+/// @Type(anotherFib): fn(n: u32) -> struct { x: i32, y: u32 }
+fn anotherFib(n: u32) =
 	match n {
 		0 => {x: 1i32, y: 2u32},
 		1 => {x: 3i32, y: 4u32, z: 5u32},
@@ -21,8 +25,10 @@ fn fiiib(n: u32) {
 }
 
 fn main() -> void {
+	/// @Type(z): u32
 	let z = fib(10)
 	let y = f3()
 	let x = fiiib(10)
+	/// @Type(a): struct { x: i32, y: u32 }
 	let a = anotherFib(10)
 }

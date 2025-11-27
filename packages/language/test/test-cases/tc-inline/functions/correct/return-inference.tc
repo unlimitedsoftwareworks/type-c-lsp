@@ -7,10 +7,12 @@
  */
 
 // Simple expression-body function
+/// @Type(f3): fn() -> u32
 fn f3() = 3u32
 
 // Recursive expression-body with match (has base cases)
-fn anotherFib(n: u32) = 
+/// @Type(anotherFib): fn(n: u32) -> u32
+fn anotherFib(n: u32) =
 	match n {
 		0 => 0u32,
 		1 => 1u32,
@@ -18,6 +20,7 @@ fn anotherFib(n: u32) =
 	}
 
 // Recursive block-body with return statements
+/// @Type(fiiib): fn(n: u32) -> u32
 fn fiiib(n: u32) {
 	if n < 2 {
 		return 0u32
@@ -26,6 +29,7 @@ fn fiiib(n: u32) {
 }
 
 // Nested function test - ensure we don't collect inner function's returns
+/// @Type(outerFunc): fn(x: u32) -> u32
 fn outerFunc(x: u32) {
 	// Inner function with its own return
 	fn innerFunc(y: u32) {
@@ -37,9 +41,13 @@ fn outerFunc(x: u32) {
 }
 
 fn main() -> void {
+	/// @Type(a): u32
 	let a = f3()
+	/// @Type(b): u32
 	let b = anotherFib(10)
+	/// @Type(c): u32
 	let c = fiiib(10)
+	/// @Type(d): u32
 	let d = outerFunc(5)
 }
 

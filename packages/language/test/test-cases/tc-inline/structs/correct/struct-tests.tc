@@ -23,23 +23,29 @@ type Person = struct {
 }
 
 // Anonymous struct literals (duck typing)
+/// @Type(createPoint): fn() -> struct { x: f64, y: f64 }
 fn createPoint() {
     return {x: 1.0, y: 2.0}
 }
 
+/// @Type(createPoint3D): fn() -> struct { x: f64, y: f64, z: f64 }
 fn createPoint3D() {
     return {x: 1.0, y: 2.0, z: 3.0}
 }
 
 // Struct with explicit type annotation
+/// @Type(createNamedPoint): fn() -> Point
 fn createNamedPoint() -> Point {
     return {x: 5.0, y: 10.0}
 }
 
 // Struct field access
+/// @Type(accessFields): fn() -> f64
 fn accessFields() {
     let p = {x: 3.0, y: 4.0}
+    /// @Type(xVal): f64
     let xVal = p.x
+    /// @Type(yVal): f64
     let yVal = p.y
     return xVal + yVal
 }
@@ -50,6 +56,7 @@ type Rectangle = struct {
     bottomRight: Point
 }
 
+/// @Type(createRectangle): fn() -> struct { topLeft: struct { x: f64, y: f64 }, bottomRight: struct { x: f64, y: f64 } }
 fn createRectangle() {
     return {
         topLeft: {x: 0.0, y: 0.0},
@@ -57,16 +64,22 @@ fn createRectangle() {
     }
 }
 
+/// @Type(accessNestedFields): fn() -> f64
 fn accessNestedFields() {
     let rect = createRectangle()
+    /// @Type(x1): f64
     let x1 = rect.topLeft.x
+    /// @Type(y1): f64
     let y1 = rect.topLeft.y
+    /// @Type(x2): f64
     let x2 = rect.bottomRight.x
+    /// @Type(y2): f64
     let y2 = rect.bottomRight.y
     return x2 - x1
 }
 
 // Structural subtyping: return common fields from match
+/// @Type(testStructuralSubtyping): fn() -> struct { x: f64, y: f64 }
 fn testStructuralSubtyping() {
     return match true {
         true => {x: 1.0, y: 2.0},
@@ -75,6 +88,7 @@ fn testStructuralSubtyping() {
 }
 
 // Common type inference with structural subtyping
+/// @Type(getPointVariant): fn(n: u32) -> struct { x: f64, y: f64 }
 fn getPointVariant(n: u32) {
     return match n {
         0 => {x: 1.0, y: 2.0},
@@ -84,6 +98,7 @@ fn getPointVariant(n: u32) {
 }
 
 // Struct with mixed field types
+/// @Type(createMixedStruct): fn() -> struct { id: u32, name: string, active: bool, score: f64 }
 fn createMixedStruct() {
     return {
         id: 42u32,
@@ -93,36 +108,48 @@ fn createMixedStruct() {
     }
 }
 
+/// @Type(accessMixedStruct): fn() -> u32
 fn accessMixedStruct() {
     let s = createMixedStruct()
+    /// @Type(id): u32
     let id = s.id
+    /// @Type(name): string
     let name = s.name
+    /// @Type(active): bool
     let active = s.active
+    /// @Type(score): f64
     let score = s.score
     return id
 }
 
 // Struct as function parameter
+/// @Type(calculateDistance): fn(p: Point) -> f64
 fn calculateDistance(p: Point) -> f64 {
     return p.x * p.x + p.y * p.y
 }
 
+/// @Type(testStructParameter): fn() -> f64
 fn testStructParameter() {
     let point = {x: 3.0, y: 4.0}
     return calculateDistance(point)
 }
 
 // Multiple struct variables
+/// @Type(testMultipleStructs): fn() -> f64
 fn testMultipleStructs() {
     let p1 = {x: 1.0, y: 2.0}
     let p2 = {x: 3.0, y: 4.0}
+    /// @Type(dx): f64
     let dx = p2.x - p1.x
+    /// @Type(dy): f64
     let dy = p2.y - p1.y
     return dx + dy
 }
 
 fn main() -> void {
+    /// @Type(point): struct { x: f64, y: f64 }
     let point = createPoint()
+    /// @Type(sum): f64
     let sum = accessFields()
 }
 

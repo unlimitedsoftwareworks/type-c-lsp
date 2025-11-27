@@ -68,7 +68,13 @@ export class TypeCLinker extends DefaultLinker {
      * that might be in the middle of initialization (shadowing case).
      */
     private allCandidatesAreFunctions(candidates: AstNodeDescription[]): boolean {
-        return candidates.every(d => ast.isFunctionDeclaration(d.node));
+        return candidates.every(d =>
+            ast.isFunctionDeclaration(d.node) ||
+            ast.isClassMethod(d.node) ||
+            ast.isImplementationMethodDecl(d.node) ||
+            ast.isBuiltinSymbolFn(d.node) ||
+            ast.isMethodHeader(d.node)
+        );
     }
 
     /**
@@ -80,7 +86,17 @@ export class TypeCLinker extends DefaultLinker {
         refInfo: ReferenceInfo
     ): AstNodeDescription | LinkingError {
         const candidateTypes = candidates
-            .map(d => ast.isFunctionDeclaration(d.node) ? this.typeProvider.getType(d.node) : undefined)
+            .map(d => {
+                if (ast.isFunctionDeclaration(d.node) ||
+                    ast.isClassMethod(d.node) ||
+                    ast.isImplementationMethodDecl(d.node) ||
+                    ast.isBuiltinSymbolFn(d.node) ||
+                    ast.isMethodHeader(d.node) 
+                ) {
+                    return this.typeProvider.getType(d.node);
+                }
+                return undefined;
+            })
             .filter((d): d is FunctionTypeDescription => d !== undefined && isFunctionType(d));
 
         const matchingIndices = this.typeProvider.resolveFunctionCall(fnCallNode.args, candidateTypes);

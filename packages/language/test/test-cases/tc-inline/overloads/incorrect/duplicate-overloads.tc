@@ -1,0 +1,59 @@
+// Test cases for duplicate function overloads (should fail validation)
+
+// Case 1: Exact duplicate with different return types
+// Return type should NOT matter for overload resolution
+fn add(a: u32, b: u32) -> u32 {
+    return a + b
+}
+
+/// @Error(TCE060): Duplicate function overload
+fn add(a: u32, b: u32) -> i32 {
+    return 0i32
+}
+
+// Case 2: Valid overload - different parameter types
+fn process(x: u32) -> string {
+    return "u32"
+}
+
+fn process(x: string) -> string {
+    return x
+}
+
+// Case 3: Duplicate with void return type
+fn log(msg: string) {
+    // do something
+}
+
+/// @Error(TCE060): Duplicate function overload
+fn log(msg: string) -> void {
+    // do something else
+}
+
+// Case 4: Generic functions cannot be overloaded
+fn map<T>(xs: T[]) -> T[] {
+    return xs
+}
+
+// Generic functions are treated as regular functions - will get duplicate error
+fn map<T>(xs: T[], f: fn(x: T) -> T) -> T[] {
+    let result: T[] = []
+    return result
+}
+
+// Case 5: Namespace overloads
+namespace Utils {
+    fn helper(x: u32) -> u32 {
+        return x
+    }
+    
+    /// @Error(TCE060): Duplicate function overload
+    fn helper(x: u32) -> i32 {
+        return 0i32
+    }
+    
+    // Valid - different parameter type
+    fn helper(x: string) -> string {
+        return x
+    }
+}

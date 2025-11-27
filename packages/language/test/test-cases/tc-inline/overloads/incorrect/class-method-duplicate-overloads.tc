@@ -1,0 +1,64 @@
+// Test cases for duplicate class method overloads (should fail validation)
+
+// Case 1: Exact duplicate with different return types
+type Calculator = class {
+    fn add(a: u32, b: u32) -> u32 {
+        return a + b
+    }
+    
+    /// @Error(TCE061): Duplicate class method overload
+    fn add(a: u32, b: u32) -> i32 {
+        return 0i32
+    }
+}
+
+// Case 2: Generic methods - treated as regular methods
+type Container<T> = class {
+    fn process<U>(item: U) -> U {
+        return item
+    }
+    
+    // Will get duplicate if signatures match
+    fn process<U>(item: U, index: u32) -> U {
+        return item
+    }
+}
+
+// Case 3: Duplicate with void return type
+type Logger = class {
+    fn log(msg: string) {
+        // log
+    }
+    
+    /// @Error(TCE061): Duplicate class method overload
+    fn log(msg: string) -> void {
+        // log
+    }
+}
+
+// Case 4: Duplicate static methods
+type Factory = class {
+    static fn create(id: u32) -> Factory {
+        return new Factory()
+    }
+    
+    /// @Error(TCE061): Duplicate class method overload
+    static fn create(id: u32) -> string {
+        return "factory"
+    }
+}
+
+// Case 5: Operator overloading duplicates
+type Vec2 = class {
+    let x: f64
+    let y: f64
+    
+    fn +(other: Vec2) -> Vec2 {
+        return new Vec2(x + other.x, y + other.y)
+    }
+    
+    /// @Error(TCE061): Duplicate class method overload
+    fn +(other: Vec2) -> string {
+        return "vec"
+    }
+}

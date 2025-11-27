@@ -5,6 +5,9 @@ import { createTypeCServices, isModule, Module } from "type-c-language";
 import { expect } from "vitest";
 import type { Diagnostic } from "vscode-languageserver-types";
 import { LibraryScheme } from "../src/builtins/index.js";
+import { runInlineTestOnSource, formatTestResults, formatMultipleTestResults, allTestsPassed, type InlineTestOptions, type InlineTestResult } from "./inline-test-runner.js";
+import { parseTestAnnotations } from "./inline-test-annotations.js";
+import { readFileSync } from "fs";
 
 export function setupLanguageServices() {
     let services: ReturnType<typeof createTypeCServices> = createTypeCServices(EmptyFileSystem);
@@ -100,3 +103,115 @@ export async function clearFileDocuments(services: LangiumSharedCoreServices | L
 export function diagnosticToString(d: Diagnostic) {
     return `[${d.range.start.line}:${d.range.start.character}..${d.range.end.line}:${d.range.end.character}]: ${d.message}`;
 }
+
+/**
+ * Run inline tests from a .tc file and return the results
+ */
+export async function runInlineTestFile(
+    setup: ReturnType<typeof setupLanguageServices>,
+    filePath: string,
+    options?: InlineTestOptions
+): Promise<InlineTestResult> {
+    // Read file content
+    const source = readFileSync(filePath, 'utf-8');
+    
+    // Clear previous documents
+    await clearFileDocuments(setup.services.TypeC);
+    
+    // Parse and validate the document
+    const doc = await setup.parseAndValidate(source);
+    await setup.services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
+    
+    // Run inline tests
+    const result = await runInlineTestOnSource(
+        source,
+        doc,
+        options?.checkTypes ? setup.typeProvider : undefined,
+        options
+    );
+    
+    return {
+        ...result,
+        filePath
+    };
+}
+
+/**
+ * Run inline tests from multiple .tc files
+ */
+export async function runInlineTestFiles(
+    setup: ReturnType<typeof setupLanguageServices>,
+    filePaths: string[],
+    options?: InlineTestOptions
+): Promise<InlineTestResult[]> {
+    const results: InlineTestResult[] = [];
+    for (const filePath of filePaths) {
+        results.push(await runInlineTestFile(setup, filePath, options));
+    }
+    return results;
+}
+
+/**
+ * Expect that all inline tests in a file pass
+ */
+export async function expectInlineTestsPass(
+    setup: ReturnType<typeof setupLanguageServices>,
+    filePath: string,
+    options?: InlineTestOptions
+) {
+    const result = await runInlineTestFile(setup, filePath, options);
+    
+    if (result.failed > 0) {
+        throw new Error(
+            `Inline tests failed for ${filePath}:\n${formatTestResults(result, true)}`
+        );
+    }
+    
+    return result;
+}
+
+/**
+ * Expect that all inline tests in multiple files pass
+ */
+export async function expectAllInlineTestsPass(
+    setup: ReturnType<typeof setupLanguageServices>,
+    filePaths: string[],
+    options?: InlineTestOptions
+) {
+    const results = await runInlineTestFiles(setup, filePaths, options);
+    
+    if (!allTestsPassed(results)) {
+        throw new Error(
+            `Some inline tests failed:\n${formatMultipleTestResults(results, true)}`
+        );
+    }
+    
+    return results;
+}
+
+/**
+ * Parse test annotations from a .tc file without running tests
+ */
+export function parseInlineTests(content: string) {
+    return parseTestAnnotations(content);
+}
+
+// Export inline test utilities for convenience
+export {
+    runInlineTestOnSource,
+    formatTestResults,
+    formatMultipleTestResults,
+    allTestsPassed,
+    type InlineTestOptions,
+    type InlineTestResult
+} from './inline-test-runner.js';
+
+export {
+    parseTestAnnotations,
+    type TestAnnotation,
+    type DiagnosticAnnotation,
+    type TypeAnnotation,
+    type NoErrorAnnotation,
+    type ParsedTestFile,
+    type FileTestResults
+} from './inline-test-annotations.js';

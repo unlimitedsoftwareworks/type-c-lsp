@@ -1,0 +1,120 @@
+// Comprehensive example of inline test annotations
+// This file demonstrates all available annotation types
+
+// ============================================================
+// ERROR ANNOTATIONS
+// ============================================================
+
+// Basic error annotation - checks for any error containing the message
+/// @Error: Variable type mismatch
+let x: u32 = "hello"
+
+// Error with specific error code
+/// @Error(TCE006): Variable type mismatch
+let y: u32 = 42.5
+
+// Multiple errors in a function
+cfn testMultipleErrors() {
+    /// @Error: Yield type mismatch
+    yield "string"
+    
+    /// @Error: Yield type mismatch
+    yield 123
+}
+
+// ============================================================
+// NO-ERROR ANNOTATIONS
+// ============================================================
+
+// Assert that this line has no errors
+/// @NoError
+let validCode: u32 = 42u32
+
+/// @NoError
+let anotherValid = "correct"
+
+// ============================================================
+// COROUTINE EXAMPLES WITH ANNOTATIONS
+// ============================================================
+
+cfn loop(x: u32[]) -> u32 {
+    yield x[0]
+    yield x[1]
+}
+
+fn testCoroutineErrors() {
+    let co = coroutine loop
+    
+    /// @Error(TCE023): Coroutine call argument 1 type mismatch
+    let x = co([1, 2, 3])  // i32[] instead of u32[]
+    
+    /// @Error(TCE022): Coroutine call argument count mismatch: Expected 1 argument(s), but got 0
+    let y = co()
+    
+    /// @NoError
+    let valid = co([1u32, 2u32])
+}
+
+// ============================================================
+// FUNCTION OVERLOAD EXAMPLES WITH ANNOTATIONS
+// ============================================================
+
+fn process(x: u32) -> u32 = x + 1u32
+fn process(x: string) -> string = x
+
+fn testOverloads() {
+    /// @NoError
+    let num = process(42u32)
+    
+    /// @NoError
+    let str = process("hello")
+}
+
+// ============================================================
+// STRUCT AND INTERFACE EXAMPLES
+// ============================================================
+
+struct Point {
+    x: u32
+    y: u32
+}
+
+fn testStructs() {
+    /// @NoError
+    let p: Point = {x: 10u32, y: 20u32}
+    
+    /// @Error: Variable type mismatch
+    let invalid: Point = {x: "wrong", y: 20u32}
+}
+
+// ============================================================
+// YIELD ERRORS
+// ============================================================
+
+cfn mismatchedYields() {
+    /// @Error: Cannot infer common type
+    yield 1
+    
+    yield "oops"
+}
+
+cfn wrongExplicitType() -> string {
+    /// @Error: Yield type mismatch
+    yield 1
+    
+    yield 2
+}
+
+// ============================================================
+// RETURN VS YIELD ERRORS
+// ============================================================
+
+cfn coroutineWithReturn() {
+    /// @Error: must use
+    return 1
+}
+
+fn regularWithYield() {
+    /// @Error: can only be used in coroutines
+    yield 1
+}

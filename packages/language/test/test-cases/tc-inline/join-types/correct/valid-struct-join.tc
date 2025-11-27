@@ -1,0 +1,11 @@
+// Valid struct join - no duplicate fields
+type Point2D = struct { x: f64, y: f64 }
+type Color = struct { r: u8, g: u8, b: u8 }
+
+// Valid: combining structs with unique fields
+type ColoredPoint = Point2D & Color
+
+// Should work fine
+let cp: ColoredPoint = { x: 1.0, y: 2.0, r: 255, g: 0, b: 0 }
+
+type Cool = {x: u32, y: u32} & {y: u32}

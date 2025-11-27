@@ -1,0 +1,11 @@
+// Error: Cannot join types other than interfaces and structs
+type Point = struct { x: f64, y: f64 }
+
+/// @Error(TCE002): Join type invalid member
+type Invalid1 = Point & u32
+
+/// @Error(TCE002): Join type invalid member
+type Invalid2 = Point & u32[]
+
+/// @Error(TCE002): Join type invalid member
+type Invalid3 = Point & fn(u32) -> void

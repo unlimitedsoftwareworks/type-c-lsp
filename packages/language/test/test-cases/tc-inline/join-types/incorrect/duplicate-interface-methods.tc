@@ -1,0 +1,51 @@
+// Error: Duplicate method signatures in joined interfaces
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Renderable = interface {
+    fn draw() -> void  // Same signature as Drawable.draw()
+    fn render() -> void
+}
+
+// May not be validated yet
+type InvalidInterface = Drawable & Renderable
+
+// Valid overloading (different signatures)
+type ValidOverload1 = interface {
+    fn process(x: u32) -> void
+}
+
+type ValidOverload2 = interface {
+    fn process(x: u32, y: u32) -> void  // Different signature - OK
+}
+
+// This is valid because signatures differ
+type ValidJoin = ValidOverload1 & ValidOverload2
+
+// But this is invalid (exact duplicate)
+type DuplicateProcess = interface {
+    fn compute(x: u32) -> void
+    /// @Error(TCE062): Duplicate interface method overload
+    fn compute(x: u32) -> void  // Exact duplicate - ERROR
+}
+
+// Valid interface join - methods with different signatures (overloading allowed)
+type Drawable2 = interface {
+    fn draw() -> void
+    fn serialize(format: string) -> u32  // Overload is fine
+}
+
+type Serializable = interface Drawable2 {
+    fn serialize() -> string
+    fn serialize(format: string) -> string  // Overload is fine
+}
+
+type Movable = interface {
+    fn move(x: f64, y: f64) -> void
+}
+
+// Valid: combining interfaces
+type Entity = Drawable & Serializable & Movable
+
+// All methods are unique or have different signatures (overloading)

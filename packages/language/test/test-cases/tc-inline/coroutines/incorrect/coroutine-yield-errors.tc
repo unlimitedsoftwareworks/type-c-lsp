@@ -1,0 +1,64 @@
+// Test coroutine yield type errors
+
+// Coroutine with mismatched yield types
+cfn mismatchedYields() {
+    yield 1
+    yield "oops"
+}
+
+// Coroutine with explicit type not matching yields
+cfn wrongExplicitType() -> string {
+    /// @Error: Yield type mismatch
+    yield 1
+    
+    /// @Error: Yield type mismatch
+    yield 2
+}
+
+// Coroutine yielding different numeric types
+cfn mixedNumericYields() -> u32 {
+    /// @NoError
+    yield 1u32
+    
+    /// @Error: Yield type mismatch
+    yield 2.5
+}
+
+// Regular function using yield
+fn regularWithYield() {
+    /// @Error: can only be used in coroutines
+    yield 1
+}
+
+// Coroutine using return
+cfn coroutineWithReturn() {
+    /// @Error: must use
+    return 1
+}
+
+// Void yield type but yielding values
+cfn voidYieldingValue() -> void {
+    /// @Error: Yield type mismatch
+    yield 42
+}
+
+// Non-void yield type but yielding nothing
+cfn missingYieldValue() -> u32 {
+    /// @Error: yield a value
+    yield
+}
+
+// Struct with incompatible fields
+/// @Error(TCE042): Cannot infer common struct
+cfn incompatibleStructs() {
+    yield {x: 1u32, y: 2u32}
+    yield {x: "oops", y: 4u32}
+}
+
+// Declared type doesn't match inferred
+cfn wrongDeclaredType() -> string {
+    /// @Error: Yield type mismatch
+    yield 1u32
+    /// @Error: Yield type mismatch
+    yield 2u32
+}

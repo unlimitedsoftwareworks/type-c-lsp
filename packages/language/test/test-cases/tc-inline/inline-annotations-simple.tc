@@ -1,0 +1,38 @@
+// Simple working examples of inline test annotations
+
+// ============================================================
+// COROUTINE ERROR TESTS
+// ============================================================
+
+cfn loop(x: u32[]) -> u32 {
+    yield x[0]
+    yield x[1]
+}
+
+fn testCoroutineErrors() {
+    let co = coroutine loop
+    
+    /// @Error(TCE023): Coroutine call argument 1 type mismatch
+    let x = co([1, 2, 3])  // i32[] instead of u32[]
+    
+    /// @Error(TCE022): Coroutine call argument count mismatch
+    let y = co()
+    
+    /// @NoError
+    let valid = co([1u32, 2u32])
+}
+
+// ============================================================
+// NO-ERROR ASSERTIONS
+// ============================================================
+
+/// @NoError
+let validCode: u32 = 42u32
+
+/// @NoError
+let anotherValid = "correct"
+
+fn testValidFunction() {
+    /// @NoError
+    let x = 10u32 + 20u32
+}

@@ -1,9 +1,0 @@
-// Error: Cannot mix structs with interfaces
-type Point = struct { x: f64, y: f64 }
-
-type Drawable = interface {
-    fn draw() -> void
-}
-
-// Invalid: mixing struct with interface
-type InvalidMix = Point & Drawable

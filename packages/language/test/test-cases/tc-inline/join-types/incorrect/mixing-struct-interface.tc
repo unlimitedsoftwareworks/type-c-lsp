@@ -1,0 +1,9 @@
+// Error: Cannot mix structs with interfaces
+type Point = struct { x: f64, y: f64 }
+
+type Drawable = interface {
+    fn draw() -> void
+}
+
+/// @Error(TCE003): Cannot combine interfaces with structs
+type InvalidMix = Point & Drawable

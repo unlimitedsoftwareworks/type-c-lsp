@@ -1,0 +1,6 @@
+type Colors = "red" | "green" | "blue"
+
+fn main() -> void {
+    /// @Error: String literal "yellow" is not assignable to
+    let invalidColor: Colors = "yellow"
+}

@@ -110,7 +110,49 @@ export class TypeCTypeUtils {
      */
 
     isPendingCheck(from: TypeDescription, to: TypeDescription): boolean {
-        return this.pendingChecks.some(pair => pair.from === from && pair.to === to);
+        return this.pendingChecks.some(pair =>
+            this.areSameTypeForCycleDetection(pair.from, from) &&
+            this.areSameTypeForCycleDetection(pair.to, to)
+        );
+    }
+
+    /**
+     * Checks if two types are "the same" for cycle detection purposes.
+     * This is more lenient than strict equality - for reference types with generics,
+     * we compare by declaration and generic arguments, not object identity.
+     */
+    private areSameTypeForCycleDetection(a: TypeDescription, b: TypeDescription): boolean {
+        // Quick identity check
+        if (a === b) return true;
+
+        // For reference types, compare by declaration and generic args
+        if (isReferenceType(a) && isReferenceType(b)) {
+            if (a.declaration !== b.declaration) return false;
+            if (a.genericArgs.length !== b.genericArgs.length) return false;
+            
+            // Recursively check generic arguments
+            for (let i = 0; i < a.genericArgs.length; i++) {
+                if (!this.areSameTypeForCycleDetection(a.genericArgs[i], b.genericArgs[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // For class types, compare structural identity
+        if (isClassType(a) && isClassType(b)) {
+            // Classes are the same if they have the same node or same structure
+            return a.node === b.node || a === b;
+        }
+
+        // For interface types, compare structural identity
+        if (isInterfaceType(a) && isInterfaceType(b)) {
+            // Interfaces are the same if they have the same node or same structure
+            return a.node === b.node || a === b;
+        }
+
+        // Default: use strict equality
+        return false;
     }
 
     addPendingCheck(from: TypeDescription, to: TypeDescription): void {
@@ -973,61 +1015,111 @@ export class TypeCTypeUtils {
         from: ReferenceTypeDescription,
         to: ReferenceTypeDescription
     ): TypeCheckResult {
-        console.log(`[isReferenceAssignableToReference] ${from.declaration.name} vs ${to.declaration.name}`);
+        console.log(`[isReferenceAssignableToReference] ${from.declaration.name}<${from.genericArgs.map(a => a.toString()).join(', ')}> vs ${to.declaration.name}<${to.genericArgs.map(a => a.toString()).join(', ')}>`);
         console.log(`  typeProvider available: ${!!this.typeProvider()}`);
 
-        // If we have a type provider, resolve both references and check assignability
-        
-        console.log(`  Resolving references...`);
-        const resolvedFrom = this.typeProvider().resolveReference(from);
-        const resolvedTo = this.typeProvider().resolveReference(to);
+        // Check if we're already checking this pair (cycle detection)
+        // When we detect a cycle, we still need to validate generic arguments
+        // but we can skip the deep resolution to break infinite recursion
+        if (this.isPendingCheck(from, to)) {
+            console.log(`  Already checking this pair - validating generic args without deep recursion`);
+            
+            // For cycle breaking: verify generic arguments match even during recursion
+            // This prevents false positives like Array<string> -> Container<u32>
+            if (from.genericArgs.length !== to.genericArgs.length) {
+                return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
+            }
 
-        console.log(`  resolvedFrom.kind: ${resolvedFrom.kind}, resolvedTo.kind: ${resolvedTo.kind}`);
+            for (let i = 0; i < from.genericArgs.length; i++) {
+                const fromArg = from.genericArgs[i];
+                const toArg = to.genericArgs[i];
 
-        // If both resolved to non-reference types, check them directly
-        // This handles class-to-interface compatibility
-        if (!isReferenceType(resolvedFrom) && !isReferenceType(resolvedTo)) {
-            console.log(`  Delegating to isAssignable with resolved types`);
-            const result = this.isAssignable(resolvedFrom, resolvedTo);
-            console.log(`  Result: ${result.success}, ${result.message || ''}`);
-            return result;
-        }
+                // If from is never, it's compatible with any target type
+                if (isNeverType(fromArg)) {
+                    continue;
+                }
 
-        // Must reference the same declaration
-        if (from.declaration !== to.declaration) {
-            console.log(`  FAIL: Different declarations`);
-            return failure(`References point to different declarations: ${from.declaration.name} vs ${to.declaration.name}`);
-        }
+                // For cycle detection: only check if types are exactly equal
+                // Don't recursively call isAssignable as that would continue the infinite loop
+                const equalResult = this.areTypesEqual(fromArg, toArg);
+                if (!equalResult.success) {
+                    return failure(`Generic argument ${i + 1} type mismatch during cycle check: ${equalResult.message}`);
+                }
+            }
 
-        // If no generic arguments, they're compatible
-        if (from.genericArgs.length === 0 && to.genericArgs.length === 0) {
+            // Generic args match, assume structural compatibility to break the cycle
             return success();
         }
 
-        // Generic argument counts must match
-        if (from.genericArgs.length !== to.genericArgs.length) {
-            return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
-        }
+        // Add to pending checks before any recursive operations
+        this.addPendingCheck(from, to);
 
-        // Check each generic argument
-        // `never` in from is compatible with any type in to
-        for (let i = 0; i < from.genericArgs.length; i++) {
-            const fromArg = from.genericArgs[i];
-            const toArg = to.genericArgs[i];
+        try {
+            // IMPORTANT: Check generic arguments BEFORE resolving!
+            // When we resolve, we might lose generic argument information,
+            // so we need to validate them while we still have the reference types
+            
+            // If they have different numbers of generic arguments, they can't be compatible
+            // UNLESS one is being resolved to check class-to-interface compatibility
+            // In that case, we need to validate generic args correspond correctly
+            
+            if (from.genericArgs.length > 0 || to.genericArgs.length > 0) {
+                console.log(`  Checking generic arguments before resolving...`);
+                
+                // Both must have same number of generic arguments
+                if (from.genericArgs.length !== to.genericArgs.length) {
+                    return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
+                }
 
-            // If from is never, it's compatible with any target type
-            if (isNeverType(fromArg)) {
-                continue;
+                // Check each generic argument
+                for (let i = 0; i < from.genericArgs.length; i++) {
+                    const fromArg = from.genericArgs[i];
+                    const toArg = to.genericArgs[i];
+
+                    console.log(`    Generic arg ${i}: ${fromArg.toString()} vs ${toArg.toString()}`);
+
+                    // If from is never, it's compatible with any target type
+                    if (isNeverType(fromArg)) {
+                        continue;
+                    }
+
+                    // Check normal assignability for generic arguments
+                    const result = this.isAssignable(fromArg, toArg);
+                    if (!result.success) {
+                        console.log(`    Generic arg ${i} FAILED: ${result.message}`);
+                        return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
+                    }
+                    console.log(`    Generic arg ${i} OK`);
+                }
             }
 
-            // Otherwise, check normal assignability
-            const result = this.isAssignable(fromArg, toArg);
-            if (!result.success) {
-                return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
-            }
-        }
+            // Now resolve both references to check their actual types
+            console.log(`  Resolving references...`);
+            const resolvedFrom = this.typeProvider().resolveReference(from);
+            const resolvedTo = this.typeProvider().resolveReference(to);
 
-        return success();
+            console.log(`  resolvedFrom.kind: ${resolvedFrom.kind}, resolvedTo.kind: ${resolvedTo.kind}`);
+
+            // If both resolved to non-reference types, check them directly
+            // This handles class-to-interface compatibility (covariant returns)
+            if (!isReferenceType(resolvedFrom) && !isReferenceType(resolvedTo)) {
+                console.log(`  Delegating to isAssignable with resolved types`);
+                const result = this.isAssignable(resolvedFrom, resolvedTo);
+                console.log(`  Result: ${result.success}, ${result.message || ''}`);
+                return result;
+            }
+
+            // If still reference types after resolution, they must reference the same declaration
+            if (from.declaration !== to.declaration) {
+                console.log(`  FAIL: Different declarations`);
+                return failure(`References point to different declarations: ${from.declaration.name} vs ${to.declaration.name}`);
+            }
+
+            return success();
+        } finally {
+            // Always remove from pending checks, even if an error occurred
+            this.removePendingCheck(from, to);
+        }
     }
 
     // ============================================================================

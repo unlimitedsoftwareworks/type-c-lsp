@@ -1,3 +1,5 @@
+// @tc-expect-no-errors
+
 type Container<T> = interface {
     fn slice(end: u64) -> Container<T>
 }
@@ -7,5 +9,5 @@ type Array<T> = class {
 }
 
 fn main() -> void {
-    let arr2: Container<u32> = new Array<string>()
-} 
+    let arr2: Container<u32> = new Array<u32>()
+}

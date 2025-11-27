@@ -655,23 +655,66 @@ function isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceT
         
         // Check if any candidate method matches the signature
         let foundMatch = false;
+        let lastError = '';
+        
         for (const classMethod of candidateMethods) {
-            const result = areFunctionTypesEqual(
-                factory.createFunctionType(classMethod.parameters, classMethod.returnType, 'fn', classMethod.genericParameters, undefined),
-                factory.createFunctionType(method.parameters, method.returnType, 'fn', method.genericParameters, undefined)
-            );
+            // Check function type compatibility (allowing covariant return types)
+            const result = isMethodImplementationCompatible(classMethod, method);
             if (result.success) {
                 foundMatch = true;
                 break;
             }
+            lastError = result.message || '';
         }
         
         if (!foundMatch) {
             // Build a helpful error message showing expected signature
             const expectedSig = `${method.names[0]}(${method.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${method.returnType.toString()}`;
-            return failure(`method '${method.names[0]}' signature mismatch: expected ${expectedSig} but no matching overload found in class`);
+            return failure(`method '${method.names[0]}' signature mismatch: expected ${expectedSig} but no matching overload found in class. ${lastError}`);
         }
     }
+    return success();
+}
+
+/**
+ * Checks if a class method implementation is compatible with an interface method.
+ *
+ * Compatibility rules:
+ * - Parameter count must match
+ * - Parameter types must be exactly equal (invariant)
+ * - Return type can be more specific (covariant): implementation return type must be assignable to interface return type
+ * - Generic parameters must match
+ *
+ * This allows a class to return a more specific type than the interface requires,
+ * which is sound because callers expecting the interface type can use the more specific type.
+ */
+function isMethodImplementationCompatible(
+    implementation: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
+    interfaceMethod: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] }
+): TypeCheckResult {
+    // Check parameter count
+    if (implementation.parameters.length !== interfaceMethod.parameters.length) {
+        return failure(`Parameter count mismatch: ${implementation.parameters.length} vs ${interfaceMethod.parameters.length}`);
+    }
+    
+    // Check parameter types (must be exactly equal, not covariant/contravariant)
+    for (let i = 0; i < implementation.parameters.length; i++) {
+        const implParam = implementation.parameters[i];
+        const ifaceParam = interfaceMethod.parameters[i];
+        
+        const typeResult = areTypesEqual(implParam.type, ifaceParam.type);
+        if (!typeResult.success) {
+            return failure(`Parameter ${i + 1} type mismatch: ${typeResult.message}`);
+        }
+    }
+    
+    // Check return type (covariant: implementation can return more specific type)
+    // The implementation return type must be assignable to the interface return type
+    const returnResult = isAssignable(implementation.returnType, interfaceMethod.returnType);
+    if (!returnResult.success) {
+        return failure(`Return type not compatible: implementation returns '${implementation.returnType.toString()}' but interface expects '${interfaceMethod.returnType.toString()}'. ${returnResult.message}`);
+    }
+    
     return success();
 }
 

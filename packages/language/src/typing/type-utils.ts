@@ -646,16 +646,30 @@ function isFunctionAssignable(from: FunctionTypeDescription, to: FunctionTypeDes
 function isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
     // All interface methods must be implemented by the class
     for (const method of to.methods) {
-        const classMethod = from.methods.find(m => m.names.some(name => method.names.includes(name)));
-        if (!classMethod) {
+        // Find all class methods with matching names (to handle overloads)
+        const candidateMethods = from.methods.filter(m => m.names.some(name => method.names.includes(name)));
+        
+        if (candidateMethods.length === 0) {
             return failure(`class does not implement required method '${method.names[0]}'`);
         }
-        const result = areFunctionTypesEqual(
-            factory.createFunctionType(classMethod.parameters, classMethod.returnType, 'fn', classMethod.genericParameters, undefined),
-            factory.createFunctionType(method.parameters, method.returnType, 'fn', method.genericParameters, undefined)
-        );
-        if (!result.success) {
-            return failure(`method '${method.names[0]}' signature mismatch: ${result.message}`);
+        
+        // Check if any candidate method matches the signature
+        let foundMatch = false;
+        for (const classMethod of candidateMethods) {
+            const result = areFunctionTypesEqual(
+                factory.createFunctionType(classMethod.parameters, classMethod.returnType, 'fn', classMethod.genericParameters, undefined),
+                factory.createFunctionType(method.parameters, method.returnType, 'fn', method.genericParameters, undefined)
+            );
+            if (result.success) {
+                foundMatch = true;
+                break;
+            }
+        }
+        
+        if (!foundMatch) {
+            // Build a helpful error message showing expected signature
+            const expectedSig = `${method.names[0]}(${method.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${method.returnType.toString()}`;
+            return failure(`method '${method.names[0]}' signature mismatch: expected ${expectedSig} but no matching overload found in class`);
         }
     }
     return success();

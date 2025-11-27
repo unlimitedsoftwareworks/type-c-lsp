@@ -38,13 +38,13 @@ cfn coroutineWithReturn() {
 
 // Void yield type but yielding values
 cfn voidYieldingValue() -> void {
-    /// @Error: Yield type mismatch
+    /// @Error(TCE035): Yield type mismatch
     yield 42
 }
 
 // Non-void yield type but yielding nothing
 cfn missingYieldValue() -> u32 {
-    /// @Error: yield a value
+    /// @Error(TCE036): Coroutine must yield a value
     yield
 }
 
@@ -57,8 +57,8 @@ cfn incompatibleStructs() {
 
 // Declared type doesn't match inferred
 cfn wrongDeclaredType() -> string {
-    /// @Error: Yield type mismatch
+    /// @Error(TCE035): Yield type mismatch
     yield 1u32
-    /// @Error: Yield type mismatch
+    /// @Error(TCE035): Yield type mismatch
     yield 2u32
 }

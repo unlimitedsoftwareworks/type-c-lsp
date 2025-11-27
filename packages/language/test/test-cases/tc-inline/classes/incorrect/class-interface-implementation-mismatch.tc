@@ -1,0 +1,17 @@
+// @tc-expect-errors
+type Container<T> = interface {
+    fn slice(end: u64) -> Container<T>
+    fn slice(start: u64, end: u64) -> Container<T>
+}
+
+/// @Error(TCE007): Class must implement interface 
+type Array<T> = class Container<T> {
+    fn slice(end: u64) -> Array<T> {}
+    fn slice(start: u64, end: u64) -> string {}
+}
+
+
+/// @Error(TCE008): Interface inheritance method conflict
+type List<T> = interface Container<T> {
+    fn slice(end: u64) -> List<T>
+}

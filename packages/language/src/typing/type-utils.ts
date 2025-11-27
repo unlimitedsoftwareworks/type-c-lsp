@@ -738,7 +738,6 @@ export class TypeCTypeUtils {
     }
 
     isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
-        console.log(`[isClassAssignableToInterface] typeProvider available: ${!!this.typeProvider()}`);
         // All interface methods must be implemented by the class
         for (const method of to.methods) {
             // Find all class methods with matching names (to handle overloads)
@@ -805,10 +804,7 @@ export class TypeCTypeUtils {
 
         // Check return type (covariant: implementation can return more specific type)
         // The implementation return type must be assignable to the interface return type
-        console.log(`[isMethodImplementationCompatible] Checking return types: ${implementation.returnType.toString()} vs ${interfaceMethod.returnType.toString()}`);
-        console.log(`  typeProvider available: ${!!this.typeProvider()}`);
         const returnResult = this.isAssignable(implementation.returnType, interfaceMethod.returnType);
-        console.log(`  returnResult: ${returnResult.success}, ${returnResult.message || ''}`);
         if (!returnResult.success) {
             return failure(`Return type not compatible: implementation returns '${implementation.returnType.toString()}' but interface expects '${interfaceMethod.returnType.toString()}'. ${returnResult.message}`);
         }
@@ -1015,15 +1011,10 @@ export class TypeCTypeUtils {
         from: ReferenceTypeDescription,
         to: ReferenceTypeDescription
     ): TypeCheckResult {
-        console.log(`[isReferenceAssignableToReference] ${from.declaration.name}<${from.genericArgs.map(a => a.toString()).join(', ')}> vs ${to.declaration.name}<${to.genericArgs.map(a => a.toString()).join(', ')}>`);
-        console.log(`  typeProvider available: ${!!this.typeProvider()}`);
-
         // Check if we're already checking this pair (cycle detection)
         // When we detect a cycle, we still need to validate generic arguments
         // but we can skip the deep resolution to break infinite recursion
         if (this.isPendingCheck(from, to)) {
-            console.log(`  Already checking this pair - validating generic args without deep recursion`);
-            
             // For cycle breaking: verify generic arguments match even during recursion
             // This prevents false positives like Array<string> -> Container<u32>
             if (from.genericArgs.length !== to.genericArgs.length) {
@@ -1064,8 +1055,6 @@ export class TypeCTypeUtils {
             // In that case, we need to validate generic args correspond correctly
             
             if (from.genericArgs.length > 0 || to.genericArgs.length > 0) {
-                console.log(`  Checking generic arguments before resolving...`);
-                
                 // Both must have same number of generic arguments
                 if (from.genericArgs.length !== to.genericArgs.length) {
                     return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
@@ -1076,8 +1065,6 @@ export class TypeCTypeUtils {
                     const fromArg = from.genericArgs[i];
                     const toArg = to.genericArgs[i];
 
-                    console.log(`    Generic arg ${i}: ${fromArg.toString()} vs ${toArg.toString()}`);
-
                     // If from is never, it's compatible with any target type
                     if (isNeverType(fromArg)) {
                         continue;
@@ -1086,32 +1073,24 @@ export class TypeCTypeUtils {
                     // Check normal assignability for generic arguments
                     const result = this.isAssignable(fromArg, toArg);
                     if (!result.success) {
-                        console.log(`    Generic arg ${i} FAILED: ${result.message}`);
                         return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
                     }
-                    console.log(`    Generic arg ${i} OK`);
                 }
             }
 
             // Now resolve both references to check their actual types
-            console.log(`  Resolving references...`);
             const resolvedFrom = this.typeProvider().resolveReference(from);
             const resolvedTo = this.typeProvider().resolveReference(to);
-
-            console.log(`  resolvedFrom.kind: ${resolvedFrom.kind}, resolvedTo.kind: ${resolvedTo.kind}`);
 
             // If both resolved to non-reference types, check them directly
             // This handles class-to-interface compatibility (covariant returns)
             if (!isReferenceType(resolvedFrom) && !isReferenceType(resolvedTo)) {
-                console.log(`  Delegating to isAssignable with resolved types`);
                 const result = this.isAssignable(resolvedFrom, resolvedTo);
-                console.log(`  Result: ${result.success}, ${result.message || ''}`);
                 return result;
             }
 
             // If still reference types after resolution, they must reference the same declaration
             if (from.declaration !== to.declaration) {
-                console.log(`  FAIL: Different declarations`);
                 return failure(`References point to different declarations: ${from.declaration.name} vs ${to.declaration.name}`);
             }
 

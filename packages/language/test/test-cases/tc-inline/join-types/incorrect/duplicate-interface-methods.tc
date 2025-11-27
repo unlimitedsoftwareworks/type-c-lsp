@@ -36,6 +36,7 @@ type Drawable2 = interface {
     fn serialize(format: string) -> u32  // Overload is fine
 }
 
+/// @Error(TCE008): Interface inheritance method conflict
 type Serializable = interface Drawable2 {
     fn serialize() -> string
     fn serialize(format: string) -> string  // Overload is fine

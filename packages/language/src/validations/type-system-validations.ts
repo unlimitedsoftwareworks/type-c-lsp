@@ -52,6 +52,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
             InterfaceType: this.checkInterfaceInheritance,
+            ClassType: this.checkClassImplementation,
         };
     }
 
@@ -960,6 +961,47 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                         }
                     );
                 }
+            }
+        }
+    }
+
+    /**
+     * Check class implementation of interfaces.
+     *
+     * When a class declares it extends interfaces (e.g., `class Container<T>`),
+     * validate that it properly implements all required methods.
+     */
+    checkClassImplementation = (node: ast.ClassType, accept: ValidationAcceptor): void => {
+        if (!node.superTypes || node.superTypes.length === 0) {
+            return; // No interfaces to implement
+        }
+
+        // Get the class type
+        const classType = this.typeProvider.getType(node);
+        if (!isClassType(classType)) {
+            return;
+        }
+
+        // Check each extended interface
+        for (const superTypeRef of node.superTypes) {
+            const interfaceType = this.typeProvider.getType(superTypeRef);
+            const resolvedInterface = isReferenceType(interfaceType)
+                ? this.typeProvider.resolveReference(interfaceType)
+                : interfaceType;
+
+            if (!isInterfaceType(resolvedInterface)) {
+                continue;
+            }
+
+            // Use the existing compatibility check from type-utils
+            const compatResult = this.typeUtils.isClassAssignableToInterface(classType, resolvedInterface);
+            if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_VARIABLE_INTERFACE_IMPLEMENTATION_ERROR;
+                const errorMsg = `Class must implement interface '${resolvedInterface.toString()}': ${compatResult.message}`;
+                accept('error', errorMsg, {
+                    node: superTypeRef,
+                    code: errorCode
+                });
             }
         }
     }

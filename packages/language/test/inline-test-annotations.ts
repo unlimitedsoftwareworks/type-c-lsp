@@ -420,7 +420,7 @@ export function validateTypeAnnotations(
             passed,
             message: passed
                 ? `✓ Type matches: ${annotation.expectedType}`
-                : `✗ Type mismatch: expected "${annotation.expectedType}", got "${actualType}"`,
+                : `✗ Type mismatch for \`${annotation.substring}\`: expected "${annotation.expectedType}", got "${actualType}"`,
             actual: actualType
         });
     }

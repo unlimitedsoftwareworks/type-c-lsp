@@ -22,6 +22,7 @@ cfn stringGen(prefix: string, count: u32) -> string {
 }
 
 fn testStrings() {
+    /// @Type(co): coroutine<fn(prefix: string, count: u32) -> string>
     let co = coroutine stringGen
     let a = co("hello", 5u32)
     let b = co("world", 10u32)
@@ -29,6 +30,7 @@ fn testStrings() {
 
 // ✅ Coroutine instance from lambda
 fn testLambdaCoroutine() {
+    /// @Type(co): coroutine<fn(n: u32) -> u32>
     let co = coroutine cfn(n: u32) -> u32 {
         yield n
         yield n + 1u32

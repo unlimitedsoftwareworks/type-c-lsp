@@ -6,7 +6,7 @@ type Color = struct { r: u8, g: u8, b: u8 }
 type ColoredPoint = Point2D & Color
 
 // Should work fine
-let cp: ColoredPoint = { x: 1.0, y: 2.0, r: 255, g: 0, b: 0 }
+let cp: ColoredPoint = { x: 1.0, y: 2.0, r: 255u8, g: 0u8, b: 0u8 }
 
 // Duplicate field with identical type is valid
 type Cool = {x: u32, y: u32} & {y: u32}

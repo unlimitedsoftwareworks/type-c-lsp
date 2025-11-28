@@ -1,0 +1,22 @@
+
+type Coords = {
+    x: u32, y: u32
+}
+
+type ZAttribute = {
+    z: u32
+}
+
+fn main() {
+    /// @Type(xvalue): struct { x: u32, y: u32, z: u32, alpha: string }
+    let xvalue: Coords & ZAttribute & {alpha: string} = {x: 1u32, y: 1u32, z: 1u32, alpha: "s"}
+
+    /// @Type(xxx): u32
+    let xxx = xvalue.x
+    /// @Type(yyy): u32
+    let yyy = xvalue.y
+    /// @Type(zzzz): u32
+    let zzzz = xvalue.z
+    /// @Type(alllpha): string
+    let alllpha = xvalue.alpha
+}

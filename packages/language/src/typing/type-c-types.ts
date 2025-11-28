@@ -174,6 +174,7 @@ export interface TupleTypeDescription extends TypeDescription {
 export interface StructFieldType {
     readonly name: string;
     readonly type: TypeDescription;
+    readonly node: AstNode;
 }
 
 export interface StructTypeDescription extends TypeDescription {
@@ -271,6 +272,7 @@ export interface MethodType {
     readonly isStatic: boolean;
     readonly isOverride: boolean;
     readonly isLocal: boolean;
+    node: ast.MethodHeader | undefined;
 }
 
 export interface AttributeType {

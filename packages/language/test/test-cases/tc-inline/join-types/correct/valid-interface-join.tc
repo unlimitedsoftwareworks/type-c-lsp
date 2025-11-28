@@ -1,18 +1,16 @@
 // Valid interface join - methods with different signatures (overloading allowed)
-type Drawable = interface {
+
+type Serializable<T> = interface {
+    fn serialize() -> T
+    fn serialize(format: T) -> T  // Overload is fine
+}
+
+type Drawable = interface Serializable<string>{
     fn draw() -> void
 }
 
-type Serializable = interface Drawable {
-    fn serialize() -> string
-    fn serialize(format: string) -> string  // Overload is fine
+
+fn main(){
+    let e: Drawable? = null
+    let z = e.serialize()
 }
-
-type Movable = interface {
-    fn move(x: f64, y: f64) -> void
-}
-
-// Valid: combining interfaces
-type Entity = Drawable & Serializable & Movable
-
-// All methods are unique or have different signatures (overloading)

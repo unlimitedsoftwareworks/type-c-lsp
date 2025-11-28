@@ -268,8 +268,8 @@ export function createStructType(
     };
 }
 
-export function createStructField(name: string, type: TypeDescription): StructFieldType {
-    return { name, type };
+export function createStructField(name: string, type: TypeDescription, node: AstNode): StructFieldType {
+    return { name, type, node };
 }
 
 export function createVariantType(
@@ -482,6 +482,7 @@ export function createMethodType(
     names: readonly string[],
     parameters: readonly FunctionParameterType[],
     returnType: TypeDescription,
+    node: ast.MethodHeader | undefined,
     genericParameters: readonly GenericTypeDescription[] = [],
     isStatic: boolean = false,
     isOverride: boolean = false,
@@ -494,7 +495,8 @@ export function createMethodType(
         returnType,
         isStatic,
         isOverride,
-        isLocal
+        isLocal,
+        node
     };
 }
 

@@ -48,6 +48,7 @@ import {
     MethodType,
     PrototypeMethodType,
     StructFieldType,
+    StructTypeDescription,
     TypeDescription,
     TypeKind,
     VariantConstructorTypeDescription
@@ -366,16 +367,10 @@ export class TypeCTypeProvider {
             return nodes;
         }
 
-        // Struct fields
-        if (isStructType(type)) {
-            if (type.node && ast.isStructType(type.node)) {
-                // Named struct type - has AST nodes for fields
-                nodes.push(...type.node.fields);
-            } else if (type.node && ast.isStructFieldExprList(type.node)) {
-                // Duck-typed struct from literal - extract StructFieldKeyValuePair nodes
-                const fieldNodes = type.node.fields.filter(f => ast.isStructFieldKeyValuePair(f));
-                nodes.push(...fieldNodes);
-            }
+        // Struct fields (including join types that resolve to structs)
+        const structType = this.services.typing.TypeUtils.asStructType(type);
+        if (structType) {
+            nodes.push(...structType.fields.map(e => e.node))
         }
 
         if (isMetaVariantType(type)) {
@@ -385,11 +380,13 @@ export class TypeCTypeProvider {
             }
         }
 
-        // Interface methods
-        if (isInterfaceType(type) && type.node && ast.isInterfaceType(type.node)) {
-            nodes.push(...type.node.methods);
-            for(const superType of type.superTypes) {
-                nodes.push(...this.getIdentifiableFields(superType));
+        // Interface methods (including join types that resolve to interfaces)
+        const interfaceType = this.services.typing.TypeUtils.asInterfaceType(type);
+        if (interfaceType) {
+            const filtered: MethodType[] = interfaceType.methods.filter(m => m.node !== undefined);
+            nodes.push(...filtered.map(m => m.node!));
+            for(const superType of interfaceType.superTypes) {
+                nodes.push(...this.getIdentifiableFields(superType))
             }
         }
 
@@ -583,7 +580,8 @@ export class TypeCTypeProvider {
     private inferStructType(node: ast.StructType): TypeDescription {
         const fields = node.fields.map(f => factory.createStructField(
             f.name,
-            this.getType(f.type)
+            this.getType(f.type),
+            f
         ));
         return factory.createStructType(fields, !node.name, node);
     }
@@ -591,7 +589,7 @@ export class TypeCTypeProvider {
     private inferVariantType(node: ast.VariantType): TypeDescription {
         const constructors = node.constructors.map(c => factory.createVariantConstructor(
             c.name,
-            c.params?.map(p => factory.createStructField(p.name, this.getType(p.type))) ?? []
+            c.params?.map(p => factory.createStructField(p.name, this.getType(p.type), p)) ?? []
         ));
         return factory.createVariantType(constructors, node);
     }
@@ -710,6 +708,7 @@ export class TypeCTypeProvider {
             node.names,
             params,
             returnType,
+            node,
             genericParams
         );
     }
@@ -861,7 +860,7 @@ export class TypeCTypeProvider {
                 ? this.getType(m.header.returnType)
                 : factory.createVoidType(m);
 
-            return factory.createMethodType([m.name], params, returnType);
+            return factory.createMethodType([m.name], params, returnType, undefined);
         }) ?? [];
 
         return factory.createFFIType(
@@ -942,7 +941,8 @@ export class TypeCTypeProvider {
                 // Property symbol (e.g., array.length)
                 properties.push({
                     name: symbol.name,
-                    type: this.getType(symbol.type)
+                    type: this.getType(symbol.type),
+                    node: symbol
                 });
             }
         }
@@ -1224,10 +1224,11 @@ export class TypeCTypeProvider {
             return firstType;
         }
 
-        // Check if all are struct types - use structural subtyping
-        const allStructs = types.every(t => isStructType(t));
-        if (allStructs) {
-            return this.getCommonStructType(types);
+        // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
+        const structTypes = types.map(t => this.services.typing.TypeUtils.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
+        if (structTypes.length === types.length) {
+            // All types are structs or resolve to structs
+            return this.getCommonStructType(structTypes);
         }
 
         // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
@@ -1396,7 +1397,8 @@ export class TypeCTypeProvider {
 
             commonFields.push({
                 name: fieldName,
-                type: firstFieldType
+                type: firstFieldType,
+                node: firstFieldType.node!
             });
         }
 
@@ -2218,7 +2220,7 @@ export class TypeCTypeProvider {
     private inferNamedStructConstruction(node: ast.NamedStructConstructionExpression): TypeDescription {
         const fields = node.fields?.flatMap(f => {
             if (ast.isStructFieldKeyValuePair(f)) {
-                return [factory.createStructField(f.name, this.inferExpression(f.expr))];
+                return [factory.createStructField(f.name, this.inferExpression(f.expr), f)];
             }
             return [];
         }) ?? [];
@@ -2450,28 +2452,31 @@ export class TypeCTypeProvider {
         else if (isTupleType(initializerType)) {
             return wrapNode(node, initializerType.elementTypes[index]);
         }
-        else if (isStructType(initializerType)) {
-            /**
-             * We need to base struct + we need to remove the previously 
-             */
-            const structType = initializerType;
-            // check if we have a destructuring
+        else {
+            // Handle structs and join types that resolve to structs
+            const structType = this.services.typing.TypeUtils.asStructType(initializerType);
+            if (structType) {
+                /**
+                 * We need to base struct + we need to remove the previously destructured fields
+                 */
+                // check if we have a destructuring
 
-            if (node.isSpread) {
-                const structFields = structType.fields;
-                // Grab all previous elements, not including the current one
-                const fieldsToRemove = (node.$container.elements ?? []).slice(0, index).map(e => e.originalName ?? e.name);
-                const newStructType = factory.createStructType(structFields.filter(f => !fieldsToRemove.includes(f.name)), false, node);
-                return wrapNode(node, newStructType);
-            }
-            else {
-                // find the field by name
-                const field = structType.fields.find(f => f.name === (node.originalName ?? node.name));
-                if (field) {
-                    return wrapNode(node, field.type);
+                if (node.isSpread) {
+                    const structFields = structType.fields;
+                    // Grab all previous elements, not including the current one
+                    const fieldsToRemove = (node.$container.elements ?? []).slice(0, index).map(e => e.originalName ?? e.name);
+                    const newStructType = factory.createStructType(structFields.filter(f => !fieldsToRemove.includes(f.name)), false, node);
+                    return wrapNode(node, newStructType);
                 }
                 else {
-                    return factory.createErrorType(`Field '${node.name}' not found`, undefined, node);
+                    // find the field by name
+                    const field = structType.fields.find(f => f.name === (node.originalName ?? node.name));
+                    if (field) {
+                        return wrapNode(node, field.type);
+                    }
+                    else {
+                        return factory.createErrorType(`Field '${node.name}' not found`, undefined, node);
+                    }
                 }
             }
         }
@@ -2690,9 +2695,12 @@ export class TypeCTypeProvider {
             return;
         }
         
-        if (isStructType(resolvedParameterType) && isStructType(resolvedArgumentType)) {
-            for (const field of resolvedParameterType.fields) {
-                const fieldInArgumentType = resolvedArgumentType.fields.find(f => f.name === field.name);
+        const paramStruct = this.services.typing.TypeUtils.asStructType(resolvedParameterType);
+        const argStruct = this.services.typing.TypeUtils.asStructType(resolvedArgumentType);
+        
+        if (paramStruct && argStruct) {
+            for (const field of paramStruct.fields) {
+                const fieldInArgumentType = argStruct.fields.find(f => f.name === field.name);
                 if (fieldInArgumentType) {
                     this.extractGenericArgsFromTypeDescription(field.type, fieldInArgumentType.type, genericMap);
                 }

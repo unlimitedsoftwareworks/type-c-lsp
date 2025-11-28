@@ -1,0 +1,14 @@
+type TypeA = {
+    x: u32,
+    y: u32
+}
+
+type TypeB = {
+    x: string,  // Conflict: same field name, different type
+    z: u32
+}
+
+fn main() {
+    // @Error(Join struct field type conflict): Join struct field type conflict
+    let point: TypeA & TypeB = {x: 10u32, y: 20u32, z: 30u32}
+}

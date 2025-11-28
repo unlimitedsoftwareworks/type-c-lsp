@@ -9,6 +9,7 @@
  * - Type simplification and normalization
  */
 
+import { AstNode } from "langium";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
@@ -20,6 +21,7 @@ import {
     IntegerTypeDescription,
     InterfaceTypeDescription,
     JoinTypeDescription,
+    MethodType,
     NullableTypeDescription,
     ReferenceTypeDescription,
     StructTypeDescription,
@@ -528,13 +530,17 @@ export class TypeCTypeUtils {
         }
 
         // Struct assignability (structural typing)
-        if (isStructType(from) && isStructType(to)) {
-            return this.isStructAssignable(from, to);
+        // Handle both direct structs and join types that resolve to structs
+        const fromStruct = this.asStructType(from);
+        const toStruct = this.asStructType(to);
+        
+        if (fromStruct && toStruct) {
+            return this.isStructAssignable(fromStruct, toStruct);
         }
 
         // Struct to named struct reference (duck typing)
         // Anonymous struct {x: 5.0, y: 10.0} can be assigned to Point if structurally compatible
-        if (isStructType(from) && isReferenceType(to)) {
+        if (fromStruct && isReferenceType(to)) {
             // We need a type provider to resolve the reference, but we don't have access to it here
             // For now, we'll just return true and let the validator handle it
             // TODO: This should properly resolve the reference and check structural compatibility
@@ -610,16 +616,21 @@ export class TypeCTypeUtils {
             }
             return failure(`Class types differ: ${from.toString()} vs ${to.toString()}`);
         }
-        else if (isClassType(from) && isInterfaceType(to)) {
+        
+        // Handle class to interface (including join types that resolve to interfaces)
+        const toInterface = this.asInterfaceType(to);
+        if (isClassType(from) && toInterface) {
             // Add to pending checks before recursing to handle circular references
             this.addPendingCheck(from, to);
-            const result = this.isClassAssignableToInterface(from, to);
+            const result = this.isClassAssignableToInterface(from, toInterface);
             this.removePendingCheck(from, to);
             return result;
         }
 
-        if (isInterfaceType(from) && isInterfaceType(to)) {
-            return this.isInterfaceAssignableToInterface(from, to);
+        // Handle interface to interface (including join types)
+        const fromInterface = this.asInterfaceType(from);
+        if (fromInterface && toInterface) {
+            return this.isInterfaceAssignableToInterface(fromInterface, toInterface);
         }
 
         // Variant constructor assignability
@@ -1179,7 +1190,8 @@ export class TypeCTypeUtils {
         if (isStructType(type)) {
             const substitutedFields = type.fields.map(f => ({
                 name: f.name,
-                type: this.substituteGenerics(f.type, substitutions)
+                type: this.substituteGenerics(f.type, substitutions),
+                node: f.node
             }));
             const structType: StructTypeDescription = {
                 kind: type.kind,
@@ -1265,7 +1277,8 @@ export class TypeCTypeUtils {
                     const substitutedParamType = this.substituteGenerics(param.type, substitutions);
                     return {
                         name: param.name,
-                        type: substitutedParamType
+                        type: substitutedParamType,
+                        node: param.node
                     };
                 })
             }));
@@ -1329,7 +1342,7 @@ export class TypeCTypeUtils {
                 name: p.name,
                 type: this.substituteGenerics(p.type, substitutions),
                 isMut: p.isMut
-            })), this.substituteGenerics(m.returnType, substitutions), m.genericParameters, m.isStatic, m.isOverride, m.isLocal));
+            })), this.substituteGenerics(m.returnType, substitutions), m.node, m.genericParameters, m.isStatic, m.isOverride, m.isLocal));
 
             return factory.createInterfaceType(substitutedMethods, type.superTypes.map(t => this.substituteGenerics(t, substitutions)), type.node);
         }
@@ -1410,9 +1423,73 @@ export class TypeCTypeUtils {
             }
         }
 
+        // Resolve reference types to get actual struct/interface definitions
+        const resolvedTypes = flatTypes.map(t =>
+            isReferenceType(t) ? this.typeProvider().resolveReference(t) : t
+        );
+
+        // Check if all types are structs - if so, merge them into a single struct
+        const allStructs = resolvedTypes.every(t => isStructType(t));
+        if (allStructs) {
+            const structTypes = resolvedTypes.filter(isStructType);
+            const mergedFields = new Map<string, { type: TypeDescription; sources: string[], nodes: AstNode[] }>();
+            
+            // Merge all struct fields
+            for (const struct of structTypes) {
+                const structName = struct.toString();
+                for (const field of struct.fields) {
+                    const existing = mergedFields.get(field.name);
+                    if (existing) {
+                        // Field already exists - check if types are compatible
+                        const typesEqual = this.areTypesEqual(existing.type, field.type);
+                        if (!typesEqual.success) {
+                            // Conflicting field types - return error
+                            return factory.createErrorType(
+                                `Join type has conflicting field '${field.name}': ${existing.type.toString()} in ${existing.sources.join(', ')} vs ${field.type.toString()} in ${structName}`,
+                                undefined,
+                                type.node
+                            );
+                        }
+                        existing.sources.push(structName);
+                        existing.nodes.push(field.node)
+                    } else {
+                        mergedFields.set(field.name, {
+                            type: field.type,
+                            sources: [structName],
+                            nodes: [field.node]
+                        });
+                    }
+                }
+            }
+            
+            // Create a merged struct type with all fields
+            const allFields = Array.from(mergedFields.entries()).map(([name, info]) =>
+                factory.createStructField(name, info.type, info.nodes[0])
+            );
+            return factory.createStructType(allFields, false, type.node);
+        }
+
+        // Check if all types are interfaces - merge them similarly
+        const allInterfaces = resolvedTypes.every(t => isInterfaceType(t));
+        if (allInterfaces) {
+            const interfaceTypes = resolvedTypes.filter(isInterfaceType);
+            // Collect all methods from all interfaces
+            const allMethods: MethodType[] = [];
+            for (const iface of interfaceTypes) {
+                allMethods.push(...iface.methods);
+            }
+            // Collect all super types
+            const allSuperTypes: TypeDescription[] = [];
+            for (const iface of interfaceTypes) {
+                allSuperTypes.push(...iface.superTypes);
+            }
+            // Create merged interface
+            return factory.createInterfaceType(allMethods, allSuperTypes, type.node);
+        }
+
         // Remove duplicates
         const uniqueTypes: TypeDescription[] = [];
-        for (const t of flatTypes) {
+        for (const t of resolvedTypes) {
             if (!uniqueTypes.some(existing => this.areTypesEqual(existing, t).success)) {
                 uniqueTypes.push(t);
             }
@@ -1430,6 +1507,72 @@ export class TypeCTypeUtils {
             toString: () => uniqueTypes.map(t => t.toString()).join(' & ')
         };
         return simplifiedJoin;
+    }
+
+    // ============================================================================
+    // Struct/Interface Join Type Utilities
+    // ============================================================================
+
+    /**
+     * Checks if a type is a struct or a join of structs, and returns the resolved struct type.
+     * This handles both direct struct types and join types that merge into a single struct.
+     *
+     * @param type The type to check
+     * @returns The struct type if it's a struct or struct join, undefined otherwise
+     *
+     * @example
+     * ```
+     * asStructType({ kind: 'struct', fields: [...] }) → StructTypeDescription
+     * asStructType(Coords & ZAttribute) → StructTypeDescription with merged fields
+     * asStructType({ kind: 'u32' }) → undefined
+     * ```
+     */
+    asStructType(type: TypeDescription): StructTypeDescription | undefined {
+        // Direct struct type
+        if (isStructType(type)) {
+            return type;
+        }
+
+        // Join type - check if it resolves to a struct
+        if (isJoinType(type)) {
+            const simplified = this.simplifyJoin(type);
+            if (isStructType(simplified)) {
+                return simplified;
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Checks if a type is an interface or a join of interfaces, and returns the resolved interface type.
+     * This handles both direct interface types and join types that merge into a single interface.
+     *
+     * @param type The type to check
+     * @returns The interface type if it's an interface or interface join, undefined otherwise
+     *
+     * @example
+     * ```
+     * asInterfaceType({ kind: 'interface', methods: [...] }) → InterfaceTypeDescription
+     * asInterfaceType(IFoo & IBar) → InterfaceTypeDescription with merged methods
+     * asInterfaceType({ kind: 'u32' }) → undefined
+     * ```
+     */
+    asInterfaceType(type: TypeDescription): InterfaceTypeDescription | undefined {
+        // Direct interface type
+        if (isInterfaceType(type)) {
+            return type;
+        }
+
+        // Join type - check if it resolves to an interface
+        if (isJoinType(type)) {
+            const simplified = this.simplifyJoin(type);
+            if (isInterfaceType(simplified)) {
+                return simplified;
+            }
+        }
+
+        return undefined;
     }
 
     // ============================================================================

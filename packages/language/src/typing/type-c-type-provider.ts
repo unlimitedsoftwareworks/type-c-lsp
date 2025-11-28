@@ -1843,8 +1843,13 @@ export class TypeCTypeProvider {
         let baseType = this.inferExpression(node.expr);
         const memberName = node.element?.$refText || '';
 
+        // Track if the base is nullable (for optional chaining propagation)
+        // In TypeScript, a?.b.c.e means all accesses after a?. are nullable
+        let baseIsNullable = false;
+        
         // If base type is nullable, unwrap it for member lookup
         if (isNullableType(baseType)) {
+            baseIsNullable = true;
             // arr?: Array<u32> with arr?.member → unwrap to Array<u32>
             // arr?: Array<u32> with arr.member → auto-unwrap (should be validation error)
             baseType = baseType.baseType;
@@ -2016,7 +2021,10 @@ export class TypeCTypeProvider {
             }
         }
 
-        if(node.isNullable) {
+        // Wrap in nullable if:
+        // 1. Current node uses optional chaining (?.)
+        // 2. OR base was nullable (propagate nullability through chain: a?.b.c → c is nullable)
+        if(node.isNullable || baseIsNullable) {
             memberType = factory.createNullableType(memberType, node);
         }
         return memberType;
@@ -2028,11 +2036,26 @@ export class TypeCTypeProvider {
         // Resolve reference types first
         fnType = isReferenceType(fnType) ? this.resolveReference(fnType) : fnType;
 
+        // Only unwrap nullable function types if they come from optional chaining
+        // Check if ANY part of the expression chain uses optional chaining (?.)
+        let isOptionalCall = false;
+        if (isNullableType(fnType)) {
+            // Check if optional chaining was used anywhere in the chain
+            // e.g., a?.b.c() should work (a?.b uses ?.)
+            const isFromOptionalChaining = this.hasOptionalChaining(node.expr);
+            
+            if (isFromOptionalChaining) {
+                isOptionalCall = true;
+                fnType = fnType.baseType;
+            }
+            // Otherwise, leave as nullable and it will error below
+        }
+
         // Handle coroutine types - calling a coroutine instance yields its yieldType
         if (isCoroutineType(fnType)) {
             // Coroutine instances are callable and yield their yieldType
             // No need to apply generic substitutions here - already done in coroutine creation
-            return fnType.yieldType;
+            return isOptionalCall ? factory.createNullableType(fnType.yieldType, node) : fnType.yieldType;
         }
 
         // Handle regular function types
@@ -2040,7 +2063,8 @@ export class TypeCTypeProvider {
             // Check if the return type is a VariantConstructorType
             // If so, we need to infer generics from the call arguments
             if (isVariantConstructorType(fnType.returnType)) {
-                return this.inferVariantConstructorCall(fnType.returnType, node);
+                const returnType = this.inferVariantConstructorCall(fnType.returnType, node);
+                return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
             }
 
             const genericParams = fnType.genericParameters || [];
@@ -2078,22 +2102,25 @@ export class TypeCTypeProvider {
             }
 
             // Apply substitutions to return type if we have any
+            let returnType = fnType.returnType;
             if (substitutions && substitutions.size > 0) {
-                return this.typeUtils.substituteGenerics(fnType.returnType, substitutions);
+                returnType = this.typeUtils.substituteGenerics(fnType.returnType, substitutions);
             }
 
-            return fnType.returnType;
+            // Wrap return type in nullable if this was an optional call
+            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
         }
 
         // Handle variant constructor calls (e.g., Result.Ok(42))
         // This is the key feature: infer generics from arguments and create a properly typed constructor
         if (isVariantConstructorType(fnType)) {
-            return this.inferVariantConstructorCall(fnType, node);
+            const returnType = this.inferVariantConstructorCall(fnType, node);
+            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
         }
 
         // Handle old-style variant constructor calls (backward compatibility)
         if (fnType.kind === TypeKind.Variant) {
-            return fnType;
+            return isOptionalCall ? factory.createNullableType(fnType, node) : fnType;
         }
 
         // Handle callable classes (classes with () operator overload)
@@ -2102,7 +2129,7 @@ export class TypeCTypeProvider {
             const callOperator = fnType.methods.find(m => m.names.includes('()'));
             if (callOperator) {
                 // TODO: Validate argument types match parameters
-                return callOperator.returnType;
+                return isOptionalCall ? factory.createNullableType(callOperator.returnType, node) : callOperator.returnType;
             }
             // If no call operator found, this is an error
             return factory.createErrorType(
@@ -2117,7 +2144,7 @@ export class TypeCTypeProvider {
             const callOperator = fnType.methods.find(m => m.names.includes('()'));
             if (callOperator) {
                 // TODO: Validate argument types match parameters
-                return callOperator.returnType;
+                return isOptionalCall ? factory.createNullableType(callOperator.returnType, node) : callOperator.returnType;
             }
             return factory.createErrorType(
                 `Interface type does not have a call operator '()'`,
@@ -2127,7 +2154,8 @@ export class TypeCTypeProvider {
         }
 
         if (isMetaVariantConstructorType(fnType)) {
-            return this.inferVariantConstructorCall(fnType.baseVariantConstructor, node);
+            const returnType = this.inferVariantConstructorCall(fnType.baseVariantConstructor, node);
+            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
         }
 
         return factory.createErrorType(
@@ -2882,6 +2910,90 @@ export class TypeCTypeProvider {
         }
         
         return resolved;
+    }
+
+    /**
+     * Check if an expression or any of its parent expressions use optional chaining.
+     *
+     * This recursively checks through the entire expression chain to detect if
+     * optional chaining (?.) was used anywhere, matching TypeScript's behavior.
+     *
+     * Propagates through operations that:
+     * - Access members/properties (member access, indexing)
+     * - Transform values while maintaining the chain (function calls, type casts)
+     * - Return objects via operator overloading (postfix/unary ops)
+     *
+     * Does NOT propagate through:
+     * - Assignments (return assigned value, not container)
+     * - Type checks (return boolean, not object)
+     * - Denull operator (!) - explicitly exits optional safety
+     *
+     * @example
+     * ```
+     * a?.b.c()         // ✅ Propagates (member access with ?.)
+     * a?.b()[0].c      // ✅ Propagates (function call + index)
+     * (a?.b as T).c    // ✅ Propagates (type cast)
+     * (a?.b++).c       // ✅ Propagates (can return object)
+     * (a?.b!).c        // ❌ Stops (denull exits optional chain)
+     * (a?.b is T).c    // ❌ Stops (returns boolean)
+     * (a?.b[0] = x).c  // ❌ Stops (returns assigned value)
+     * ```
+     */
+    private hasOptionalChaining(expr: ast.Expression): boolean {
+        // ✅ PROPAGATE: Member access with optional chaining operator
+        if (ast.isMemberAccess(expr)) {
+            if (expr.isNullable) {
+                return true;
+            }
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Function calls - a?.b().c
+        if (ast.isFunctionCall(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Index access - a?.b[0].c
+        if (ast.isIndexAccess(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Reverse index access (Type-C specific) - a?.b[-1].c
+        if (ast.isReverseIndexAccess(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Type casts - (a?.b as T).c
+        // Transforms type but continues with same value chain
+        if (ast.isTypeCastExpression(expr)) {
+            return this.hasOptionalChaining(expr.left);
+        }
+        
+        // ✅ PROPAGATE: Postfix operators - (a?.b++).c
+        // Can return object via operator overloading
+        if (ast.isPostfixOp(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Unary operators - (!a?.b).c
+        // Can return object via operator overloading
+        if (ast.isUnaryExpression(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ❌ STOP: Index/Reverse index assignments - return assigned value, not container
+        // (a?.b[0] = x) returns x, not a?.b
+        // No recursion needed
+        
+        // ❌ STOP: Instance checks - return boolean, not object
+        // (a?.b is T) returns bool, chain ends
+        // No recursion needed
+        
+        // ❌ STOP: Denull operator - explicitly exits optional safety
+        // a?.b! asserts non-null, subsequent accesses are non-optional
+        // No recursion needed
+        
+        return false;
     }
 }
 

@@ -12,6 +12,7 @@ import {
     isFunctionType,
     isInterfaceType,
     isJoinType,
+    isNullableType,
     isReferenceType,
     isStructType,
     isVariantConstructorType
@@ -269,6 +270,18 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Resolve reference types first
         if (isReferenceType(fnType)) {
             fnType = this.typeProvider.resolveReference(fnType);
+        }
+
+        // Only unwrap nullable function types if they come from optional chaining
+        // Check if ANY part of the expression chain uses optional chaining (?.)
+        if (isNullableType(fnType)) {
+            const isFromOptionalChaining = this.hasOptionalChaining(node.expr);
+            
+            if (isFromOptionalChaining) {
+                // Unwrap for validation - arguments still need to be checked
+                fnType = fnType.baseType;
+            }
+            // Otherwise, leave as nullable and validation will continue below
         }
 
         // Handle coroutine instance calls
@@ -1037,5 +1050,89 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // - Variant constructor assignability
         // - And more...
         return this.typeUtils.isAssignable(actual, expected);
+    }
+
+    /**
+     * Check if an expression or any of its parent expressions use optional chaining.
+     *
+     * This recursively checks through the entire expression chain to detect if
+     * optional chaining (?.) was used anywhere, matching TypeScript's behavior.
+     *
+     * Propagates through operations that:
+     * - Access members/properties (member access, indexing)
+     * - Transform values while maintaining the chain (function calls, type casts)
+     * - Return objects via operator overloading (postfix/unary ops)
+     *
+     * Does NOT propagate through:
+     * - Assignments (return assigned value, not container)
+     * - Type checks (return boolean, not object)
+     * - Denull operator (!) - explicitly exits optional safety
+     *
+     * @example
+     * ```
+     * a?.b.c()         // ✅ Propagates (member access with ?.)
+     * a?.b()[0].c      // ✅ Propagates (function call + index)
+     * (a?.b as T).c    // ✅ Propagates (type cast)
+     * (a?.b++).c       // ✅ Propagates (can return object)
+     * (a?.b!).c        // ❌ Stops (denull exits optional chain)
+     * (a?.b is T).c    // ❌ Stops (returns boolean)
+     * (a?.b[0] = x).c  // ❌ Stops (returns assigned value)
+     * ```
+     */
+    private hasOptionalChaining(expr: ast.Expression): boolean {
+        // ✅ PROPAGATE: Member access with optional chaining operator
+        if (ast.isMemberAccess(expr)) {
+            if (expr.isNullable) {
+                return true;
+            }
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Function calls - a?.b().c
+        if (ast.isFunctionCall(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Index access - a?.b[0].c
+        if (ast.isIndexAccess(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Reverse index access (Type-C specific) - a?.b[-1].c
+        if (ast.isReverseIndexAccess(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Type casts - (a?.b as T).c
+        // Transforms type but continues with same value chain
+        if (ast.isTypeCastExpression(expr)) {
+            return this.hasOptionalChaining(expr.left);
+        }
+        
+        // ✅ PROPAGATE: Postfix operators - (a?.b++).c
+        // Can return object via operator overloading
+        if (ast.isPostfixOp(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ✅ PROPAGATE: Unary operators - (!a?.b).c
+        // Can return object via operator overloading
+        if (ast.isUnaryExpression(expr)) {
+            return this.hasOptionalChaining(expr.expr);
+        }
+        
+        // ❌ STOP: Index/Reverse index assignments - return assigned value, not container
+        // (a?.b[0] = x) returns x, not a?.b
+        // No recursion needed
+        
+        // ❌ STOP: Instance checks - return boolean, not object
+        // (a?.b is T) returns bool, chain ends
+        // No recursion needed
+        
+        // ❌ STOP: Denull operator - explicitly exits optional safety
+        // a?.b! asserts non-null, subsequent accesses are non-optional
+        // No recursion needed
+        
+        return false;
     }
 }

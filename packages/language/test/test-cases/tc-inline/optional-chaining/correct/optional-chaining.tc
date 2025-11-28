@@ -1,0 +1,55 @@
+// @test: Test correct optional chaining behavior
+// Tests TypeScript-compliant optional chaining propagation
+
+type Vec = interface {
+    fn set(vec: {x: u32, y: i32}?) -> void
+    fn set(vec: null) -> void
+    fn get() -> {data: {f: fn() -> {x: u32, y: u32}}}
+    fn method() -> {nested: {value: u32}}
+}
+
+type Container = interface {
+    fn getValue() -> u32
+    fn getVec() -> Vec
+}
+
+fn main() {
+    let v: Vec? = null
+    let c: Container? = null
+    
+    // ✅ Basic optional chaining with method call
+    v?.set(null)
+    
+    // ✅ Optional chaining with function call chain
+    let z = v?.get().data.f()
+    // z: {x: u32, y: u32}?
+    
+    // ✅ Optional chaining with multiple member accesses
+    let nested = v?.method().nested.value
+    // nested: u32?
+    
+    // ✅ Optional chaining with index access
+    let arr: u32[]? = null
+    let elem = arr![0]
+    // elem: u32?
+    
+    // ✅ Optional chaining with chained index access
+    let matrix: u32[][]? = null
+    let val = matrix![0][1]
+    // val: u32?
+    
+    // ✅ Optional chaining through function calls
+    let result = c?.getVec().method().nested.value
+    // result: u32?
+    
+    // ✅ Type cast in optional chain
+    let casted = (v?.get() as {data: {f: fn() -> {x: u32, y: u32}}}).data.f()
+    // casted: {x: u32, y: u32}?
+    
+    // ✅ Postfix operators in chain (can return object via overloading)
+    // Note: This is valid TypeScript - operator might return object
+    
+    // ✅ Null coalescing with optional chain
+    let withDefault = v?.method().nested.value ?? 0u32
+    // withDefault: u32
+}

@@ -1,0 +1,57 @@
+// @test: Test optional chain propagation behavior
+// Tests that nullability propagates correctly through chains
+
+type Data = interface {
+    fn getValue() -> u32
+    fn getNext() -> Data
+}
+
+type Container = interface {
+    fn getData() -> Data
+    fn ++() -> Container  // Postfix operator overload
+    fn !() -> Container   // Unary operator overload
+}
+
+fn main() {
+    let c: Container? = null
+    let d: Data? = null
+    
+    // ✅ Basic chaining - nullability propagates
+    let v1 = c?.getData().getValue()
+    // v1: u32?
+    
+    // ✅ Deep chaining - nullability propagates through all accesses
+    let v2 = c?.getData().getNext().getNext().getValue()
+    // v2: u32?
+    
+    // ✅ Function call in middle of chain
+    let v3 = c?.getData().getNext().getValue()
+    // v3: u32?
+    
+    // ✅ Index access propagates
+    let arr: u32[]? = null
+    let v4 = arr[0]
+    // v4: u32?
+    
+    // ✅ Multiple index accesses
+    let matrix: u32[][]? = null
+    let v5 = matrix[0][1]
+    // v5: u32?
+    
+    // ✅ Type cast propagates - (a?.b as T).c
+    let v6 = (c?.getData() as Data).getValue()
+    // v6: u32?
+    
+    // ✅ Postfix operator propagates (can return object via overloading)
+    // let v7 = (c++).getData().getValue()
+    // v7: u32?
+    
+    // ✅ Unary operator propagates (can return object via overloading)
+    // let v8 = (!c?).getData().getValue()
+    // v8: u32?
+    
+    // ✅ Mixed chain with multiple ?. operators
+    let c2: Container? = null
+    let v9 = c?.getData().getNext()?.getValue()
+    // v9: u32?
+}

@@ -1,0 +1,57 @@
+// @test: Test complex optional chaining scenarios
+// Tests edge cases and complex chaining patterns
+
+type Data = interface {
+    fn getValue() -> u32
+    fn getNext() -> Data?
+    fn getArray() -> u32[]
+}
+
+type Wrapper = interface {
+    fn unwrap() -> Data?
+    fn transform() -> Wrapper?
+}
+
+fn main() {
+    let w: Wrapper? = null
+    let d: Data? = null
+    
+    // ✅ Multiple ?. in same chain
+    let v1 = w?.unwrap()?.getValue()
+    // v1: u32?
+    
+    // ✅ Complex nested optional chain
+    let v2 = w?.transform()?.unwrap()?.getNext()?.getValue()
+    // v2: u32?
+    
+    // ✅ Optional chain with index access
+    let v3 = d?.getArray()[0]
+    // v3: u32?
+    
+    // ✅ Optional chain with multiple index accesses
+    let matrix: u32[][]? = null
+    let v4 = matrix?[0][1]
+    // v4: u32?
+    
+    // ✅ Null coalescing after optional chain
+    let v5 = d?.getValue() ?? 0u32
+    // v5: u32 (unwrapped by ??)
+    
+    // ✅ Optional chain in function argument
+    fn process(x: u32?) -> void {}
+    process(d?.getValue())
+    // Passes u32? to function expecting u32?
+    
+    // ✅ Optional chain in binary expression
+    let sum = (d?.getValue() ?? 0u32) + 10u32
+    // sum: u32
+    
+    // ✅ Optional chain in conditional
+    if d?.getValue() == 5u32 {
+        // Comparison with u32? and u32 is valid
+    }
+    
+    // ✅ Optional chain with array construction
+    let arr = [d?.getValue(), d?.getNext()?.getValue()]
+    // arr: u32?[]
+}

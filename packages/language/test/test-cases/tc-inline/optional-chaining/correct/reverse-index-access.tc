@@ -1,0 +1,29 @@
+// @test: Test Type-C specific reverse index access with optional chaining
+// Tests that reverse indexing works with optional chaining
+
+type Container = interface {
+    fn getArray() -> u32[]
+}
+
+fn main() {
+    let c: Container? = null
+    let arr: u32[]? = null
+    
+    // ✅ Reverse index access with optional chaining
+    let last = arr![-1]
+    // last: u32?
+    
+    // ✅ Chained reverse index access
+    let matrix: u32[][]? = null
+    let val = matrix![-1][-1]
+    // val: u32?
+    
+    // ✅ Reverse index through method call
+    let elem = c?.getArray()[-1]
+    // elem: u32?
+    
+    // ✅ Mixed forward and reverse indexing
+    let v1 = arr![0]
+    let v2 = arr![-1]
+    // Both are u32?
+}

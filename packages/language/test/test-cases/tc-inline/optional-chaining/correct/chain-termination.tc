@@ -1,0 +1,40 @@
+// @test: Test operations that correctly terminate optional chains
+// Tests operations that exit optional safety or fundamentally change the value
+
+type Data = interface {
+    fn getValue() -> u32
+}
+
+type Container = interface {
+    fn getData() -> Data
+}
+
+fn main() {
+    let c: Container? = null
+    let arr: u32[]? = null
+    
+    // ✅ Denull (!) terminates optional chain - result is non-nullable
+    let d1 = c?.getData()!
+    // d1: Data (non-nullable after !)
+    
+    // ✅ Instance check returns boolean - chain terminates
+    let isData = c?.getData() is Data
+    // isData: bool
+    
+    // ✅ Assignment returns assigned value
+    let assigned = (arr?[0] = 5u32)
+    // assigned: u32 (not u32[]?)
+    
+    // ✅ Null coalescing unwraps nullable
+    let value = c?.getData().getValue() ?? 0u32
+    // value: u32 (unwrapped by ??)
+    
+    // ✅ After denull, regular access works (not nullable anymore)
+    let v1 = c?.getData()!.getValue()
+    // v1: u32 (not nullable - ! removed nullability)
+    
+    // ✅ Instance check in condition
+    if c?.getData() is Data {
+        // Type guard - c?.getData() is now known to be Data?
+    }
+}

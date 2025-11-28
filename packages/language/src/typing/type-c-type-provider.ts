@@ -20,6 +20,7 @@ import {
     FunctionTypeDescription,
     GenericTypeDescription,
     InterfaceTypeDescription,
+    ReferenceTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
@@ -1857,16 +1858,7 @@ export class TypeCTypeProvider {
             const refType = baseType;
             // Build substitution map from generic parameters to concrete arguments
             // Example: Array<u32> → { T: u32 }
-            if (refType.genericArgs.length > 0 && refType.declaration.genericParameters) {
-                genericSubstitutions = new Map();
-                refType.declaration.genericParameters.forEach((param, i) => {
-                    if (i < refType.genericArgs.length) {
-                        genericSubstitutions!.set(param.name, refType.genericArgs[i]);
-                    }
-                });
-            }
-            // Resolve to get the actual type definition (Array class with T parameter)
-            baseType = this.resolveReference(refType);
+            genericSubstitutions = this.buildGenericSubstitutions(refType);
             
             /**
              * CRITICAL FIX: Apply generic substitutions to the ENTIRE resolved type.
@@ -1892,26 +1884,20 @@ export class TypeCTypeProvider {
              *
              * Without this step, methods from `Serializable<T>` would return `T` instead of `string`.
              */
-            if (genericSubstitutions && genericSubstitutions.size > 0) {
-                baseType = this.typeUtils.substituteGenerics(baseType, genericSubstitutions);
-            }
+            baseType = this.resolveAndSubstituteReference(refType);
         }
 
         // If base type is a variant constructor type (e.g., Option<u32>.Some), extract generic substitutions
         if (isVariantConstructorType(baseType)) {
             const constructorType = baseType;
-            // Get the variant declaration to extract generic parameter names
-            const variantAstNode = constructorType.baseVariant.node;
-            if (variantAstNode && ast.isVariantType(variantAstNode)) {
-                const variantDecl = AstUtils.getContainerOfType(variantAstNode, ast.isTypeDeclaration);
-                if (variantDecl && variantDecl.genericParameters && constructorType.genericArgs.length > 0) {
-                    genericSubstitutions = new Map();
-                    variantDecl.genericParameters.forEach((param, i) => {
-                        if (i < constructorType.genericArgs.length) {
-                            genericSubstitutions!.set(param.name, constructorType.genericArgs[i]);
-                        }
-                    });
-                }
+            // Create a temporary reference type to use the helper method
+            if (constructorType.variantDeclaration && constructorType.genericArgs.length > 0) {
+                const tempRef = factory.createReferenceType(
+                    constructorType.variantDeclaration,
+                    constructorType.genericArgs,
+                    constructorType.node
+                );
+                genericSubstitutions = this.buildGenericSubstitutions(tempRef);
             }
         }
 
@@ -1969,24 +1955,11 @@ export class TypeCTypeProvider {
                 
                 // Then check supertypes recursively
                 for (const superType of iface.superTypes) {
-                    let resolvedSuperType = superType;
-                    
-                    // If superType is a ReferenceType with generic args (e.g., Serializable<string>),
-                    // we need to resolve it and apply substitutions
-                    if (isReferenceType(superType) && superType.genericArgs.length > 0) {
-                        // Build substitution map for this supertype: T → string
-                        const superSubstitutions = new Map<string, TypeDescription>();
-                        if (superType.declaration.genericParameters) {
-                            superType.declaration.genericParameters.forEach((param, i) => {
-                                if (i < superType.genericArgs.length) {
-                                    superSubstitutions.set(param.name, superType.genericArgs[i]);
-                                }
-                            });
-                        }
-                        // Resolve and substitute to get Serializable with T → string
-                        const resolved = this.resolveReference(superType);
-                        resolvedSuperType = this.typeUtils.substituteGenerics(resolved, superSubstitutions);
-                    }
+                    // If superType is a ReferenceType with generic args, resolve and substitute
+                    // Otherwise, use it as-is
+                    const resolvedSuperType = (isReferenceType(superType) && superType.genericArgs.length > 0)
+                        ? this.resolveAndSubstituteReference(superType)
+                        : superType;
                     
                     // Convert resolved supertype to interface and search recursively
                     const superInterface = this.typeUtils.asInterfaceType(resolvedSuperType);
@@ -2845,6 +2818,70 @@ export class TypeCTypeProvider {
         }
 
         // TODO: add more cases as needed (variant types, function types, etc.)
+    }
+
+    // ========================================================================
+    // Generic Substitution Helpers
+    // ========================================================================
+
+    /**
+     * Builds a generic substitution map from a reference type.
+     *
+     * **Purpose:**
+     * Extracts the mapping from generic parameter names to their concrete type arguments.
+     * This is a common operation when working with instantiated generic types.
+     *
+     * **Example:**
+     * ```
+     * type Array<T> = ...
+     * let arr: Array<u32> = ...
+     *
+     * buildGenericSubstitutions(Array<u32>) → Map { "T" → u32 }
+     * ```
+     *
+     * @param refType Reference type with potential generic arguments
+     * @returns Map of parameter names to concrete types, or undefined if no generics
+     */
+    private buildGenericSubstitutions(refType: ReferenceTypeDescription): Map<string, TypeDescription> | undefined {
+        if (refType.genericArgs.length > 0 && refType.declaration.genericParameters) {
+            const substitutions = new Map<string, TypeDescription>();
+            refType.declaration.genericParameters.forEach((param: ast.GenericType, i: number) => {
+                if (i < refType.genericArgs.length) {
+                    substitutions.set(param.name, refType.genericArgs[i]);
+                }
+            });
+            return substitutions;
+        }
+        return undefined;
+    }
+
+    /**
+     * Resolves a reference type and applies generic substitutions from its arguments.
+     *
+     * **Purpose:**
+     * Combines two common operations: resolving a reference and substituting its generics.
+     * Used when we need the fully instantiated type (e.g., `Serializable<string>` not `Serializable<T>`).
+     *
+     * **Example:**
+     * ```
+     * type Serializable<T> = interface { fn serialize() -> T }
+     *
+     * resolveAndSubstitute(Serializable<string>) →
+     *   interface { fn serialize() -> string }  // T substituted with string
+     * ```
+     *
+     * @param refType Reference type to resolve and substitute
+     * @returns Resolved type with generics substituted
+     */
+    private resolveAndSubstituteReference(refType: ReferenceTypeDescription): TypeDescription {
+        const substitutions = this.buildGenericSubstitutions(refType);
+        const resolved = this.resolveReference(refType);
+        
+        if (substitutions && substitutions.size > 0) {
+            return this.typeUtils.substituteGenerics(resolved, substitutions);
+        }
+        
+        return resolved;
     }
 }
 

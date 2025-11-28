@@ -14,11 +14,12 @@ type Calculator = class {
 
 // Case 2: Generic methods - treated as regular methods
 type Container<T> = class {
+    /// @Error(TCE064): Generic methods use type inference and cannot have multiple signatures
     fn process<U>(item: U) -> U {
         return item
     }
     
-    // Will get duplicate if signatures match
+    /// @Error(TCE064): Generic methods use type inference and cannot have multiple signatures
     fn process<U>(item: U, index: u32) -> U {
         return item
     }

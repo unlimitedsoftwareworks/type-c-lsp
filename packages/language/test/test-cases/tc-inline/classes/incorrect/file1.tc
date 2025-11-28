@@ -1,0 +1,11 @@
+type Vec = interface {
+    fn set(vec: {x: u32, y: i32}?)
+    fn set(vec: null)
+}
+
+fn main() {
+    let v: Vec? = null
+    v?.set(v) 
+    let vec: {x: u32, y: i32}? = null
+    v?.set(vec)
+}

@@ -3,5 +3,6 @@ fn getValues() -> (string, u8[], u64, u32, {x: f32, y: f32}) {
 }
 
 fn main() {
+    /// @Type(getValues): fn() -> (string, u8[], u64, u32, { x: f32, y: f32 })
     let (a, b, _, d, e) = getValues()
 }

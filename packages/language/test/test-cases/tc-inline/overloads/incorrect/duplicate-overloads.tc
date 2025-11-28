@@ -31,11 +31,13 @@ fn log(msg: string) -> void {
 }
 
 // Case 4: Generic functions cannot be overloaded
+/// @Error(TCE063): Generic function overload error
 fn map<T>(xs: T[]) -> T[] {
     return xs
 }
 
 // Generic functions are treated as regular functions - will get duplicate error
+/// @Error(TCE063): Generic function overload error
 fn map<T>(xs: T[], f: fn(x: T) -> T) -> T[] {
     let result: T[] = []
     return result

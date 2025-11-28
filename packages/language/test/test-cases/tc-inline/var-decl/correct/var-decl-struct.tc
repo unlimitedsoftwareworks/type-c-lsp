@@ -2,8 +2,10 @@
 fn main() {
     let {
         x,
+        /// @Type(alpha): string?
         y: alpha?,
         z,
+        /// @Type(rest): struct { a: u8, b: string, c: bool }?
         ...rest?
     } = {
         x: 1u32,

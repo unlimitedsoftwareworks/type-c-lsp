@@ -1,4 +1,4 @@
-// @tc-expect-errors
+
 type Container<T> = interface {
     fn slice(end: u64) -> Container<T>
     fn slice(start: u64, end: u64) -> Container<T>

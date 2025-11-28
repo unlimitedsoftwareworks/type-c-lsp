@@ -1,23 +1,4 @@
-// Test variant constructor type annotations
-// Testing: Using variant constructor types (e.g., Option.Some) in type annotations
-
-type Option<T> = variant {
-    Some(value: T),
-    None()
-}
-
-type Result<T, E> = variant {
-    Ok(value: T),
-    Err(error: E)
-}
-
-type Status<T> = variant {
-    Success(data: T),
-    Failure(message: string)
-}
-
-// Test 1: Simple variant constructor type without generics
-fn testSimpleConstructorType() -> void { 
-    /// @Error: Constructor 'Some' parameter 1 type mismatch
-    let noneVal: Option<string> = Option.Some({x: 1u32})
-}
+fn overloadedFn(a: u32) -> i32 {}
+fn overloadedFn(a: f32) -> f64 {}
+/// @Error(TCE060): Duplicate function overload
+fn overloadedFn(a: f32) -> f64 {}

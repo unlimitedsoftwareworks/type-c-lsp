@@ -1,4 +1,3 @@
-// @tc-expect-errors
 type Container<T> = interface {
     fn slice(end: u64) -> Container<T>
 }
@@ -8,6 +7,6 @@ type Array<T> = class {
 }
 
 fn main() -> void {
-    // @tc-expect-error: TCE007
+    /// @Error(TCE007): string is not assignable to u32
     let arr2: Container<u32> = new Array<string>()
 }

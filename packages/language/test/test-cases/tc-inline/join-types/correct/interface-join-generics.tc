@@ -1,0 +1,42 @@
+// Test 1: Valid interface join - methods with different signatures (overloading allowed)
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Serializable<T> = interface Drawable {
+    fn serialize() -> T
+    fn serialize(format: T) -> T  // Overload is fine
+}
+
+// Valid: combining interfaces
+type Entity = Drawable & Serializable<string>
+
+fn main(){
+    // TODO: will cause a bug due to nullable direct access!
+    let e: Entity? = null
+    
+    /// @Type(zz): string
+    let zz = e.serialize()
+}
+
+// Test 2: Generic type propagation through join
+type EntityGeneric<T> = Drawable & Serializable<T>
+
+fn test2(){
+    let e: EntityGeneric<string>? = null
+
+    /// @Type(z): string
+    let z = e.serialize()
+}
+
+// Test 3: Interface with generic supertype
+type SerializableString = interface Serializable<string>{
+    fn draw() -> void
+}
+
+fn test3(){
+    let e: SerializableString? = null
+
+    /// @Type(z): string
+    let z = e.serialize()
+}

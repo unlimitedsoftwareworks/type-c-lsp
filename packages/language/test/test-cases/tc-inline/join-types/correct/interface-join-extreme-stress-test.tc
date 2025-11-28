@@ -1,0 +1,227 @@
+// EXTREME Stress Test - Pushing Generic Substitution to the Limits
+
+// Test 11: Deeply nested arrays (3 levels)
+type Matrix<T> = interface {
+    fn getMatrix() -> T[][][]
+    fn getFlat() -> T
+}
+
+type NumericMatrix = interface Matrix<u32> {
+    fn sum() -> u64
+}
+
+fn test11() {
+    let nm: NumericMatrix? = null
+
+    /// @Type(matrix): u32[][][]
+    let matrix = nm.getMatrix()
+
+    /// @Type(flat): u32
+    let flat = nm.getFlat()
+}
+
+// Test 12: Generic with complex struct types
+type Point2D = struct { x: f64, y: f64 }
+type Point3D = struct { x: f64, y: f64, z: f64 }
+
+type Storage<T> = interface {
+    fn get() -> T
+    fn getArray() -> T[]
+}
+
+type PointStorage = interface Storage<Point3D> {
+    fn count() -> u32
+}
+
+fn test12() {
+    let ps: PointStorage? = null
+
+    /// @Type(point): Point3D
+    let point = ps.get()
+    
+    /// @Type(points): Point3D[]
+    let points = ps.getArray()
+}
+
+// Test 13: Nested generics with structs inside arrays
+type Wrapper<T> = struct { value: T, metadata: string }
+
+type Collection<T> = interface {
+    fn getWrapped() -> Wrapper<T>[]
+    fn getUnwrapped() -> T[]
+}
+
+type StringCollection = interface Collection<u8> {
+    fn join() -> string
+}
+
+fn test13() {
+    let sc: StringCollection? = null
+    /// @Type(wrapped): Wrapper<u8>[]
+    let wrapped = sc.getWrapped()
+    
+    /// @Type(unwrapped): u8[]
+    let unwrapped = sc.getUnwrapped()
+}
+
+// Test 14: Recursive-like structure (LinkedList style)
+type Node<T> = struct { data: T, hasNext: bool }
+
+type LinkedList<T> = interface {
+    fn getHead() -> Node<T>?
+    fn getData() -> T[]
+}
+
+type IntList = interface LinkedList<i32> {
+    fn size() -> u32
+}
+
+fn test14() {
+    let list: IntList? = null
+
+    /// @Type(head): Node<i32>?
+    let head = list.getHead()
+    
+    /// @Type(data): i32[]
+    let data = list.getData()
+}
+
+// Test 15: Triple nesting with generics and structs
+type Container<T> = struct { items: T[] }
+
+type Repository<T> = interface {
+    fn getAll() -> Container<T>[]
+    fn getFirst() -> T
+}
+
+type UserRepo = interface Repository<struct{id: u64, name: string}> {
+    fn findById(id: u64) -> struct{id: u64, name: string}?
+}
+
+fn test15() {
+    let repo: UserRepo? = null
+
+    /// @Type(containers): Container<struct { id: u64, name: string }>[]
+    let containers = repo.getAll()
+    
+    /// @Type(first): struct { id: u64, name: string }
+    let first = repo.getFirst()
+}
+
+// Test 16: Multiple levels with array nesting at different depths
+type Level1<T> = interface {
+    fn level1() -> T[]
+}
+
+type Level2<T> = interface Level1<T[]> {
+    fn level2() -> T
+}
+
+type Level3<T> = interface Level2<T[]> {
+    fn level3() -> T[][][]
+}
+
+fn test16() {
+    let l3: Level3<bool>? = null
+
+    /// @Type(result1): bool[][][]
+    let result1 = l3.level1()
+
+    /// @Type(result2): bool[]
+    let result2 = l3.level2()
+    
+    /// @Type(result3): bool[][][]
+    let result3 = l3.level3()
+}
+
+// Test 17: Join with complex nested types
+type Reader<T> = interface {
+    fn read() -> T
+}
+
+type Writer<T> = interface {
+    fn write(data: T) -> void
+}
+
+type IOStream = Reader<struct{buffer: u8[], size: u32}> & Writer<struct{buffer: u8[], size: u32}>
+
+fn test17() {
+    let io: IOStream? = null
+
+    /// @Type(data): struct { buffer: u8[], size: u32 }
+    let data = io.read()
+}
+
+// Test 18: Extreme nesting - 4 levels of arrays with structs
+type DeepNest<T> = interface {
+    fn getDeep() -> T[][][][]
+    fn getItem() -> T
+}
+
+type Coord = struct { x: i16, y: i16 }
+
+type TileMap = interface DeepNest<Coord> {
+    fn getTile(x: u32, y: u32) -> Coord?
+}
+
+fn test18() {
+    let tm: TileMap? = null
+
+    /// @Type(deep): Coord[][][][]
+    let deep = tm.getDeep()
+    
+    /// @Type(item): Coord
+    let item = tm.getItem()
+}
+
+// Test 19: Generic with nullable nested in struct
+type Maybe<T> = struct { value: T?, hasValue: bool }
+
+type Provider<T> = interface {
+    fn provide() -> Maybe<T>
+    fn provideArray() -> Maybe<T>[]
+}
+
+type F32Provider = interface Provider<f32> {
+    fn getDefault() -> f32
+}
+
+fn test19() {
+    let prov: F32Provider? = null
+
+    /// @Type(maybe): Maybe<f32>
+    let maybe = prov.provide()
+    
+    /// @Type(maybes): Maybe<f32>[]
+    let maybes = prov.provideArray()
+}
+
+// Test 20: The Ultimate Test - Everything combined
+type TreeNode<T> = struct {
+    value: T,
+    children: TreeNode<T>[]?,
+    metadata: struct { depth: u32, path: string }
+}
+
+type TreeOps<T> = interface {
+    fn getRoot() -> TreeNode<T>
+    fn getAllNodes() -> TreeNode<T>[]
+    fn getValue() -> T
+}
+
+type StringTree = interface TreeOps<string> {
+    fn print() -> void
+}
+
+fn test20() {
+    let tree: StringTree? = null
+    
+    /// @Type(root): TreeNode<string>
+    let root = tree.getRoot()
+    
+    /// @Type(nodes): TreeNode<string>[]
+    let nodes = tree.getAllNodes()
+    
+    /// @Type(value): string
+    let value = tree.getValue()
+}

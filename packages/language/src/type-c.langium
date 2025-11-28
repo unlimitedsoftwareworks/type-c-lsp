@@ -644,7 +644,7 @@ MethodOperatorName returns string:
     '>=' | 
     LESS_THAN '=' | 
     '<<' | 
-    '>>' | 
+    '>' '>' | 
     '&' | 
     '|' | 
     '^' | 

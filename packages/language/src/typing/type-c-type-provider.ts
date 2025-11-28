@@ -19,6 +19,7 @@ import { isAssignmentOperator } from './operator-utils.js';
 import {
     FunctionTypeDescription,
     GenericTypeDescription,
+    InterfaceTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
@@ -1866,6 +1867,34 @@ export class TypeCTypeProvider {
             }
             // Resolve to get the actual type definition (Array class with T parameter)
             baseType = this.resolveReference(refType);
+            
+            /**
+             * CRITICAL FIX: Apply generic substitutions to the ENTIRE resolved type.
+             *
+             * **Why this is needed:**
+             * When a type has generic supertypes (e.g., `Entity<T> = Drawable & Serializable<T>`),
+             * resolving the reference gives us `Drawable & Serializable<T>` where `T` is still
+             * unsubstituted. We need to apply the substitutions from the reference type
+             * (e.g., `Entity<string>` → `{T: string}`) to ALL parts of the resolved type,
+             * including supertypes.
+             *
+             * **Example:**
+             * ```
+             * type Entity<T> = Drawable & Serializable<T>
+             * let e: Entity<string> = ...
+             * e.serialize()  // Should return `string`, not `T`
+             * ```
+             *
+             * **What happens:**
+             * 1. baseType starts as `ReferenceType{Entity, genericArgs:[string]}`
+             * 2. After resolve: `JoinType{Drawable, Serializable<T>}`  ← T is still generic!
+             * 3. After substitution: `JoinType{Drawable, Serializable<string>}`  ← T → string ✓
+             *
+             * Without this step, methods from `Serializable<T>` would return `T` instead of `string`.
+             */
+            if (genericSubstitutions && genericSubstitutions.size > 0) {
+                baseType = this.typeUtils.substituteGenerics(baseType, genericSubstitutions);
+            }
         }
 
         // If base type is a variant constructor type (e.g., Option<u32>.Some), extract generic substitutions
@@ -1895,13 +1924,106 @@ export class TypeCTypeProvider {
             return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
-        const targetType = this.getType(targetRef);
+        /**
+         * CRITICAL FIX: Look up interface methods from the substituted type, not the AST.
+         *
+         * **Why this is needed:**
+         * When accessing methods on interfaces with generic supertypes, we must use the
+         * already-substituted baseType instead of getting the method from the original AST node.
+         * The AST node has the original generic type (e.g., `T`), but the baseType has been
+         * substituted with concrete types (e.g., `string`).
+         *
+         * **Example:**
+         * ```
+         * type Serializable<T> = interface {
+         *     fn serialize() -> T
+         * }
+         * type Entity = Drawable & Serializable<string>
+         * let e: Entity = ...
+         * e.serialize()  // Should return `string`, not `T`
+         * ```
+         *
+         * **What happens:**
+         * 1. baseType is `JoinType{Drawable, Serializable<string>}` (already substituted)
+         * 2. We find `serialize()` method in `Serializable<string>`
+         * 3. Method's return type is `string` (substituted), not `T` ✓
+         *
+         * **Recursive supertype handling:**
+         * We also recursively search through interface supertypes, handling cases where
+         * supertypes are themselves generic references (e.g., `interface Foo extends Bar<T>`).
+         * For each supertype reference, we:
+         * 1. Extract its generic arguments
+         * 2. Resolve the reference to get the actual interface definition
+         * 3. Substitute generics in the resolved interface
+         * 4. Search for the method recursively
+         */
+        const baseInterface = this.typeUtils.asInterfaceType(baseType);
+        if (baseInterface && ast.isMethodHeader(targetRef)) {
+            // Recursive helper to find methods in interface hierarchy
+            const findMethodInInterface = (iface: InterfaceTypeDescription): MethodType | undefined => {
+                // First check methods directly defined in this interface
+                const method = iface.methods.find((m: MethodType) => m.names.includes(memberName));
+                if (method) {
+                    return method;
+                }
+                
+                // Then check supertypes recursively
+                for (const superType of iface.superTypes) {
+                    let resolvedSuperType = superType;
+                    
+                    // If superType is a ReferenceType with generic args (e.g., Serializable<string>),
+                    // we need to resolve it and apply substitutions
+                    if (isReferenceType(superType) && superType.genericArgs.length > 0) {
+                        // Build substitution map for this supertype: T → string
+                        const superSubstitutions = new Map<string, TypeDescription>();
+                        if (superType.declaration.genericParameters) {
+                            superType.declaration.genericParameters.forEach((param, i) => {
+                                if (i < superType.genericArgs.length) {
+                                    superSubstitutions.set(param.name, superType.genericArgs[i]);
+                                }
+                            });
+                        }
+                        // Resolve and substitute to get Serializable with T → string
+                        const resolved = this.resolveReference(superType);
+                        resolvedSuperType = this.typeUtils.substituteGenerics(resolved, superSubstitutions);
+                    }
+                    
+                    // Convert resolved supertype to interface and search recursively
+                    const superInterface = this.typeUtils.asInterfaceType(resolvedSuperType);
+                    if (superInterface) {
+                        const superMethod = findMethodInInterface(superInterface);
+                        if (superMethod) {
+                            return superMethod;
+                        }
+                    }
+                }
+                return undefined;
+            };
 
-        // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
-        if (genericSubstitutions) {
-            memberType = this.typeUtils.substituteGenerics(targetType, genericSubstitutions);
-        } else {
-            memberType = targetType;
+            const method = findMethodInInterface(baseInterface);
+            if (method) {
+                // Convert method to function type for return
+                // The method already has substituted types (e.g., return type is `string`, not `T`)
+                memberType = factory.createFunctionType(
+                    method.parameters,
+                    method.returnType,
+                    'fn',
+                    method.genericParameters,
+                    targetRef
+                );
+            }
+        }
+
+        // If we didn't find it in the interface, fall back to getting from AST
+        if (!memberType) {
+            const targetType = this.getType(targetRef);
+
+            // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
+            if (genericSubstitutions) {
+                memberType = this.typeUtils.substituteGenerics(targetType, genericSubstitutions);
+            } else {
+                memberType = targetType;
+            }
         }
 
         // Post process the member type

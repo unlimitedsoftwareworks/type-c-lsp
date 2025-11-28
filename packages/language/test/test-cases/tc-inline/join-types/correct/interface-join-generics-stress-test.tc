@@ -1,0 +1,151 @@
+// Stress Test for Generic Type Substitution in Interface Joins
+
+// Test 4: Multiple levels of interface inheritance with generics
+type Identifiable<T> = interface {
+    fn getId() -> T
+}
+
+type Versioned<T, V> = interface Identifiable<T> {
+    fn getVersion() -> V
+}
+
+type Entity<T> = interface Versioned<T, u32> {
+    fn save() -> void
+}
+
+fn test4() {
+    let e: Entity<string>? = null
+
+    /// @Type(id): string
+    let id = e.getId()
+    
+    /// @Type(version): u32
+    let version = e.getVersion()
+}
+
+// Test 5: Multiple generic parameters with join types
+type Readable<T> = interface {
+    fn read() -> T
+}
+
+type Writable<T> = interface {
+    fn write(data: T) -> void
+}
+
+type ReadWrite<T> = Readable<T> & Writable<T>
+
+fn test5() {
+    let rw: ReadWrite<i32>? = null
+
+    /// @Type(data): i32
+    let data = rw.read()
+}
+
+// Test 6: Nested generic types (Array<T>)
+type Container<T> = interface {
+    fn getItems() -> T[]
+    fn addItem(item: T) -> void
+}
+
+type NamedContainer<T> = interface Container<T> {
+    fn getName() -> string
+}
+
+fn test6() {
+    let nc: NamedContainer<u64>? = null
+
+    /// @Type(name): string
+    let name = nc.getName()
+    
+    /// @Type(items): u64[]
+    let items = nc.getItems()
+}
+
+// Test 7: Generic parameter remapping (T -> Array<U>)
+type Source<T> = interface {
+    fn fetch() -> T
+}
+
+type BatchSource<U> = interface Source<U[]> {
+    fn count() -> u32
+}
+
+fn test7() {
+    let bs: BatchSource<string>? = null
+    /// @Type(count): u32
+    let count = bs.count()
+    /// @Type(batch): string[]
+    let batch = bs.fetch()
+}
+
+// Test 8: Triple join with different generics
+type A<T> = interface {
+    fn getA() -> T
+}
+
+type B<U> = interface {
+    fn getB() -> U
+}
+
+type C<V> = interface {
+    fn getC() -> V
+}
+
+type ABC = A<u8> & B<u16> & C<u32>
+
+fn test8() {
+    let abc: ABC? = null
+
+    /// @Type(a): u8
+    let a = abc.getA()
+    
+    /// @Type(b): u16
+    let b = abc.getB()
+
+    /// @Type(c): u32
+    let c = abc.getC()
+}
+
+// Test 9: Chained generics (T -> U -> V)
+type Stage1<T> = interface {
+    fn stage1() -> T
+}
+
+type Stage2<U> = interface Stage1<U[]> {
+    fn stage2() -> U
+}
+
+type Stage3<V> = interface Stage2<V> {
+    fn stage3() -> V[]
+}
+
+fn test9() {
+    let s3: Stage3<i64>? = null
+    
+    /// @Type(result1): i64[]
+    let result1 = s3.stage1()
+    
+    /// @Type(result2): i64
+    let result2 = s3.stage2()
+    
+    /// @Type(result3): i64[]
+    let result3 = s3.stage3()
+}
+
+// Test 10: Multiple interfaces with same generic parameter
+type Producer<T> = interface {
+    fn produce() -> T
+}
+
+type Consumer<T> = interface {
+    fn consume(item: T) -> void
+}
+
+type Processor<T> = Producer<T> & Consumer<T>
+
+fn test10() {
+    let proc: Processor<f32>? = null
+
+    /// @Type(produced): f32
+    let produced = proc.produce()
+}

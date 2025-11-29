@@ -223,6 +223,12 @@ export class TypeCTypeProvider {
             if (fn && fn.header.returnType) {
                 return this.getType(fn.header.returnType);
             }
+            
+            // Also check for class methods
+            const classMethod = AstUtils.getContainerOfType(parent, ast.isClassMethod);
+            if (classMethod && classMethod.method?.header?.returnType) {
+                return this.getType(classMethod.method.header.returnType);
+            }
         }
 
         // Binary expressions: use the other operand's type as context

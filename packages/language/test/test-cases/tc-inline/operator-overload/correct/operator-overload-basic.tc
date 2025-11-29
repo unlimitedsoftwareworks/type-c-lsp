@@ -37,7 +37,7 @@ fn main() -> void {
     /// @Type(v4): Vector
     let v4 = v1 + 5.0f
     
-    /// @type(v5, Vector) - Binary operator overload: Vector - Vector
+    /// @Type(v5): Vector
     let v5 = v2 - v1
     
     /// @Type(v6): Vector

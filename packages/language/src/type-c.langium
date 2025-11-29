@@ -406,11 +406,11 @@ Statement:
     MatchStatement |
     ReturnStatement |
     VariableDeclarationStatement<false> | 
-    WhileStatement) ';'?;
+    WhileStatement);
 
 
 BlockStatement:
-    '{' statements+=Statement* '}';
+    '{' statements+=(Statement)* '}';
 
 BreakStatement:
     kind='break';

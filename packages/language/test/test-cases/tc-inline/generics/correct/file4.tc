@@ -5,7 +5,9 @@ type Container<T> = interface {
 }
 
 type Array<T> = class {
-    fn slice(end: u64) -> Array<T> {}
+    fn slice(end: u64) -> Array<T> {
+        return new Array<T>()
+    }
 }
 
 fn main() -> void {

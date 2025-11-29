@@ -65,9 +65,16 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
                 if (name) {
                     symbols.add(container, this.descriptions.createDescription(declaration, name, document));
                 }
+                // Handle ClassMethod with multiple names (operator overloading)
+                // The name provider returns the first name, but we need to add all names to the scope
+                if (ast.isClassMethod(declaration) && declaration.method) {
+                    for(const name of declaration.method.names) {
+                        symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                    }
+                }
+                // Handle MethodHeader with multiple names (operator overloading) - for interfaces
                 else if (ast.isMethodHeader(declaration)) {
                     for(const name of declaration.names) {
-                        // TODO: Add custom name provider
                         symbols.add(container, this.descriptions.createDescription(declaration, name, document));
                     }
                 }

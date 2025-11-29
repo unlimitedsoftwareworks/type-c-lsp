@@ -14,7 +14,7 @@ type Matrix = class {
 
     // Multiple operator overloads - overload resolution should pick the right one
     fn * (scalar: f32) -> f32 {
-        return this
+        return 1.0f
     }
 
     fn * (other: Matrix) -> Matrix {
@@ -26,7 +26,7 @@ type Matrix = class {
     }
 
     fn + (scalar: f32) -> f32 {
-        return this
+        return 1.0f
     }
 }
 

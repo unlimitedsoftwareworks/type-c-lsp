@@ -9,8 +9,12 @@ type Container<T> = interface {
 }
 
 type Array<T> = class Container<T> {
-    fn slice(end: u64) -> Array<T> {}
-    fn slice(start: u64, end: u64) -> Array<T> {}
+    fn slice(end: u64) -> Container<T> {
+        return new Array<T>()
+    }
+    fn slice(start: u64, end: u64) -> Container<T> {
+        return new Array<T>()
+    }
 }
 
 type List<T> = interface Container<T> {

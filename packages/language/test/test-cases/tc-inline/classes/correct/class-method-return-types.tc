@@ -1,0 +1,56 @@
+// Test class method return type validation - correct cases
+
+type Calculator = class {
+    // Explicit return type
+    static fn add(a: u32, b: u32) -> u32 = a + b
+
+    // Inferred return type from expression
+    static fn subtract(a: u32, b: u32) {
+        return a - b
+    }
+
+    // Inferred return type from conditional
+    fn abs(n: i32) = if n < 0 => (0u32 - n as u32) else n as u32
+
+    fn x() {
+        /// @Type(z): u32
+        let z = this.abs(1)
+        /// @Type(z2): u32
+        let z2 = add(1, 2)
+    }
+
+    // Multiple returns with same type in block
+    static fn max(a: u32, b: u32) =
+        if a > b => a
+        else b
+    
+
+    // Void return type (no explicit returns)
+    static fn logResult(value: u32) {
+        // No return statement - implicitly void
+    }
+
+    // Match expression with consistent type
+    static fn classify(n: u32) = match n {
+        0 => "zero",
+        1 => "one",
+        _ => "many"
+    }
+
+    // Static method with inferred type
+    static fn helper() = 100u32
+
+    // Static method with explicit type
+    static fn compute(x: u32, y: u32) -> u32 = x + y
+
+    static {
+        /// @Type(add): fn(a: u32, b: u32) -> u32
+        add(1u32, 2u32)
+
+        /// @Type(z1): u32
+        let z1 = Calculator.subtract(1u32, 2u32)
+
+        /// @Type(z2): u32
+        let z2 = subtract(1, 2)
+    }
+}

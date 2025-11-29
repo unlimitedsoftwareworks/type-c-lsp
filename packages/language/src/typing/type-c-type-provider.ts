@@ -441,8 +441,8 @@ export class TypeCTypeProvider {
         if (ast.isExternFFIDecl(node)) return this.inferFFIDecl(node);
 
         // Class/Interface members
+        if (ast.isClassMethod(node)) return this.inferClassMethod(node);
         if (ast.isMethodHeader(node)) return this.inferMethodHeaderAsType(node);
-        if (ast.isClassMethod(node)) return this.inferMethodHeaderAsType(node.method);
 
         // Expressions
         if (ast.isExpression(node)) return this.inferExpression(node);
@@ -715,10 +715,63 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Infers the type of a class method with body/expression inference support.
+     *
+     * Similar to function declaration inference, but for class methods.
+     * If the method has an explicit return type annotation, use it.
+     * Otherwise, infer from the method body or expression.
+     */
+    private inferClassMethod(node: ast.ClassMethod): TypeDescription {
+        const methodHeader = node.method;
+        const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+        const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+            arg.name,
+            this.getType(arg.type),
+            arg.isMut
+        )) ?? [];
+
+        let returnType: TypeDescription;
+
+        if (methodHeader.header?.returnType) {
+            // Explicit return type provided
+            returnType = this.getType(methodHeader.header.returnType);
+        } else {
+            // Infer return type from method body or expression
+            // Note: Methods cannot be coroutines directly, but method headers can specify coroutine types
+            
+            if (node.expr) {
+                // Expression-body method: fn foo() = expr
+                returnType = this.getType(node.expr);
+            } else if (node.body) {
+                // Block-body method: fn foo() { ... }
+                returnType = this.inferReturnTypeFromBody(node.body);
+            } else {
+                // No body or expression (abstract method or interface method)
+                returnType = factory.createVoidType(node);
+            }
+        }
+
+        return factory.createFunctionType(params, returnType, 'fn', genericParams, node);
+    }
+
+    /**
      * Converts a MethodHeader to a FunctionType for type display and checking.
      * This is used when hovering over a method or getting its type for other purposes.
+     *
+     * **IMPORTANT FIX:**
+     * If the MethodHeader is part of a ClassMethod, we need to get the type from the
+     * ClassMethod instead, which properly infers return types from method bodies/expressions.
+     * Otherwise, direct method calls (without `this.` or `ClassName.`) would get void
+     * return types instead of the inferred type.
      */
     private inferMethodHeaderAsType(node: ast.MethodHeader): TypeDescription {
+        // Check if this MethodHeader is part of a ClassMethod
+        // If so, get the inferred type from the ClassMethod (which includes body inference)
+        if (node.$container && ast.isClassMethod(node.$container)) {
+            return this.inferClassMethod(node.$container);
+        }
+        
+        // Otherwise, use the MethodHeader directly (for interfaces, etc.)
         const methodType = this.inferMethodHeader(node);
         return factory.createFunctionType(
             methodType.parameters,

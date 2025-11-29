@@ -1,4 +1,4 @@
-import { AstNode, ValidationAcceptor, ValidationChecks } from "langium";
+import { AstNode, AstUtils, ValidationAcceptor, ValidationChecks } from "langium";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
@@ -17,6 +17,7 @@ import {
     isStructType,
     isVariantConstructorType
 } from "../typing/type-c-types.js";
+import * as factory from "../typing/type-factory.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
 import { ErrorCode } from "../codes/errors.js";
@@ -49,6 +50,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
+            ClassMethod: this.checkClassMethod,
             IndexSet: this.checkIndexSet,
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
@@ -628,6 +630,174 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 });
             }
         }
+    }
+
+    /**
+     * Check class method declarations for return type issues.
+     *
+     * Validates:
+     * 1. If no explicit return type → ensure we can infer successfully (no error type)
+     * 2. If explicit return type → ensure inferred type matches declared type
+     *
+     * This is similar to function validation but for class methods specifically.
+     * Note: Class methods are always regular functions (fn), not coroutines (cfn).
+     *
+     * Examples:
+     * ```
+     * class Foo {
+     *     fn bad() = match n { 0 => 1, _ => "oops" }  // ❌ Can't infer common type
+     *     fn good() -> u32 = ...                       // ✅ Explicit type
+     *     fn good2() = 42                              // ✅ Can infer u32
+     * }
+     * ```
+     */
+    checkClassMethod = (node: ast.ClassMethod, accept: ValidationAcceptor): void => {
+        // Get the method header
+        const methodHeader = node.method;
+        if (!methodHeader || !methodHeader.header) {
+            return;
+        }
+
+        // We need to infer the return type from the method body/expression
+        let inferredReturnType: TypeDescription;
+        
+        if (node.expr) {
+            // Expression-body method: fn foo() = expr
+            inferredReturnType = this.typeProvider.getType(node.expr);
+        } else if (node.body) {
+            // Block-body method: fn foo() { ... }
+            // Class methods are always regular functions
+            inferredReturnType = this.inferReturnTypeFromBody(node.body);
+        } else {
+            // No body or expression (shouldn't happen for implemented methods)
+            return;
+        }
+
+        // Check 1: If inferred return type is an error, report it
+        if (isErrorType(inferredReturnType)) {
+            const errorType = inferredReturnType;
+            const message = errorType.message || 'Cannot infer return type';
+
+            // Don't report recursion placeholder errors
+            if (message === '__recursion_placeholder__') {
+                return;
+            }
+
+            // Highlight the method declaration for visibility
+            accept('error', message, {
+                node: node,
+                code: ErrorCode.TC_METHOD_RETURN_TYPE_INFERENCE_FAILED
+            });
+            return;
+        }
+
+        // Check 2: If explicit return type, validate it matches inferred type
+        if (methodHeader.header.returnType) {
+            const declaredReturnType = this.typeProvider.getType(methodHeader.header.returnType);
+
+            const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Method return type mismatch: ${compatResult.message}`
+                    : `Method return type mismatch: Declared '${declaredReturnType.toString()}', but inferred '${inferredReturnType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: methodHeader.header.returnType,
+                    code: ErrorCode.TC_METHOD_RETURN_TYPE_MISMATCH
+                });
+            }
+        }
+    }
+
+    /**
+     * Helper method to infer return type from a block body.
+     * This is extracted from the type provider for reuse in validation.
+     */
+    private inferReturnTypeFromBody(body: ast.BlockStatement): TypeDescription {
+        const returnStatements = this.collectReturnStatements(body);
+
+        if (returnStatements.length === 0) {
+            return factory.createVoidType();
+        }
+
+        // Get types of all return expressions
+        const allReturnTypes = returnStatements
+            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : factory.createVoidType());
+
+        // Filter out recursion placeholders
+        const nonPlaceholderTypes = allReturnTypes.filter(type => {
+            if (isErrorType(type)) {
+                return type.message !== '__recursion_placeholder__';
+            }
+            return true;
+        });
+
+        const returnTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allReturnTypes;
+
+        if (returnTypes.length === 0) {
+            return factory.createVoidType();
+        }
+
+        // Find common type
+        return this.getCommonType(returnTypes);
+    }
+
+    /**
+     * Collect all return statements from a block (only from this function level).
+     */
+    private collectReturnStatements(block: ast.BlockStatement): ast.ReturnStatement[] {
+        const returns: ast.ReturnStatement[] = [];
+
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function - don't collect its returns!
+            if (ast.isFunctionDeclaration(node)) {
+                return;
+            }
+
+            if (ast.isReturnStatement(node)) {
+                returns.push(node);
+            }
+
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+
+        return returns;
+    }
+
+    /**
+     * Get the common type from multiple types.
+     * Simplified version for validation - delegates to type provider's logic.
+     */
+    private getCommonType(types: TypeDescription[]): TypeDescription {
+        if (types.length === 0) {
+            return factory.createVoidType();
+        }
+
+        if (types.length === 1) {
+            return types[0];
+        }
+
+        // Check if all types are identical
+        const firstType = types[0];
+        const allIdentical = types.every(t => t.toString() === firstType.toString());
+
+        if (allIdentical) {
+            return firstType;
+        }
+
+        // For more complex cases, return an error type
+        return factory.createErrorType(
+            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+            undefined,
+            firstType.node
+        );
     }
 
     /**

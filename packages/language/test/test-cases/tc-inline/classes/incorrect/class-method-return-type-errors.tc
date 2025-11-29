@@ -1,0 +1,29 @@
+// Test class method return type validation - error cases
+
+class Calculator {
+    // Error: Cannot infer common type (mixing u32 and string)
+    fn bad(n: u32) = match n {
+        0 => 1u32,
+        _ => "oops"
+    } // @error TCE044
+
+    // Error: Declared type doesn't match inferred type
+    fn wrongType() -> string = 42 // @error TCE045
+
+    // OK: Explicit type matches
+    fn good() -> u32 = 42
+
+    // OK: Can infer type
+    fn inferredOk() = 42u32
+
+    // Error: Block method with mismatched returns
+    fn mixedReturns(flag: bool) {
+        if flag => 1u32
+        else "error" // @error TCE044
+    }
+
+    // Error: Declared type doesn't match body
+    fn wrongBlockType() -> string {
+        return 42; // @error TCE045
+    }
+}

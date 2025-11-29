@@ -1,0 +1,3 @@
+
+/// @Error(TCE080): Variable declaration error: Variable 'x' must have an initializer. All variables must be initialized at declaration
+let x = 

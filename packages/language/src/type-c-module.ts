@@ -60,7 +60,7 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),
         ScopeProvider: (services: TypeCServices) => new TypeCScopeProvider(services),
-        Linker: (services: TypeCServices) => new TypeCLinker(services)
+        Linker: (services: TypeCServices) => new TypeCLinker(services),
     },
     typing: {
         TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services),

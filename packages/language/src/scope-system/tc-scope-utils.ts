@@ -1,18 +1,19 @@
 import { AstNode, ReferenceInfo } from "langium";
 import * as ast from "../generated/ast.js";
 
-type ReferencableSymbol = 
-    ast.VariableDeclaration | 
+type ReferencableSymbol =
+    ast.VariableDeclaration |
     ast.DestructuringElement |
-    ast.FunctionDeclaration | 
-    ast.TypeDeclaration | 
-    ast.NamespaceDecl | 
-    ast.FunctionParameter | 
+    ast.FunctionDeclaration |
+    ast.TypeDeclaration |
+    ast.NamespaceDecl |
+    ast.FunctionParameter |
     ast.GenericType |
     ast.ExternFFIDecl |
     ast.SubModule |
     ast.BuiltinDefinition |
     ast.ClassAttributeDecl |
+    ast.ClassMethod |
     ast.MethodHeader |
     ast.VariantConstructor;  // TODO: Make this context-sensitive later
 
@@ -124,9 +125,9 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
     else if (ast.isClassType(container)) {
         // Add class attributes and methods
         declarations.push(...container?.attributes ?? []);
-        declarations.push(
-            ...container?.methods.map(e => e.method) ?? []
-        );
+        // Push ClassMethod nodes (not MethodHeader) because ClassMethod is in IdentifiableReference
+        // but MethodHeader is not, so Langium's reference type filtering will work correctly
+        declarations.push(...container?.methods ?? []);
     }
     return declarations;
 }

@@ -1,0 +1,48 @@
+// Test basic operator overloading with classes
+
+type Vector = class  {
+    let x: f32
+    let y: f32
+
+    // Binary operators
+    fn + (other: Vector) -> Vector {
+        return new Vector({ x: this.x + other.x, y: this.y + other.y })
+    }
+
+    fn + (scalar: f32) -> Vector {
+        return new Vector({ x: this.x + scalar, y: this.y + scalar })
+    }
+
+    fn - (other: Vector) -> Vector {
+        return new Vector({ x: this.x - other.x, y: this.y - other.y })
+    }
+
+    fn * (scalar: f32) -> Vector {
+        return new Vector({ x: this.x * scalar, y: this.y * scalar })
+    }
+
+    // Unary operators
+    fn - () -> Vector {
+        return new Vector({ x: -this.x, y: -this.y })
+    }
+}
+
+fn main() -> void {
+    let v1 = new Vector({ x: 1.0f, y: 2.0f })
+    let v2 = new Vector({ x: 3.0f, y: 4.0f })
+    
+    /// @Type(v3): Vector
+    let v3 = v1 + v2
+    
+    /// @Type(v4): Vector
+    let v4 = v1 + 5.0f
+    
+    /// @type(v5, Vector) - Binary operator overload: Vector - Vector
+    let v5 = v2 - v1
+    
+    /// @Type(v6): Vector
+    let v6 = v1 * 2.0f
+    
+    /// @Type(v7): Vector
+    let v7 = -v1
+}

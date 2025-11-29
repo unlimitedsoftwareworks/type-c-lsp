@@ -12,5 +12,5 @@ type Drawable = interface Serializable<string>{
 
 fn main(){
     let e: Drawable? = null
-    let z = e.serialize()
+    let z = e!.serialize()
 }

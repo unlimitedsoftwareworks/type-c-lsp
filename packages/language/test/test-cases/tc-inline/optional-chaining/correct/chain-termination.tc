@@ -22,7 +22,7 @@ fn main() {
     // isData: bool
     
     // ✅ Assignment returns assigned value
-    let assigned = (arr?[0] = 5u32)
+    let assigned = (arr![0] = 5u32)
     // assigned: u32 (not u32[]?)
     
     // ✅ Null coalescing unwraps nullable

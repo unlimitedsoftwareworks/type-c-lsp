@@ -30,7 +30,7 @@ fn main() {
     
     // ✅ Optional chain with multiple index accesses
     let matrix: u32[][]? = null
-    let v4 = matrix?[0][1]
+    let v4 = matrix![0][1]
     // v4: u32?
     
     // ✅ Null coalescing after optional chain

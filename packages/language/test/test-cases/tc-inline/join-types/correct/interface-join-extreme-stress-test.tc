@@ -14,10 +14,10 @@ fn test11() {
     let nm: NumericMatrix? = null
 
     /// @Type(matrix): u32[][][]
-    let matrix = nm.getMatrix()
+    let matrix = nm!.getMatrix()
 
     /// @Type(flat): u32
-    let flat = nm.getFlat()
+    let flat = nm!.getFlat()
 }
 
 // Test 12: Generic with complex struct types
@@ -37,10 +37,10 @@ fn test12() {
     let ps: PointStorage? = null
 
     /// @Type(point): Point3D
-    let point = ps.get()
+    let point = ps!.get()
     
     /// @Type(points): Point3D[]
-    let points = ps.getArray()
+    let points = ps!.getArray()
 }
 
 // Test 13: Nested generics with structs inside arrays
@@ -58,10 +58,10 @@ type StringCollection = interface Collection<u8> {
 fn test13() {
     let sc: StringCollection? = null
     /// @Type(wrapped): Wrapper<u8>[]
-    let wrapped = sc.getWrapped()
+    let wrapped = sc!.getWrapped()
     
     /// @Type(unwrapped): u8[]
-    let unwrapped = sc.getUnwrapped()
+    let unwrapped = sc!.getUnwrapped()
 }
 
 // Test 14: Recursive-like structure (LinkedList style)
@@ -80,10 +80,10 @@ fn test14() {
     let list: IntList? = null
 
     /// @Type(head): Node<i32>?
-    let head = list.getHead()
+    let head = list!.getHead()
     
     /// @Type(data): i32[]
-    let data = list.getData()
+    let data = list!.getData()
 }
 
 // Test 15: Triple nesting with generics and structs
@@ -102,10 +102,10 @@ fn test15() {
     let repo: UserRepo? = null
 
     /// @Type(containers): Container<struct { id: u64, name: string }>[]
-    let containers = repo.getAll()
+    let containers = repo!.getAll()
     
     /// @Type(first): struct { id: u64, name: string }
-    let first = repo.getFirst()
+    let first = repo!.getFirst()
 }
 
 // Test 16: Multiple levels with array nesting at different depths
@@ -125,13 +125,13 @@ fn test16() {
     let l3: Level3<bool>? = null
 
     /// @Type(result1): bool[][][]
-    let result1 = l3.level1()
+    let result1 = l3!.level1()
 
     /// @Type(result2): bool[]
-    let result2 = l3.level2()
+    let result2 = l3!.level2()
     
     /// @Type(result3): bool[][][]
-    let result3 = l3.level3()
+    let result3 = l3!.level3()
 }
 
 // Test 17: Join with complex nested types
@@ -149,7 +149,7 @@ fn test17() {
     let io: IOStream? = null
 
     /// @Type(data): struct { buffer: u8[], size: u32 }
-    let data = io.read()
+    let data = io!.read()
 }
 
 // Test 18: Extreme nesting - 4 levels of arrays with structs
@@ -168,10 +168,10 @@ fn test18() {
     let tm: TileMap? = null
 
     /// @Type(deep): Coord[][][][]
-    let deep = tm.getDeep()
+    let deep = tm!.getDeep()
     
     /// @Type(item): Coord
-    let item = tm.getItem()
+    let item = tm!.getItem()
 }
 
 // Test 19: Generic with nullable nested in struct
@@ -190,10 +190,10 @@ fn test19() {
     let prov: F32Provider? = null
 
     /// @Type(maybe): Maybe<f32>
-    let maybe = prov.provide()
+    let maybe = prov!.provide()
     
     /// @Type(maybes): Maybe<f32>[]
-    let maybes = prov.provideArray()
+    let maybes = prov!.provideArray()
 }
 
 // Test 20: The Ultimate Test - Everything combined
@@ -217,11 +217,11 @@ fn test20() {
     let tree: StringTree? = null
     
     /// @Type(root): TreeNode<string>
-    let root = tree.getRoot()
+    let root = tree!.getRoot()
     
     /// @Type(nodes): TreeNode<string>[]
-    let nodes = tree.getAllNodes()
+    let nodes = tree!.getAllNodes()
     
     /// @Type(value): string
-    let value = tree.getValue()
+    let value = tree!.getValue()
 }

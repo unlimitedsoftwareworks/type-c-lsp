@@ -54,6 +54,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: this.checkInterfaceInheritance,
             ClassType: this.checkClassImplementation,
+            MemberAccess: this.checkMemberAccess,
+            DenullExpression: this.checkDenullExpression,
         };
     }
 
@@ -1016,6 +1018,86 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: errorCode
                 });
             }
+        }
+    }
+
+    /**
+     * Check member access for proper usage of optional chaining.
+     *
+     * Rules:
+     * 1. Accessing a nullable type with `.` → error (should use `?.`)
+     *    UNLESS there's `?.` somewhere in the parent chain (nullability propagation)
+     * 2. Accessing a non-nullable type with `?.` → warning
+     *
+     * Examples:
+     * - `e?.serialize()` where `e: Entity?` → ✅ OK
+     * - `e.serialize()` where `e: Entity?` → ❌ Error
+     * - `e?.serialize()` where `e: Entity` → ⚠️ Warning
+     * - `e.serialize()` where `e: Entity` → ✅ OK
+     * - `c?.getData().getValue()` → ✅ OK (nullability propagates from `?.`)
+     */
+    checkMemberAccess = (node: ast.MemberAccess, accept: ValidationAcceptor): void => {
+        const baseType = this.typeProvider.getType(node.expr);
+        const isBaseNullable = isNullableType(baseType);
+        const usesOptionalChaining = node.isNullable;
+        
+        // Check if optional chaining is used anywhere in the parent chain
+        const hasOptionalChainingInChain = this.hasOptionalChaining(node.expr);
+
+        // Rule 1: Accessing nullable type with regular `.`
+        // EXCEPTION: If there's `?.` in the parent chain, nullability propagates so `.` is OK
+        if (isBaseNullable && !usesOptionalChaining && !hasOptionalChainingInChain) {
+            const errorCode = ErrorCode.TC_NULLABLE_ACCESSED_WITHOUT_OPTIONAL_CHAINING;
+            accept('error',
+                `Cannot access member of nullable type '${baseType.toString()}' using '.'. Use optional chaining '?.' instead, or unwrap with '!' if you're certain the value is not null.`,
+                {
+                    node,
+                    property: 'element',
+                    code: errorCode
+                }
+            );
+            return;
+        }
+
+        // Rule 2: Accessing non-nullable type with `?.`
+        if (!isBaseNullable && usesOptionalChaining) {
+            const errorCode = ErrorCode.TC_NON_NULLABLE_ACCESSED_WITH_OPTIONAL_CHAINING;
+            accept('warning',
+                `Unnecessary optional chaining: Type '${baseType.toString()}' is not nullable. Use regular member access '.' instead.`,
+                {
+                    node,
+                    property: 'element',
+                    code: errorCode
+                }
+            );
+        }
+    }
+
+    /**
+     * Check denull expression for unnecessary usage on non-nullable types.
+     *
+     * Rules:
+     * 1. Using `!` on a non-nullable type → warning (unnecessary)
+     * 2. Using `!` on a nullable type → ✅ OK
+     *
+     * Examples:
+     * - `e!` where `e: Entity?` → ✅ OK (unwraps nullable)
+     * - `e!` where `e: Entity` → ⚠️ Warning (unnecessary)
+     */
+    checkDenullExpression = (node: ast.DenullExpression, accept: ValidationAcceptor): void => {
+        const exprType = this.typeProvider.getType(node.expr);
+        
+        // If the expression is not nullable, the denull operator is unnecessary
+        if (!isNullableType(exprType)) {
+            const errorCode = ErrorCode.TC_DENULL_ON_NON_NULLABLE;
+            accept('warning',
+                `Unnecessary denull operator: Type '${exprType.toString()}' is not nullable. The '!' operator has no effect here.`,
+                {
+                    node,
+                    property: 'expr',
+                    code: errorCode
+                }
+            );
         }
     }
 

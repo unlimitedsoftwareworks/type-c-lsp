@@ -1,0 +1,89 @@
+// Test special operator overloading: [], [-], []=, [-]=, (), ++, --
+
+type SmartArray<T> = class {
+    let data: T[]
+
+    // Index access operator: []
+    fn [](index: u32) -> T {
+        return this.data[index]
+    }
+
+    // Index set operator: []=
+    fn []=(index: u32, value: T) -> void {
+        // Would set the value
+    }
+
+    // Reverse index access operator: [-]
+    fn [-](index: u32) -> T {
+        return this.data[this.data.length - index]
+    }
+
+    // Reverse index set operator: [-]=
+    fn [-]=(index: u32, value: T) -> void {
+        // Would set the value from end
+    }
+
+    // Call operator: ()
+    fn ()(index: u32) -> T {
+        return this.data[index]
+    }
+
+    // Call operator overload with different signature
+    fn ()(start: u32, end: u32) -> T[] {
+        return []
+    }
+}
+
+type Counter = class {
+    let value: u32
+
+    // Postfix increment: ++
+    fn ++() -> Counter {
+        return this
+    }
+
+    // Postfix decrement: --
+    fn --() -> Counter {
+        return this
+    }
+
+    // Prefix increment (unary +)
+    fn +() -> Counter {
+        return this
+    }
+
+    // Prefix decrement (unary -)
+    fn -() -> Counter {
+        return this
+    }
+}
+
+fn main() -> void {
+    let arr = new SmartArray<u32>({ data: [1u32, 2u32, 3u32] })
+    
+    /// @Type(elem1): u32
+    let elem1 = arr[0u32]
+    
+    /// @Type(elem2): u32
+    let elem2 = arr[-1u32]
+    
+    /// @Type(elem3): u32
+    let elem3 = arr(0u32)
+    
+    /// @Type(slice): u32[]
+    let slice = arr(0u32, 2u32)
+    
+    let counter = new Counter({ value: 0u32 })
+    
+    /// @Type(c1): Counter
+    let c1 = counter++
+    
+    /// @Type(c2): Counter
+    let c2 = counter--
+    
+    /// @Type(c3): Counter
+    let c3 = +counter
+    
+    /// @Type(c4): Counter
+    let c4 = -counter
+}

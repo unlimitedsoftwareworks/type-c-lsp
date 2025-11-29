@@ -16,7 +16,7 @@ fn main(){
     let e: Entity? = null
     
     /// @Type(zz): string
-    let zz = e.serialize()
+    let zz = e!.serialize()
 }
 
 // Test 2: Generic type propagation through join
@@ -26,7 +26,7 @@ fn test2(){
     let e: EntityGeneric<string>? = null
 
     /// @Type(z): string
-    let z = e.serialize()
+    let z = e!.serialize()
 }
 
 // Test 3: Interface with generic supertype
@@ -38,5 +38,5 @@ fn test3(){
     let e: SerializableString? = null
 
     /// @Type(z): string
-    let z = e.serialize()
+    let z = e!.serialize()
 }

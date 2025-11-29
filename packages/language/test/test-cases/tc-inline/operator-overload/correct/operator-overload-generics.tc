@@ -1,0 +1,51 @@
+// Test operator overloading with generics and overload resolution
+
+type Container<T> = class {
+    let value: T
+
+    // Operator overload with generic return type
+    fn + (other: Container<T>) -> Container<T> {
+        return new Container<T>({ value: this.value })
+    }
+}
+
+type Matrix = class {
+    let data: f32[]
+
+    // Multiple operator overloads - overload resolution should pick the right one
+    fn * (scalar: f32) -> f32 {
+        return this
+    }
+
+    fn * (other: Matrix) -> Matrix {
+        return this
+    }
+
+    fn + (other: Matrix) -> Matrix {
+        return this
+    }
+
+    fn + (scalar: f32) -> f32 {
+        return this
+    }
+}
+
+fn main() -> void {
+    let c1 = new Container<u32>({ value: 10u32 })
+    let c2 = new Container<u32>({ value: 20u32 })
+    
+    /// @Type(c3): Container<u32>
+    let c3 = c1 + c2
+    
+    let m1 = new Matrix({ data: [] })
+    let m2 = new Matrix({ data: [] })
+    
+    /// @Type(m3): f32
+    let m3 = m1 * 2.0f
+    
+    /// @Type(m4): Matrix
+    let m4 = m1 * m2
+    
+    /// @Type(m5): Matrix
+    let m5 = m1 + m2
+}

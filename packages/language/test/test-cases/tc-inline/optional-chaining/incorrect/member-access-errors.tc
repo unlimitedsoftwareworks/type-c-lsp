@@ -1,0 +1,63 @@
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Serializable<T> = interface Drawable {
+    fn serialize() -> T
+    fn serialize(format: T) -> T
+}
+
+// Valid: combining interfaces
+type Entity = Drawable & Serializable<string>
+
+fn main(){
+    let e: Entity? = null
+    
+    /// @Error(TCE070)
+    let zz = e.serialize()
+    
+    /// @Type(zz2): string?
+    let zz2 = e?.serialize()
+    
+    let e2: Entity = e!
+    
+    /// @Warning(TCE071)
+    let zz3 = e2?.serialize()
+    
+    /// @Type(zz4): string
+    let zz4 = e2.serialize()
+    
+    /// @Warning(TCE072)
+    let e3 = e2!
+    
+    /// @Type(e4): Entity
+    let e4 = e!
+}
+
+type Data = interface {
+    fn getValue() -> u32
+}
+
+type Container = interface {
+    fn getData() -> Data
+}
+
+fn testChaining() {
+    let c: Container? = null
+    
+    // Optional chaining propagates nullability - this is OK!
+    /// @Type(value): u32
+    let value = c?.getData().getValue() ?? 0u32
+    
+    // This is also correct: continue using optional chaining
+    /// @Type(value2): u32
+    let value2 = c?.getData()?.getValue() ?? 0u32
+    
+    // Also correct: unwrap first
+    /// @Type(value3): u32
+    let value3 = c!.getData().getValue()
+    
+    // But this is an error - no optional chaining at all
+    /// @Error(TCE070)
+    let value4 = c.getData().getValue()
+}

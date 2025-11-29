@@ -17,10 +17,10 @@ fn test4() {
     let e: Entity<string>? = null
 
     /// @Type(id): string
-    let id = e.getId()
+    let id = e!.getId()
     
     /// @Type(version): u32
-    let version = e.getVersion()
+    let version = e!.getVersion()
 }
 
 // Test 5: Multiple generic parameters with join types
@@ -38,7 +38,7 @@ fn test5() {
     let rw: ReadWrite<i32>? = null
 
     /// @Type(data): i32
-    let data = rw.read()
+    let data = rw!.read()
 }
 
 // Test 6: Nested generic types (Array<T>)
@@ -55,10 +55,10 @@ fn test6() {
     let nc: NamedContainer<u64>? = null
 
     /// @Type(name): string
-    let name = nc.getName()
+    let name = nc!.getName()
     
     /// @Type(items): u64[]
-    let items = nc.getItems()
+    let items = nc!.getItems()
 }
 
 // Test 7: Generic parameter remapping (T -> Array<U>)
@@ -73,9 +73,9 @@ type BatchSource<U> = interface Source<U[]> {
 fn test7() {
     let bs: BatchSource<string>? = null
     /// @Type(count): u32
-    let count = bs.count()
+    let count = bs!.count()
     /// @Type(batch): string[]
-    let batch = bs.fetch()
+    let batch = bs!.fetch()
 }
 
 // Test 8: Triple join with different generics
@@ -97,13 +97,13 @@ fn test8() {
     let abc: ABC? = null
 
     /// @Type(a): u8
-    let a = abc.getA()
+    let a = abc!.getA()
     
     /// @Type(b): u16
-    let b = abc.getB()
+    let b = abc!.getB()
 
     /// @Type(c): u32
-    let c = abc.getC()
+    let c = abc!.getC()
 }
 
 // Test 9: Chained generics (T -> U -> V)
@@ -123,13 +123,13 @@ fn test9() {
     let s3: Stage3<i64>? = null
     
     /// @Type(result1): i64[]
-    let result1 = s3.stage1()
+    let result1 = s3!.stage1()
     
     /// @Type(result2): i64
-    let result2 = s3.stage2()
+    let result2 = s3!.stage2()
     
     /// @Type(result3): i64[]
-    let result3 = s3.stage3()
+    let result3 = s3!.stage3()
 }
 
 // Test 10: Multiple interfaces with same generic parameter
@@ -147,5 +147,5 @@ fn test10() {
     let proc: Processor<f32>? = null
 
     /// @Type(produced): f32
-    let produced = proc.produce()
+    let produced = proc!.produce()
 }

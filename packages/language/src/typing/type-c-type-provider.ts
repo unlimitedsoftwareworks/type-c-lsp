@@ -20,7 +20,6 @@ import {
     FunctionTypeDescription,
     GenericTypeDescription,
     InterfaceTypeDescription,
-    ReferenceTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
@@ -29,7 +28,6 @@ import {
     isFFIType,
     isFunctionType,
     isGenericType,
-    isInterfaceType,
     isJoinType,
     isMetaClassType,
     isMetaEnumType,
@@ -49,6 +47,7 @@ import {
     isVariantType,
     MethodType,
     PrototypeMethodType,
+    ReferenceTypeDescription,
     StructFieldType,
     StructTypeDescription,
     TypeDescription,
@@ -1603,6 +1602,9 @@ export class TypeCTypeProvider {
         if (ast.isFunctionCall(node)) return this.inferFunctionCall(node);
         if (ast.isIndexAccess(node)) return this.inferIndexAccess(node);
         if (ast.isIndexSet(node)) return this.inferIndexSet(node);
+        if (ast.isReverseIndexAccess(node)) return this.inferReverseIndexAccess(node);
+        if (ast.isReverseIndexSet(node)) return this.inferReverseIndexSet(node);
+        if (ast.isPostfixOp(node)) return this.inferPostfixOp(node);
 
         // Construction
         if (ast.isArrayConstructionExpression(node)) return this.inferArrayConstruction(node);
@@ -1770,6 +1772,13 @@ export class TypeCTypeProvider {
             return left;
         }
 
+        // Check for operator overloads on classes/interfaces
+        // Only classes and interfaces can have operator overloads
+        const operatorOverload = this.resolveOperatorOverload(left, node.op, [right], node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
         // Arithmetic operators - use left operand's type (simplified)
         // In a full implementation, this would have proper type promotion rules
         return left;
@@ -1782,8 +1791,148 @@ export class TypeCTypeProvider {
             return factory.createBoolType(node);
         }
 
+        // Check for operator overloads on classes/interfaces
+        const operatorOverload = this.resolveOperatorOverload(exprType, node.op, [], node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
         // Other unary operators preserve the type
         return exprType;
+    }
+
+    /**
+     * Resolves operator overloads for binary and unary expressions.
+     *
+     * **How it works:**
+     * 1. Check if the LHS (left-hand side) type is a class or interface
+     * 2. Find all methods with the operator name (e.g., '+', '-', '[]')
+     * 3. Use the same resolution mechanism as function calls to find the best match
+     * 4. Return the return type of the selected method
+     *
+     * **Example:**
+     * ```
+     * class Vector {
+     *     fn +(other: Vector) -> Vector { ... }
+     *     fn +(scalar: f32) -> Vector { ... }
+     * }
+     *
+     * let v1: Vector = ...
+     * let v2: Vector = ...
+     * v1 + v2  // Resolves to Vector.+(Vector) -> Vector
+     * v1 + 2.0 // Resolves to Vector.+(f32) -> Vector
+     * ```
+     *
+     * @param lhsType Type of the left-hand side operand (or the only operand for unary)
+     * @param operator The operator string (e.g., '+', '-', '!', '[]')
+     * @param rhsTypes Array of right-hand side operand types (empty for unary operators)
+     * @param node The expression node (for error reporting)
+     * @returns The return type if an overload is found, undefined otherwise
+     */
+    private resolveOperatorOverload(
+        lhsType: TypeDescription,
+        operator: string,
+        rhsTypes: TypeDescription[],
+        node: AstNode
+    ): TypeDescription | undefined {
+        // Resolve reference types first
+        let resolvedLhs = isReferenceType(lhsType) ? this.resolveReference(lhsType) : lhsType;
+        
+        // Unwrap nullable types
+        if (isNullableType(resolvedLhs)) {
+            resolvedLhs = resolvedLhs.baseType;
+        }
+
+        // Keep track of generic substitutions if we have a reference type with concrete args
+        let genericSubstitutions: Map<string, TypeDescription> | undefined;
+        if (isReferenceType(lhsType)) {
+            genericSubstitutions = this.buildGenericSubstitutions(lhsType);
+        }
+
+        // Check if it's a class or interface type (only these can have operator overloads)
+        const classType = isClassType(resolvedLhs) ? resolvedLhs : undefined;
+        const interfaceType = this.typeUtils.asInterfaceType(resolvedLhs);
+
+        if (!classType && !interfaceType) {
+            // Not a class or interface, no operator overload possible
+            return undefined;
+        }
+
+        // Collect all methods with the operator name
+        const methods: MethodType[] = [];
+        
+        if (classType) {
+            for (const method of classType.methods) {
+                if (method.names.includes(operator)) {
+                    methods.push(method);
+                }
+            }
+        }
+        
+        if (interfaceType) {
+            for (const method of interfaceType.methods) {
+                if (method.names.includes(operator)) {
+                    methods.push(method);
+                }
+            }
+        }
+
+        if (methods.length === 0) {
+            // No operator overload found
+            return undefined;
+        }
+
+        // Use the same resolution logic as function calls
+        // Filter by argument count first
+        const argBasedCandidates = methods.filter(method => method.parameters.length === rhsTypes.length);
+
+        if (argBasedCandidates.length === 0) {
+            return undefined;
+        }
+
+        if (argBasedCandidates.length === 1) {
+            const selectedMethod = argBasedCandidates[0];
+            let returnType = selectedMethod.returnType;
+
+            // Apply generic substitutions if we have them
+            if (genericSubstitutions && genericSubstitutions.size > 0) {
+                returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
+            }
+
+            return returnType;
+        }
+
+        // Multiple candidates - find best match
+        // First try exact match
+        for (const method of argBasedCandidates) {
+            if (method.parameters.every((param, index) => this.typeUtils.areTypesEqual(rhsTypes[index], param.type).success)) {
+                let returnType = method.returnType;
+                
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
+                }
+                
+                return returnType;
+            }
+        }
+
+        // Then try assignable match
+        for (const method of argBasedCandidates) {
+            if (method.parameters.every((param, index) => this.typeUtils.isAssignable(rhsTypes[index], param.type).success)) {
+                let returnType = method.returnType;
+                
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
+                }
+                
+                return returnType;
+            }
+        }
+
+        // No matching overload found
+        return undefined;
     }
 
     /**
@@ -2123,31 +2272,26 @@ export class TypeCTypeProvider {
             return isOptionalCall ? factory.createNullableType(fnType, node) : fnType;
         }
 
-        // Handle callable classes (classes with () operator overload)
-        if (isClassType(fnType)) {
-            // Look for the () operator method
-            const callOperator = fnType.methods.find(m => m.names.includes('()'));
-            if (callOperator) {
-                // TODO: Validate argument types match parameters
-                return isOptionalCall ? factory.createNullableType(callOperator.returnType, node) : callOperator.returnType;
+        // Handle callable classes/interfaces (with () operator overload)
+        // Only check this if fnType is a class or interface, not if it's already a function
+        const baseClassType = isClassType(fnType) ? fnType : undefined;
+        const baseInterfaceType = this.typeUtils.asInterfaceType(fnType);
+        
+        if (baseClassType || baseInterfaceType) {
+            // Use operator overload resolution for () operator
+            // This handles multiple overloads correctly
+            const args = node.args || [];
+            const argTypes = args.map(arg => this.inferExpression(arg));
+            
+            const operatorOverload = this.resolveOperatorOverload(fnType, '()', argTypes, node);
+            if (operatorOverload) {
+                return isOptionalCall ? factory.createNullableType(operatorOverload, node) : operatorOverload;
             }
+            
             // If no call operator found, this is an error
+            const typeName = baseClassType ? 'Class' : 'Interface';
             return factory.createErrorType(
-                `Class type does not have a call operator '()'. Use 'new' for constructors.`,
-                undefined,
-                node
-            );
-        }
-
-        // Handle callable interfaces (interfaces with () operator overload)
-        if (isInterfaceType(fnType)) {
-            const callOperator = fnType.methods.find(m => m.names.includes('()'));
-            if (callOperator) {
-                // TODO: Validate argument types match parameters
-                return isOptionalCall ? factory.createNullableType(callOperator.returnType, node) : callOperator.returnType;
-            }
-            return factory.createErrorType(
-                `Interface type does not have a call operator '()'`,
+                `${typeName} type does not have a call operator '()'. ${baseClassType ? "Use 'new' for constructors." : ''}`,
                 undefined,
                 node
             );
@@ -2288,20 +2432,89 @@ export class TypeCTypeProvider {
             return baseType.elementType;
         }
 
-        if (isClassType(baseType)) {
-            // TODO: find the method with the name '[]'
-            const method = baseType.methods.find(m => m.names.includes('[]'));
-            if (method) {
-                return method.returnType;
-            }
-            return factory.createErrorType('Class does not implement index access operator `[]`', undefined, node);
+        // Check for operator overload on classes/interfaces
+        const indexTypes = node.indexes?.map(idx => this.inferExpression(idx)) ?? [];
+        const operatorOverload = this.resolveOperatorOverload(baseType, '[]', indexTypes, node);
+        if (operatorOverload) {
+            return operatorOverload;
         }
 
-        return factory.createErrorType('Invalid index access on type ' + baseType.toString(), undefined, node);
+        return factory.createErrorType('Type does not implement index access operator `[]`', undefined, node);
     }
 
     private inferIndexSet(node: ast.IndexSet): TypeDescription {
-        return this.inferExpression(node.value);
+        let baseType = this.inferExpression(node.expr);
+        if(isReferenceType(baseType)) {
+            baseType = this.resolveReference(baseType);
+        }
+
+        // Check for operator overload on classes/interfaces
+        // []=  operator takes index types + value type as parameters
+        const indexTypes = node.indexes?.map(idx => this.inferExpression(idx)) ?? [];
+        const valueType = this.inferExpression(node.value);
+        const allArgTypes = [...indexTypes, valueType];
+        
+        const operatorOverload = this.resolveOperatorOverload(baseType, '[]=', allArgTypes, node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
+        // Default: return the value type
+        return valueType;
+    }
+
+    private inferReverseIndexAccess(node: ast.ReverseIndexAccess): TypeDescription {
+        let baseType = this.inferExpression(node.expr);
+        if(isReferenceType(baseType)) {
+            baseType = this.resolveReference(baseType);
+        }
+
+        if (isArrayType(baseType)) {
+            return baseType.elementType;
+        }
+
+        // Check for operator overload on classes/interfaces
+        const indexType = this.inferExpression(node.index);
+        const operatorOverload = this.resolveOperatorOverload(baseType, '[-]', [indexType], node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
+        return factory.createErrorType('Type does not implement reverse index access operator `[-]`', undefined, node);
+    }
+
+    private inferReverseIndexSet(node: ast.ReverseIndexSet): TypeDescription {
+        let baseType = this.inferExpression(node.expr);
+        if(isReferenceType(baseType)) {
+            baseType = this.resolveReference(baseType);
+        }
+
+        // Check for operator overload on classes/interfaces
+        // [-]= operator takes index type + value type as parameters
+        const indexType = this.inferExpression(node.index);
+        const valueType = this.inferExpression(node.value);
+        
+        const operatorOverload = this.resolveOperatorOverload(baseType, '[-]=', [indexType, valueType], node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
+        // Default: return the value type
+        return valueType;
+    }
+
+    private inferPostfixOp(node: ast.PostfixOp): TypeDescription {
+        const exprType = this.inferExpression(node.expr);
+
+        // Check for operator overload on classes/interfaces
+        // ++ and -- are unary operators (no parameters)
+        const operatorOverload = this.resolveOperatorOverload(exprType, node.op, [], node);
+        if (operatorOverload) {
+            return operatorOverload;
+        }
+
+        // Default: preserve the type
+        return exprType;
     }
 
     /**

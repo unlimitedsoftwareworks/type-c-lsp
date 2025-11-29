@@ -202,6 +202,16 @@ export class TypeCTypeProvider {
             return this.getType(parent.annotation);
         }
 
+        // Expression-body function: fn foo() -> T = expr
+        if (ast.isFunctionDeclaration(parent) && parent.expr === node && parent.header?.returnType) {
+            return this.getType(parent.header.returnType);
+        }
+
+        // Expression-body method: fn foo() -> T = expr (in class)
+        if (ast.isClassMethod(parent) && parent.expr === node && parent.method?.header?.returnType) {
+            return this.getType(parent.method.header.returnType);
+        }
+
         // Function call argument
         // foo(expr)
         if (ast.isFunctionCall(parent)) {

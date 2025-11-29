@@ -8,5 +8,6 @@ fn main() {
     let v: Vec? = null
     v?.set(null) 
 
-    let z = v?.get().data.f()
+    /// @Error(TCE070): Cannot access member of nullable type
+    let z = v.get().data.f()
 }

@@ -8,6 +8,4 @@ type Class1 = class {
 }
 
 /// @Error(TCE082): Circular interface inheritance detected
-type Interface2 = interface Interface1 {
-
-}
+type Interface2 = interface Interface1 {}

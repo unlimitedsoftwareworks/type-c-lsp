@@ -9,6 +9,7 @@ import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
 import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
 import { FunctionOverloadValidator } from './validations/function-overload-validations.js';
 import { TypeCVariableUsageValidator } from './validations/variable-usage-validation.js';
+import { TypeCVariableInitializerValidator } from './validations/variable-initializer-validation.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
@@ -30,7 +31,8 @@ export type TypeCAddedServices = {
     validation: {
         TypeSystemValidator: TypeCTypeSystemValidator,
         FunctionOverloadValidator: FunctionOverloadValidator,
-        VariableUsageValidator: TypeCVariableUsageValidator
+        VariableUsageValidator: TypeCVariableUsageValidator,
+        VariableInitializerValidator: TypeCVariableInitializerValidator
     },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
@@ -52,7 +54,8 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     validation: {
         TypeSystemValidator: (services: TypeCServices) => new TypeCTypeSystemValidator(services),
         FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services),
-        VariableUsageValidator: () => new TypeCVariableUsageValidator()
+        VariableUsageValidator: () => new TypeCVariableUsageValidator(),
+        VariableInitializerValidator: () => new TypeCVariableInitializerValidator()
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),

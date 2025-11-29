@@ -9,7 +9,8 @@ export function registerValidationChecks(services: TypeCServices) {
     const validations: TypeCBaseValidation[] = [
         services.validation.TypeSystemValidator,
         services.validation.FunctionOverloadValidator,
-        services.validation.VariableUsageValidator
+        services.validation.VariableUsageValidator,
+        services.validation.VariableInitializerValidator
     ]
     for (const validation of validations) {
         registry.register(validation.getChecks(), validation);

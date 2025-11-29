@@ -140,7 +140,7 @@ interface VariableDeclaration {
     isConst: boolean;
     name: string;
     annotation?: DataType;
-    initializer: Expression;
+    initializer?: Expression;
 }
 VariableDecl returns VariableDeclaration:
     VariableDeclSingle |
@@ -150,17 +150,34 @@ VariableDecl returns VariableDeclaration:
         infer VariableDefinition
     };
 
+/**
+ * Chevrotain Error recovery is .. well.. bad.
+ * If we have 
+ ```tc
+fn main() {
+    let x: u32 = 1
+    let y: f32 = 1.0f
+
+    let z = 
+
+} 
+
+It breaks the AST and the `let z = ` is treated as a global variable and cannot access
+the local variables .. hence we make the initializers optional but make a validation for them..
+
+ ```
+ */
 VariableDeclSingle:
-    (isConst?='const')? name=ID ((':' annotation=DataType<false>) | (isNullable?='?'))? '=' initializer=Expression;
+    (isConst?='const')? name=ID ((':' annotation=DataType<false>) | (isNullable?='?'))? '=' (initializer=Expression)?;
 
 VariableDeclArrayDestructuring:
-    (isConst?='const')? '[' elements+=DestructuringElement<true, false> (',' elements+=DestructuringElement<true, false>)* ']' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '[' elements+=DestructuringElement<true, false> (',' elements+=DestructuringElement<true, false>)* ']' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
 VariableDeclStructDestructuring:
-    (isConst?='const')? '{' elements+=DestructuringElement<true, true> (',' elements+=DestructuringElement<true, true>)* '}' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '{' elements+=DestructuringElement<true, true> (',' elements+=DestructuringElement<true, true>)* '}' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
 VariableDeclTupleDestructuring:
-    (isConst?='const')? '(' elements+=DestructuringElement<false, false> (',' elements+=DestructuringElement<false, false>)* ')' (':' annotation=DataType<false>)? '=' initializer=Expression;
+    (isConst?='const')? '(' elements+=DestructuringElement<false, false> (',' elements+=DestructuringElement<false, false>)* ')' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
 DestructuringElement<allowDestructuring, allowNameOverride>:
     (<allowDestructuring>(isSpread?='...')?) (<allowNameOverride> (originalName=ID ':')?) name=ID isNullable?='?'? |
@@ -377,7 +394,7 @@ StringLiteral:
  */
 
 Statement:
-    ExpressionStatement ';'? | // TODO: remove this ; once we figure out the issue of consecutive expresison statements
+    (ExpressionStatement| // TODO: remove this ; once we figure out the issue of consecutive expresison statements
     BlockStatement |
     BreakStatement |
     ContinueStatement |
@@ -389,7 +406,7 @@ Statement:
     MatchStatement |
     ReturnStatement |
     VariableDeclarationStatement<false> | 
-    WhileStatement;
+    WhileStatement) ';'?;
 
 
 BlockStatement:

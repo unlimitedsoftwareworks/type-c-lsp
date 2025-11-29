@@ -1,0 +1,12 @@
+type Interface1 = interface {
+    fn print() -> void
+}
+
+type Class1 = class {
+
+}
+
+/// @Error(TCE081): Interface can only extend other interfaces
+type Interface2 = interface Class1 {
+
+}

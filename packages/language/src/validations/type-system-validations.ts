@@ -1076,10 +1076,13 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
 
     /**
-     * Check interface inheritance for method conflicts.
+     * Check interface inheritance for method conflicts and circular references.
      *
-     * When an interface extends another interface, it cannot override methods with
-     * different return types (same parameters, different return type).
+     * Validates:
+     * 1. Interfaces can only extend other interfaces
+     * 2. No circular inheritance (A extends B, B extends A)
+     * 3. When an interface extends another interface, it cannot override methods with
+     *    different return types (same parameters, different return type).
      */
     checkInterfaceInheritance = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
         if (!node.superTypes || node.superTypes.length === 0) {
@@ -1090,6 +1093,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const interfaceType = this.typeProvider.getType(node);
         if (!isInterfaceType(interfaceType)) {
             return;
+        }
+
+        // Check for circular inheritance before processing methods
+        const visited = new Set<ast.InterfaceType>();
+        const path: string[] = [];
+        const circularRef = this.detectCircularInheritance(node, visited, path);
+        if (circularRef) {
+            const errorCode = ErrorCode.TC_INTERFACE_CIRCULAR_INHERITANCE;
+            accept('error',
+                `Circular interface inheritance detected: ${circularRef}`,
+                {
+                    node: node,
+                    code: errorCode
+                }
+            );
+            return; // Don't process further if there's a circular reference
         }
 
         // Collect all methods from parent interfaces
@@ -1107,13 +1126,24 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 ? this.typeProvider.resolveReference(parentType)
                 : parentType;
 
-            if (!isInterfaceType(resolvedParent)) {
+            // Use asInterfaceType to handle both direct interfaces and join types that resolve to interfaces
+            const parentInterface = this.typeUtils.asInterfaceType(resolvedParent);
+            
+            if (!parentInterface) {
+                const errorCode = ErrorCode.TC_INTERFACE_INVALID_SUPERTYPE;
+                accept('error',
+                    `Interface can only extend other interfaces, but '${resolvedParent.toString()}' is not an interface`,
+                    {
+                        node: extendedRef,
+                        code: errorCode
+                    }
+                );
                 continue;
             }
 
-            const parentName = resolvedParent.toString();
+            const parentName = parentInterface.toString();
 
-            for (const method of resolvedParent.methods) {
+            for (const method of parentInterface.methods) {
                 for (const name of method.names) {
                     const paramTypes = method.parameters.map(p => p.type.toString());
                     const signatureKey = `${name}(${paramTypes.join(',')})`;
@@ -1148,6 +1178,69 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 }
             }
         }
+    }
+
+    /**
+     * Detects circular inheritance in interfaces.
+     * Returns the cycle path as a string if found, undefined otherwise.
+     *
+     * @param node Current interface node being checked
+     * @param visited Set of interface nodes already visited in this path
+     * @param path Array of interface names forming the current path
+     * @returns Cycle description string if circular reference found, undefined otherwise
+     */
+    private detectCircularInheritance(
+        node: ast.InterfaceType,
+        visited: Set<ast.InterfaceType>,
+        path: string[]
+    ): string | undefined {
+        // If we've already visited this node in the current path, we found a cycle
+        if (visited.has(node)) {
+            // Find where the cycle starts
+            const nodeType = this.typeProvider.getType(node);
+            const nodeName = isInterfaceType(nodeType) ? nodeType.toString() : 'unknown';
+            const cycleStart = path.indexOf(nodeName);
+            if (cycleStart >= 0) {
+                const cycle = [...path.slice(cycleStart), nodeName];
+                return cycle.join(' → ');
+            }
+            return path.join(' → ') + ' → ' + nodeName;
+        }
+
+        // Add current node to visited set and path
+        visited.add(node);
+        const nodeType = this.typeProvider.getType(node);
+        const nodeName = isInterfaceType(nodeType) ? nodeType.toString() : 'unknown';
+        path.push(nodeName);
+
+        // Check all supertypes
+        if (node.superTypes) {
+            for (const superTypeRef of node.superTypes) {
+                const superType = this.typeProvider.getType(superTypeRef);
+                
+                // Resolve reference to get the actual interface
+                const resolvedSuper = isReferenceType(superType)
+                    ? this.typeProvider.resolveReference(superType)
+                    : superType;
+
+                // Use asInterfaceType to handle join types
+                const superInterface = this.typeUtils.asInterfaceType(resolvedSuper);
+                
+                if (superInterface && superInterface.node && ast.isInterfaceType(superInterface.node)) {
+                    // Recursively check the supertype
+                    const result = this.detectCircularInheritance(
+                        superInterface.node,
+                        new Set(visited), // Create a copy to allow different branches
+                        [...path] // Create a copy of the path
+                    );
+                    if (result) {
+                        return result;
+                    }
+                }
+            }
+        }
+
+        return undefined;
     }
 
     /**

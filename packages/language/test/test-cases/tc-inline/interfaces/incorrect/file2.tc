@@ -1,0 +1,13 @@
+/// @Error(TCE082): Circular interface inheritance detected
+type Interface1 = interface Interface2 {
+    fn print() -> void
+}
+
+type Class1 = class {
+
+}
+
+/// @Error(TCE082): Circular interface inheritance detected
+type Interface2 = interface Interface1 {
+
+}

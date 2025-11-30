@@ -8,5 +8,5 @@ fn main() {
     let i: string? = null
     let j: string[] = ["hello", "world"]
     let x = {a: 1, b: "hello"}
-    let d = (1 as i32)
+    let d2 = (1 as i32)
 }

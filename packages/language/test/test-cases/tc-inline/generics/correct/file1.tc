@@ -13,9 +13,9 @@ fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
 fn main() {
     let c: u32[] = [1u32,2u32,3u32]
 
-    /// @Type(d): i32[]
-    let d = map(c, fn(a: u32) -> i32 = overloadedFn(a))
+    /// @Type(d1): i32[]
+    let d1 = map(c, fn(a: u32) -> i32 = overloadedFn(a))
 
     /// @Type(overloadedFn): fn(a: u32) -> i32
-    let d = map(c, fn(a: u32) -> i32 = overloadedFn(a))
+    let d2 = map(c, fn(a: u32) -> i32 = overloadedFn(a))
 }

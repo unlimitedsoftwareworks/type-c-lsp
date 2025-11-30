@@ -1,0 +1,61 @@
+// Test valid function parameters - no duplicates
+
+/// @NoError
+fn add(a: u32, b: u32) -> u32 = a + b
+
+/// @NoError
+fn multiply(x: f64, y: f64, z: f64) -> f64 = x * y * z
+
+/// @NoError
+fn greet(name: string, greeting: string) -> string = greeting + name
+
+// Class methods with valid parameters
+type Calculator = class {
+    /// @NoError
+    fn compute(x: u32, y: u32, operation: string) -> u32 = x + y
+    
+    /// @NoError
+    static fn process(input: string, output: string) -> bool = true
+}
+
+// Interface methods with valid parameters
+type Processor = interface {
+    /// @NoError
+    fn transform(source: string, destination: string) -> string
+    
+    /// @NoError
+    fn validate(data: string, schema: string, strict: bool) -> bool
+}
+
+// Lambda expressions with valid parameters
+/// @NoError
+let lambda1 = fn(a: u32, b: u32) -> u32 = a + b
+
+/// @NoError
+let lambda2 = fn(x: string, y: string, z: bool) -> string {
+    return x + y
+}
+
+// Coroutines with valid parameters
+/// @NoError
+cfn generateNumbers(start: u32, end: u32, step: u32) {
+    yield! start
+}
+
+// Function types with valid parameters
+/// @NoError
+type Callback1 = fn(x: u32, y: u32) -> void
+
+/// @NoError
+type Callback2 = fn(a: string, b: string, c: bool) -> string
+
+// Function types with unnamed parameters (always valid)
+/// @NoError
+type Callback3 = fn(u32, u32) -> void
+
+/// @NoError
+type Callback4 = fn(u32, string, bool) -> void
+
+// Function types with mix of named and unnamed parameters
+/// @NoError
+type Callback5 = fn(x: u32, u32, y: string) -> void

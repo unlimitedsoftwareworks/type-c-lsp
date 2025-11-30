@@ -1,0 +1,75 @@
+// Test valid variable declarations - no duplicates in same scope
+
+// Different variables in same statement
+/// @NoError
+let x = 1, y = 2, z = 3
+
+// Different variables in different statements
+/// @NoError
+let a = 1
+
+/// @NoError
+let b = 2
+
+/// @NoError
+let c = 3
+
+// Variable shadowing in nested scopes (allowed)
+/// @NoError
+let outer = 1
+
+fn testShadowing() {
+    /// @NoError
+    let outer = 2  // OK - different scope, shadowing allowed
+}
+
+// Variables in function scope
+/// @NoError
+fn testFunction() {
+    let fnVar = 1
+    let fnVar2 = 2
+}
+
+// Destructuring without duplicates
+/// @NoError
+let [first, second, third] = [1, 2, 3]
+
+/// @NoError
+let {name, age, city} = {name: "John", age: 30, city: "NYC"}
+
+fn f() = (1, 2)
+
+/// @NoError
+let (tuple1, tuple2) = f()
+
+// Namespace scope
+/// @NoError
+namespace TestNamespace {
+    let nsVar1 = 1
+    let nsVar2 = 2
+}
+
+// Variable and function with different names
+/// @NoError
+let varName = 1
+
+/// @NoError
+fn funcName() -> u32 = 42
+
+// Loop scopes (each iteration is separate)
+/// @NoError
+fn testLoops() {
+    for let i = 0; i < 10; i = i + 1 {
+        let loopVar = i
+    }
+    
+    foreach item in [1, 2, 3] {
+        let itemCopy = 1
+    }
+}
+
+
+fn aha() -> u32 = 1
+
+/// @No
+fn aha(x: u32) -> u32 = 1

@@ -1,0 +1,84 @@
+// Test duplicate function parameters - should report errors
+
+/// @Error(TCE083): Duplicate parameter 'a'
+fn badAdd(a: u32, a: u32) -> u32 = a + a
+
+/// @Error(TCE083): Duplicate parameter 'x'
+fn badMultiply(x: f64, y: f64, x: f64) -> f64 = x * y
+
+/// @Error(TCE083): Duplicate parameter 'name'
+fn badGreet(name: string, name: string, name: string) -> string = name
+
+// Multiple duplicates in one function
+/// @Error(TCE083): Duplicate parameter 'a'
+fn multipleDuplicates(a: u32, b: u32, a: u32, 
+/// @Error(TCE083): Duplicate parameter 'b'
+    b: u32) -> u32 = a + b
+
+// Class methods with duplicate parameters
+type BadCalculator = class {
+    /// @Error(TCE083): Duplicate parameter 'x'
+    fn compute(x: u32, x: u32) -> u32 = x + x
+    
+    /// @Error(TCE083): Duplicate parameter 'input'
+    static fn process(input: string, input: string) -> bool = true
+}
+
+// Interface methods with duplicate parameters
+type BadProcessor = interface {
+    /// @Error(TCE083): Duplicate parameter 'source'
+    fn transform(source: string, source: string) -> string
+    
+    /// @Error(TCE083): Duplicate parameter 'data'
+    fn validate(data: string, data: string, 
+        /// @Error(TCE083): Duplicate parameter 'data'
+        data: string) -> bool
+}
+
+// Lambda expressions with duplicate parameters
+/// @Error(TCE083): Duplicate parameter 'a'
+let badLambda1 = fn(a: u32, a: u32) -> u32 = a + a
+
+/// @Error(TCE083): Duplicate parameter 'x'
+let badLambda2 = fn(x: string, y: string, x: string) -> string {
+    return x + y
+}
+
+// Coroutines with duplicate parameters
+/// @Error(TCE083): Duplicate parameter 'start'
+cfn badGenerateNumbers(start: u32, start: u32) {
+    yield start
+}
+
+// Mix of unique and duplicate parameters
+/// @Error(TCE083): Duplicate parameter 'z'
+fn mixedParams(a: u32, b: u32, z: u32, c: u32, z: u32) -> u32 = a + b + c + z
+
+// Function types with duplicate named parameters (using FnTypeHeader)
+/// @Error(TCE083): Duplicate parameter 'x'
+type BadCallback1 = fn(x: u32, x: u32) -> void
+
+/// @Error(TCE083): Duplicate parameter 'a'
+type BadCallback2 = fn(a: string, b: string, a: string) -> string
+
+// Function types with multiple duplicates (using FnTypeHeader)
+/// @Error(TCE083): Duplicate parameter 'x'
+type BadCallback3 = fn(x: u32, y: string, x: u32, 
+/// @Error(TCE083): Duplicate parameter 'y'
+    y: string) -> void
+
+// Mix of named and unnamed parameters with duplicates (using FnTypeHeader)
+/// @Error(TCE083): Duplicate parameter 'data'
+type BadCallback4 = fn(data: u32, u32, data: string) -> void
+
+/// @Error(TCE083): Duplicate parameter 'data'
+type BadCallback5 = fn(data: u32, y: u32, data: string) -> void
+
+fn aha() -> u32 = 1
+fn aha(x: u32) -> u32 = 1
+
+/// @Error(TCE084): Duplicate declaration 'aha'
+let aha = 1
+
+// Scopes to the function call
+let z = aha()

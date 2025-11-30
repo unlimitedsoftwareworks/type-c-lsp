@@ -1,0 +1,109 @@
+// Test duplicate variable declarations - should report errors
+
+// Duplicate in same statement
+/// @Error(TCE084): Duplicate declaration 'x'
+let x = 1, x = 2
+
+
+let a = 1, 
+    b = 2, 
+    /// @Error(TCE084): Duplicate variable 'a'
+    a = 3, 
+    c = 4, 
+    /// @Error(TCE084): Duplicate variable 'a'
+    a = 5
+
+// Duplicate in same scope (different statements)
+/// @NoError
+let var1 = 1
+
+/// @Error(TCE084): Duplicate variable 'var1'
+let var1 = 2
+
+// Multiple duplicates in same scope
+/// @NoError
+let dup1 = 1
+
+/// @NoError
+let dup2 = 2
+
+/// @Error(TCE084): Duplicate variable 'dup1'
+let dup1 = 3
+
+/// @Error(TCE084): Duplicate variable 'dup2'
+let dup2 = 4
+
+// Duplicates in function scope
+fn testFunctionDuplicates() {
+    /// @NoError
+    let fnVar = 1
+    
+    /// @Error(TCE084): Duplicate variable 'fnVar'
+    let fnVar = 2
+
+    // Duplicates in block scope
+    {
+        /// @NoError
+        let blockVar = 1
+        
+        /// @Error(TCE084): Duplicate variable 'blockVar'
+        let blockVar = 2
+    }
+}
+
+// Duplicate in destructuring within same statement
+/// @Error(TCE084): Duplicate variable 'dup'
+let [dup, dup] = [1, 2]
+
+/// @Error(TCE084): Duplicate variable 'name'
+let {name, name} = {name: "John", age: 30}
+
+fn f() = (1, 2)
+
+/// @Error(TCE084): Duplicate variable 't'
+let (t, t) = f()
+
+// Variable declaration with function name in same scope
+/// @Error(TCE084): Duplicate declaration 'conflictName
+let conflictName = 1
+
+// Function OK because error is thrown in variable
+fn conflictName() -> u32 = 42
+ 
+// Function conflicts with variable name
+/// @NoError
+fn anotherConflict() -> u32 = 42
+
+/// @Error(TCE084): Duplicate declaration 'anotherConflict'
+let anotherConflict = 1
+
+// Duplicates in namespace
+namespace DuplicateNamespace {
+    /// @NoError
+    let nsVar = 1
+    
+    /// @Error(TCE084): Duplicate variable 'nsVar'
+    let nsVar = 2
+}
+
+// Global scope duplicates
+/// @NoError
+let globalVar = 1
+
+/// @Error(TCE084): Duplicate variable 'globalVar'
+let globalVar = 2
+
+// Mix of destructuring and simple declarations
+/// @NoError
+let simpleVar = 1
+
+/// @Error(TCE084): Duplicate variable 'simpleVar'
+let [simpleVar, other] = [2, 3]
+
+fn x() {
+    let a = 1 
+    /// @Error(TCE084): Duplicate variable
+    let a = 2
+    /// @Error(TCE084): Duplicate variable
+    let a = 3
+}

@@ -617,9 +617,41 @@ export class TypeCTypeUtils {
             return failure(`Class types differ: ${from.toString()} vs ${to.toString()}`);
         }
         
+        // Handle class to reference type (which may resolve to an interface)
+        // This is critical for: fn serialize() = this, where 'this' is class type
+        // and interface expects 'Serializable' (a ReferenceType)
+        if (isClassType(from) && isReferenceType(to)) {
+            // Check if we're already checking this pair (circular reference detection)
+            if (this.isPendingCheck(from, to)) {
+                return success(); // Assume compatibility to break the cycle
+            }
+            
+            // Add to pending checks before recursing
+            this.addPendingCheck(from, to);
+            
+            try {
+                const resolvedTo = this.typeProvider().resolveReference(to);
+                // Recursively check if class is assignable to the resolved type
+                return this.isAssignable(from, resolvedTo);
+            } finally {
+                this.removePendingCheck(from, to);
+            }
+        }
+        
         // Handle class to interface (including join types that resolve to interfaces)
         const toInterface = this.asInterfaceType(to);
         if (isClassType(from) && toInterface) {
+            // CRITICAL: Check if this class is already being checked against ANY type
+            // This prevents infinite recursion when methods return 'this' and interface expects the interface type
+            // Example: fn serialize() -> Serializable = this
+            const isClassAlreadyBeingChecked = this.pendingChecks.some(pair =>
+                isClassType(pair.from) && pair.from.node === from.node
+            );
+            
+            if (isClassAlreadyBeingChecked) {
+                return success(); // Assume compatibility to break the cycle
+            }
+            
             // Add to pending checks before recursing to handle circular references
             this.addPendingCheck(from, to);
             const result = this.isClassAssignableToInterface(from, toInterface);

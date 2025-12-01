@@ -1,0 +1,7 @@
+
+// Empty struct
+/// @Error 
+type Empty = struct {}
+
+/// @Error
+let empty = {}

@@ -1,0 +1,51 @@
+// Test struct spread field type mismatches - should report errors
+
+fn main() {
+    // Type mismatch: overriding u32 field with string
+    let p = {x: 1, y: 2}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let z = {...p, x: "hi"}
+    
+    // Type mismatch: overriding string field with number
+    let name = {first: "John", last: "Doe"}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let badName = {...name, first: 42}
+    
+    // Type mismatch: overriding bool field with number
+    let config = {enabled: true, timeout: 100}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let badConfig = {...config, enabled: 1}
+    
+    // Multiple type mismatches
+    let point = {x: 1, y: 2, z: 3}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let badPoint = {...point, x: "one", 
+        /// @Error(TCE087): Struct spread field type mismatch
+        y: "two"}
+    
+    // Type mismatch with explicit types
+    let typed: struct {name: string, age: u32} = {name: "Alice", age: 25}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let badTyped = {...typed, age: "twenty-five"}
+}
+
+
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Object = class {
+    fn serialize() -> string = "0xff00ff00"
+}
+
+type Object2 = class {
+    fn serialize() -> u32 = 1
+}
+
+fn test() {
+    let obj: Serializable = new Object()
+
+    let p = {o: obj, name: "cool"}
+    /// @Error(TCE087): Struct spread field type mismatch
+    let p2 = {...p, o: new Object2()}
+}

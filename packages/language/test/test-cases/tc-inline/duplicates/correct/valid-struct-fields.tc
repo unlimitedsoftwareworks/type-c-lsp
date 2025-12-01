@@ -1,0 +1,65 @@
+// Test valid struct field names - no duplicates
+
+// Valid struct type definition
+/// @NoError
+type Point = struct {
+    x: u32,
+    y: u32,
+    z: u32
+}
+
+// Valid struct with multiple fields
+/// @NoError
+type Rectangle = struct {
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32
+}
+
+// Valid struct construction
+/// @NoError
+let p1 = {x: 1, y: 2, z: 3}
+
+// Valid construction with spread (no duplicates)
+let base = {x: 1, y: 2}
+/// @NoError
+let p2 = {...base, z: 3, w: 4}
+
+// Valid construction with spread overriding (allowed)
+/// @NoError
+let p3 = {...base, x: 10}
+
+// Complex struct with many unique fields
+/// @NoError
+type User = struct {
+    id: u32,
+    name: string,
+    email: string,
+    age: u32,
+    active: bool
+}
+
+// Nested struct construction (all unique)
+/// @NoError
+let nested = {
+    point: {x: 1, y: 2},
+    label: "test",
+    value: 42
+}
+
+// Multiple spreads with unique additions
+let p = {x: 1}
+let q = {y: 2}
+/// @NoError
+let combined = {...p, ...q, z: 3}
+
+
+// Single field struct
+/// @NoError
+type Single = struct {
+    value: u32
+}
+
+/// @NoError
+let single = {value: 42}

@@ -79,6 +79,15 @@ export class TypeCTypeProvider {
      */
     private readonly inferringFunctions = new Set<AstNode>();
 
+    /**
+     * Tracks classes currently being inferred to prevent infinite recursion.
+     *
+     * When inferring class methods that reference `this` (e.g., `fn serialize() = this`),
+     * we need to detect when we're already inferring the same class to avoid
+     * stack overflow.
+     */
+    private readonly inferringClasses = new Set<ast.ClassType>();
+
     /** Services for accessing Langium infrastructure */
     protected readonly services: TypeCServices;
 
@@ -658,32 +667,91 @@ export class TypeCTypeProvider {
     }
 
     private inferClassType(node: ast.ClassType): TypeDescription {
-        // node.attributes is directly an Array<ClassAttributeDecl>
-        const attributes = node.attributes?.map(attrDecl =>
-            factory.createAttributeType(
-                attrDecl.name,
-                this.getType(attrDecl.type),
-                attrDecl.isStatic ?? false,
-                attrDecl.isConst ?? false,
-                attrDecl.isLocal ?? false
-            )
-        ) ?? [];
+        // Check if we're already inferring this class (to handle methods that reference `this`)
+        if (this.inferringClasses.has(node)) {
+            // Return a partial class type with just attributes, no methods
+            // This allows `this` expressions to get the class type without infinite recursion
+            const attributes = node.attributes?.map(attrDecl =>
+                factory.createAttributeType(
+                    attrDecl.name,
+                    this.getType(attrDecl.type),
+                    attrDecl.isStatic ?? false,
+                    attrDecl.isConst ?? false,
+                    attrDecl.isLocal ?? false
+                )
+            ) ?? [];
 
-        const methods = node.methods?.map(m => {
-            const methodHeader = this.inferMethodHeader(m.method);
+            const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
+            const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
+
+            // Return class with empty methods to break recursion
+            return factory.createClassType(attributes, [], superTypes, implementations, node);
+        }
+
+        // Mark this class as being inferred
+        this.inferringClasses.add(node);
+
+        try {
+            // node.attributes is directly an Array<ClassAttributeDecl>
+            const attributes = node.attributes?.map(attrDecl =>
+                factory.createAttributeType(
+                    attrDecl.name,
+                    this.getType(attrDecl.type),
+                    attrDecl.isStatic ?? false,
+                    attrDecl.isConst ?? false,
+                    attrDecl.isLocal ?? false
+                )
+            ) ?? [];
+
+            const methods = node.methods?.map(m => {
+            const methodHeader = m.method;
+            const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+            const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+                arg.name,
+                this.getType(arg.type),
+                arg.isMut
+            )) ?? [];
+
+            // Infer return type - check if explicit, otherwise infer from body/expression
+            let returnType: TypeDescription;
+            if (methodHeader.header?.returnType) {
+                // Explicit return type provided
+                returnType = this.getType(methodHeader.header.returnType);
+            } else {
+                // Infer return type from method body or expression
+                if (m.expr) {
+                    // Expression-body method: fn foo() = expr
+                    returnType = this.getType(m.expr);
+                } else if (m.body) {
+                    // Block-body method: fn foo() { ... }
+                    returnType = this.inferReturnTypeFromBody(m.body);
+                } else {
+                    // No body or expression (abstract method or interface method)
+                    returnType = factory.createVoidType(m);
+                }
+            }
+
             return {
-                ...methodHeader,
+                names: methodHeader.names,
+                parameters: params,
+                returnType: returnType,
+                node: methodHeader,
+                genericParameters: genericParams,
                 isStatic: m.isStatic ?? false,
                 isOverride: m.isOverride ?? false,
                 isLocal: m.isLocal ?? false
             };
-        }) ?? [];
+            }) ?? [];
 
-        const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
+            const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
 
-        const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
+            const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
-        return factory.createClassType(attributes, methods, superTypes, implementations, node);
+            return factory.createClassType(attributes, methods, superTypes, implementations, node);
+        } finally {
+            // Always remove from the set, even if inference fails
+            this.inferringClasses.delete(node);
+        }
     }
 
     private inferImplementationType(node: ast.ImplementationType): TypeDescription {

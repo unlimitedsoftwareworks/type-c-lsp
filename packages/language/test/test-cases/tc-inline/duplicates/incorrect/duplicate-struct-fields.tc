@@ -1,0 +1,67 @@
+// Test duplicate struct field names - should report errors
+
+// Duplicate fields in struct type definition
+type Point = struct {
+    x: u32,
+    /// @Error(TCE085): Duplicate field 'x'
+    x: u32,
+    y: u32
+}
+
+// Multiple duplicates in struct type
+type Rectangle = struct {
+    width: u32,
+    height: u32,
+    /// @Error(TCE085): Duplicate field 'width'
+    width: u32,
+    /// @Error(TCE085): Duplicate field 'height'
+    height: u32
+}
+
+// Duplicate fields in struct construction
+/// @Error(TCE086): Duplicate field 'x'
+let p1 = {x: 1, x: 2, y: 3}
+
+// Duplicate after spread operator
+let base = {x: 1, y: 2}
+/// @Error(TCE086): Duplicate field 'x'
+let p2 = {...base, x: 3, y: 4, x: 5}
+
+// Multiple duplicates in construction
+/// @Error(TCE086): Duplicate field 'a'
+let obj1 = {a: 1, b: 2, a: 3, 
+    /// @Error(TCE086): Duplicate field 'b'
+    b: 4}
+
+// Struct type with three of the same field
+type Triple = struct {
+    value: u32,
+    /// @Error(TCE085): Duplicate field 'value'
+    value: u32,
+    /// @Error(TCE085): Duplicate field 'value'
+    value: u32
+}
+
+// Complex struct with mixed valid and duplicate fields
+type User = struct {
+    id: u32,
+    name: string,
+    email: string,
+    /// @Error(TCE085): Duplicate field 'id'
+    id: u32,
+    age: u32
+}
+
+// Nested struct construction with duplicates in inner struct
+let nested = {
+    /// @Error(TCE086): Duplicate field 'x'
+    point: {x: 1, x: 2},
+    label: "test",
+    /// @Error(TCE086): Duplicate field 'point'
+    point: 1
+}
+
+// Multiple spread with duplicates
+let p = {x: 1}
+/// @Error(TCE086): Duplicate field 'y'
+let z = {...p, x: 1, y: 1, y: 2}

@@ -22,3 +22,25 @@ type List<T> = interface Container<T> {
 }
  
 
+// Test valid struct spread field overrides - no type errors
+
+type Serializable = interface {
+    fn serialize() -> Serializable
+}
+
+type Object = class Serializable {
+    fn serialize() = this
+}
+
+type Object2 = class {
+    fn serialize() = this
+}
+
+
+fn test() {
+    let obj1: Serializable = new Object()
+    let obj2: Serializable = new Object2()
+
+    let p = {o: obj1, name: "cool"}
+    let p2 = {...p, obj: new Object2()}
+}

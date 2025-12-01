@@ -1,0 +1,64 @@
+// Test valid struct spread field overrides - no type errors
+
+fn main() {
+    // Valid: overriding u32 field with u32
+    /// @NoError
+    let p = {x: 1, y: 2}
+    /// @NoError
+    let z = {...p, x: 10}
+    
+    // Valid: overriding string field with string
+    /// @NoError
+    let name = {first: "John", last: "Doe"}
+    /// @NoError
+    let newName = {...name, first: "Jane"}
+    
+    // Valid: overriding bool field with bool
+    /// @NoError
+    let config = {enabled: true, timeout: 100}
+    /// @NoError
+    let newConfig = {...config, enabled: false}
+    
+    // Valid: adding new fields (not overriding)
+    /// @NoError
+    let point2d = {x: 1, y: 2}
+    /// @NoError
+    let point3d = {...point2d, z: 3}
+    
+    // Valid: overriding multiple fields with compatible types
+    /// @NoError
+    let original = {a: 1, b: 2, c: 3}
+    /// @NoError
+    let updated = {...original, a: 10, b: 20}
+    
+    // Valid: multiple spreads with compatible overrides
+    /// @NoError
+    let base1 = {x: 1, y: 2}
+    /// @NoError
+    let base2 = {z: 3, w: 4}
+    /// @NoError
+    let combined = {...base1, ...base2, x: 100}
+    
+    // Valid: spread with explicit type annotation
+    /// @NoError
+    let typed: struct {name: string, age: u32} = {name: "Alice", age: 25u32}
+    /// @NoError
+    let updated2 = {...typed, age: 30u32}
+}
+
+type Serializable = interface {
+    fn serialize() -> Serializable
+}
+
+type Object = class {
+    fn serialize() = this
+}
+
+fn test() {
+    let obj = new Object()
+
+    let p = {o: obj, name: "cool"}
+    let p2 = {...p, obj: new Object()}
+
+    let c = obj.serialize()
+}

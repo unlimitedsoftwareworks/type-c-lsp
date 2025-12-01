@@ -12,12 +12,14 @@ import { ErrorCode } from "../codes/errors.js";
 
 /**
  * Validator for duplicate declarations.
- * 
+ *
  * Currently validates:
  * - Duplicate function parameter names at the same level
  * - Duplicate function type parameter names (when names are present)
  * - Duplicate variable declarations within the same scope
- * 
+ * - Duplicate struct field names in struct type definitions
+ * - Duplicate field names in struct construction expressions
+ *
  * Examples:
  * ```tc
  * fn add(a: u32, a: u32) -> u32 { ... }  // ❌ Error - duplicate parameter 'a'
@@ -26,7 +28,13 @@ import { ErrorCode } from "../codes/errors.js";
  * type Callback = fn(x: u32, x: u32) -> void  // ❌ Error - duplicate parameter 'x'
  * type Callback = fn(u32, u32) -> void        // ✅ OK - unnamed parameters
  * type Callback = fn(x: u32, y: u32) -> void  // ✅ OK - unique named parameters
- * 
+ *
+ * type Point = struct { x: u32, x: u32 }  // ❌ Error - duplicate field 'x'
+ * type Point = struct { x: u32, y: u32 }  // ✅ OK - unique fields
+ *
+ * let p = {x: 1, x: 2}  // ❌ Error - duplicate field 'x' in construction
+ * let p = {...base, x: 1, x: 2}  // ❌ Error - duplicate field 'x' after spread
+ *
  * let x = 1, x = 2  // ❌ Error - duplicate variable 'x' in same statement
  * let x = 1; let x = 2  // ❌ Error - duplicate variable 'x' in same scope
  * { let x = 1 } { let x = 1 }  // ✅ OK - different scopes
@@ -47,7 +55,9 @@ export class DuplicateValidator extends TypeCBaseValidation {
             VariablesDeclarations: this.checkVariableDeclarationsInStatement,
             Module: this.checkVariablesInScope,
             NamespaceDecl: this.checkVariablesInScope,
-            BlockStatement: this.checkVariablesInScope
+            BlockStatement: this.checkVariablesInScope,
+            StructType: this.checkStructTypeFields,
+            NamedStructConstructionExpression: this.checkStructConstructionFields
         };
     }
 
@@ -355,5 +365,67 @@ export class DuplicateValidator extends TypeCBaseValidation {
         }
 
         return items;
+    }
+
+    /**
+     * Check for duplicate field names in struct type definitions.
+     * Example: type Point = struct { x: u32, x: u32 }
+     */
+    checkStructTypeFields = (node: ast.StructType, accept: ValidationAcceptor): void => {
+        const seenFields = new Map<string, ast.StructField>();
+
+        for (const field of node.fields) {
+            const fieldName = field.name;
+            
+            if (seenFields.has(fieldName)) {
+                // Found a duplicate field in the struct type definition
+                const errorCode = ErrorCode.TC_DUPLICATE_STRUCT_FIELD;
+                accept('error',
+                    `Duplicate field '${fieldName}': Field is already defined in this struct type.`,
+                    {
+                        node: field,
+                        property: 'name',
+                        code: errorCode
+                    }
+                );
+            } else {
+                seenFields.set(fieldName, field);
+            }
+        }
+    }
+
+    /**
+     * Check for duplicate field names in struct construction expressions.
+     * Handles both regular fields and spread expressions.
+     * Example: let p = {x: 1, x: 2} or let p = {...base, x: 1, x: 2}
+     */
+    checkStructConstructionFields = (node: ast.NamedStructConstructionExpression, accept: ValidationAcceptor): void => {
+        const seenFields = new Map<string, ast.StructFieldKeyValuePair>();
+
+        for (const field of node.fields) {
+            // Skip spread expressions - they don't define duplicate keys themselves
+            if (ast.isStructSpreadExpression(field)) {
+                continue;
+            }
+
+            if (ast.isStructFieldKeyValuePair(field)) {
+                const fieldName = field.name;
+                
+                if (seenFields.has(fieldName)) {
+                    // Found a duplicate field in the struct construction
+                    const errorCode = ErrorCode.TC_DUPLICATE_STRUCT_CONSTRUCTION_FIELD;
+                    accept('error',
+                        `Duplicate field '${fieldName}': Field is already defined in this struct construction.`,
+                        {
+                            node: field,
+                            property: 'name',
+                            code: errorCode
+                        }
+                    );
+                } else {
+                    seenFields.set(fieldName, field);
+                }
+            }
+        }
     }
 }

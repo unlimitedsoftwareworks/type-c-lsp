@@ -58,6 +58,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ClassType: this.checkClassImplementation,
             MemberAccess: this.checkMemberAccess,
             DenullExpression: this.checkDenullExpression,
+            NamedStructConstructionExpression: this.checkStructSpreadFieldTypes,
         };
     }
 
@@ -1479,5 +1480,72 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // No recursion needed
         
         return false;
+    }
+
+    /**
+     * Check struct construction expressions for spread field type compatibility.
+     *
+     * When spreading an object and overriding its fields, the override must have
+     * a compatible type with the original field.
+     *
+     * Examples:
+     * ```tc
+     * let p = {x: 1, y: 2}              // x: u32, y: u32
+     * let z = {...p, x: 10}             // ✅ OK - x: u32 matches
+     * let w = {...p, x: "hello"}        // ❌ Error - x: string doesn't match u32
+     * let q = {...p, z: 3}              // ✅ OK - z is new, not overriding
+     * ```
+     */
+    checkStructSpreadFieldTypes = (node: ast.NamedStructConstructionExpression, accept: ValidationAcceptor): void => {
+        // Collect all fields from spread expressions
+        const spreadFields = new Map<string, TypeDescription>();
+        
+        for (const field of node.fields) {
+            if (ast.isStructSpreadExpression(field)) {
+                // Get the type of the spread expression
+                const spreadType = this.typeProvider.getType(field.expression);
+                
+                // Resolve reference types
+                let resolvedType = spreadType;
+                if (isReferenceType(spreadType)) {
+                    const resolved = this.typeProvider.resolveReference(spreadType);
+                    if (resolved) {
+                        resolvedType = resolved;
+                    }
+                }
+                
+                // If it's a struct type, collect its fields
+                if (isStructType(resolvedType)) {
+                    for (const structField of resolvedType.fields) {
+                        spreadFields.set(structField.name, structField.type);
+                    }
+                }
+            }
+        }
+        
+        // Now check all regular fields against spread fields
+        for (const field of node.fields) {
+            if (ast.isStructFieldKeyValuePair(field)) {
+                const fieldName = field.name;
+                const spreadFieldType = spreadFields.get(fieldName);
+                
+                // If this field overrides a spread field, check type compatibility
+                if (spreadFieldType) {
+                    const overrideType = this.typeProvider.getType(field.expr);
+                    
+                    const compatResult = this.isTypeCompatible(overrideType, spreadFieldType);
+                    if (!compatResult.success) {
+                        const errorCode = ErrorCode.TC_STRUCT_SPREAD_FIELD_TYPE_MISMATCH;
+                        const errorMsg = compatResult.message
+                            ? `Struct spread field type mismatch: Field '${fieldName}' override - ${compatResult.message}`
+                            : `Struct spread field type mismatch: Field '${fieldName}' override has type '${overrideType.toString()}', but spread expects '${spreadFieldType.toString()}'`;
+                        accept('error', errorMsg, {
+                            node: field.expr,
+                            code: errorCode
+                        });
+                    }
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,9 @@
-fn main() {
-    let x: u32 = 1;
-    let y: f32 = 1.0f;
-    
-    
+// Test valid struct spread field overrides - no type errors
 
-} 
+type Serializable = interface {
+    fn serialize() -> Serializable
+}
+
+type Object = class Serializable {
+    fn serialize() = this
+}

@@ -1,0 +1,34 @@
+type Box<T> = class {
+    let value: T
+    // Should infer T from field access
+    fn getValue() {
+        return this.value
+    }
+
+    fn v() {
+        return this.value
+    }
+
+    fn setValue(v: T){
+        this.value = v
+    }
+}
+
+
+type Container<T> = class {
+    let inner: Box<T>
+    
+    // Should infer Container<T> from 'this'
+    fn getContainer() = this
+    
+    // Should access nested generics
+    fn getInnerValue() {
+        return this.inner.getValue()
+    }
+    
+    // Method chaining with nested generics
+    fn setInnerValue(v: T) -> Container<T> {
+        this.inner.setValue(v)
+        return this
+    }
+}

@@ -88,6 +88,21 @@ export class TypeCTypeProvider {
      */
     private readonly inferringClasses = new Set<ast.ClassType>();
 
+    /**
+     * Tracks class methods currently being inferred to prevent infinite recursion.
+     *
+     * This is critical for handling cycles like:
+     * ```
+     * fn getValue() { return this.value }
+     * ```
+     *
+     * Where inferring the method's return type requires accessing class members,
+     * which triggers scope resolution, which triggers type inference again.
+     *
+     * Maps method node to its containing class node for cycle detection.
+     */
+    private readonly inferringMethods = new Map<ast.ClassMethod, ast.ClassType>();
+
     /** Services for accessing Langium infrastructure */
     protected readonly services: TypeCServices;
 
@@ -669,8 +684,9 @@ export class TypeCTypeProvider {
     private inferClassType(node: ast.ClassType): TypeDescription {
         // Check if we're already inferring this class (to handle methods that reference `this`)
         if (this.inferringClasses.has(node)) {
-            // Return a partial class type with just attributes, no methods
+            // Return a partial class type with attributes and stub methods
             // This allows `this` expressions to get the class type without infinite recursion
+            // Stub methods have void return types to break cycles
             const attributes = node.attributes?.map(attrDecl =>
                 factory.createAttributeType(
                     attrDecl.name,
@@ -681,11 +697,33 @@ export class TypeCTypeProvider {
                 )
             ) ?? [];
 
+            // Create stub methods with void return types to allow method-to-method calls
+            const stubMethods = node.methods?.map(m => {
+                const methodHeader = m.method;
+                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+                    arg.name,
+                    this.getType(arg.type),
+                    arg.isMut
+                )) ?? [];
+
+                return {
+                    names: methodHeader.names,
+                    parameters: params,
+                    returnType: factory.createVoidType(m), // Placeholder void type
+                    node: methodHeader,
+                    genericParameters: genericParams,
+                    isStatic: m.isStatic ?? false,
+                    isOverride: m.isOverride ?? false,
+                    isLocal: m.isLocal ?? false
+                };
+            }) ?? [];
+
             const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
             const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
-            // Return class with empty methods to break recursion
-            return factory.createClassType(attributes, [], superTypes, implementations, node);
+            // Return class with stub methods to break recursion
+            return factory.createClassType(attributes, stubMethods, superTypes, implementations, node);
         }
 
         // Mark this class as being inferred
@@ -712,35 +750,60 @@ export class TypeCTypeProvider {
                 arg.isMut
             )) ?? [];
 
-            // Infer return type - check if explicit, otherwise infer from body/expression
-            let returnType: TypeDescription;
-            if (methodHeader.header?.returnType) {
-                // Explicit return type provided
-                returnType = this.getType(methodHeader.header.returnType);
-            } else {
-                // Infer return type from method body or expression
-                if (m.expr) {
-                    // Expression-body method: fn foo() = expr
-                    returnType = this.getType(m.expr);
-                } else if (m.body) {
-                    // Block-body method: fn foo() { ... }
-                    returnType = this.inferReturnTypeFromBody(m.body);
-                } else {
-                    // No body or expression (abstract method or interface method)
-                    returnType = factory.createVoidType(m);
-                }
+            // Check if we're already inferring this method (cycle detection)
+            // This prevents infinite recursion when method body accesses class members
+            if (this.inferringMethods.has(m)) {
+                // Return a placeholder method with void return type to break the cycle
+                // The actual return type will be inferred later if needed
+                return {
+                    names: methodHeader.names,
+                    parameters: params,
+                    returnType: factory.createVoidType(m),
+                    node: methodHeader,
+                    genericParameters: genericParams,
+                    isStatic: m.isStatic ?? false,
+                    isOverride: m.isOverride ?? false,
+                    isLocal: m.isLocal ?? false
+                };
             }
 
-            return {
-                names: methodHeader.names,
-                parameters: params,
-                returnType: returnType,
-                node: methodHeader,
-                genericParameters: genericParams,
-                isStatic: m.isStatic ?? false,
-                isOverride: m.isOverride ?? false,
-                isLocal: m.isLocal ?? false
-            };
+            // Mark this method as being inferred
+            this.inferringMethods.set(m, node);
+
+            try {
+                // Infer return type - check if explicit, otherwise infer from body/expression
+                let returnType: TypeDescription;
+                if (methodHeader.header?.returnType) {
+                    // Explicit return type provided
+                    returnType = this.getType(methodHeader.header.returnType);
+                } else {
+                    // Infer return type from method body or expression
+                    if (m.expr) {
+                        // Expression-body method: fn foo() = expr
+                        returnType = this.getType(m.expr);
+                    } else if (m.body) {
+                        // Block-body method: fn foo() { ... }
+                        returnType = this.inferReturnTypeFromBody(m.body);
+                    } else {
+                        // No body or expression (abstract method or interface method)
+                        returnType = factory.createVoidType(m);
+                    }
+                }
+
+                return {
+                    names: methodHeader.names,
+                    parameters: params,
+                    returnType: returnType,
+                    node: methodHeader,
+                    genericParameters: genericParams,
+                    isStatic: m.isStatic ?? false,
+                    isOverride: m.isOverride ?? false,
+                    isLocal: m.isLocal ?? false
+                };
+            } finally {
+                // Always remove from the set, even if inference fails
+                this.inferringMethods.delete(m);
+            }
             }) ?? [];
 
             const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
@@ -814,28 +877,46 @@ export class TypeCTypeProvider {
             arg.isMut
         )) ?? [];
 
-        let returnType: TypeDescription;
-
-        if (methodHeader.header?.returnType) {
-            // Explicit return type provided
-            returnType = this.getType(methodHeader.header.returnType);
-        } else {
-            // Infer return type from method body or expression
-            // Note: Methods cannot be coroutines directly, but method headers can specify coroutine types
-            
-            if (node.expr) {
-                // Expression-body method: fn foo() = expr
-                returnType = this.getType(node.expr);
-            } else if (node.body) {
-                // Block-body method: fn foo() { ... }
-                returnType = this.inferReturnTypeFromBody(node.body);
-            } else {
-                // No body or expression (abstract method or interface method)
-                returnType = factory.createVoidType(node);
-            }
+        // Check if we're already inferring this method (cycle detection)
+        // This prevents infinite recursion when method body accesses class members
+        const containingClass = AstUtils.getContainerOfType(node, ast.isClassType);
+        if (containingClass && this.inferringMethods.has(node)) {
+            // Return a placeholder function type with void return type to break the cycle
+            return factory.createFunctionType(params, factory.createVoidType(node), 'fn', genericParams, node);
         }
 
-        return factory.createFunctionType(params, returnType, 'fn', genericParams, node);
+        // Mark this method as being inferred
+        if (containingClass) {
+            this.inferringMethods.set(node, containingClass);
+        }
+
+        try {
+            let returnType: TypeDescription;
+
+            if (methodHeader.header?.returnType) {
+                // Explicit return type provided
+                returnType = this.getType(methodHeader.header.returnType);
+            } else {
+                // Infer return type from method body or expression
+                // Note: Methods cannot be coroutines directly, but method headers can specify coroutine types
+                
+                if (node.expr) {
+                    // Expression-body method: fn foo() = expr
+                    returnType = this.getType(node.expr);
+                } else if (node.body) {
+                    // Block-body method: fn foo() { ... }
+                    returnType = this.inferReturnTypeFromBody(node.body);
+                } else {
+                    // No body or expression (abstract method or interface method)
+                    returnType = factory.createVoidType(node);
+                }
+            }
+
+            return factory.createFunctionType(params, returnType, 'fn', genericParams, node);
+        } finally {
+            // Always remove from the set, even if inference fails
+            this.inferringMethods.delete(node);
+        }
     }
 
     /**
@@ -2144,38 +2225,43 @@ export class TypeCTypeProvider {
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
 
-        // If base type is a reference type (e.g., Array<u32>), resolve it but keep the generic args
+        // CRITICAL FIX: Check if reference type points to a class being inferred BEFORE resolving
+        // This prevents triggering full inference of nested classes during member access
         if (isReferenceType(baseType)) {
-            const refType = baseType;
-            // Build substitution map from generic parameters to concrete arguments
-            // Example: Array<u32> → { T: u32 }
-            genericSubstitutions = this.buildGenericSubstitutions(refType);
-            
-            /**
-             * CRITICAL FIX: Apply generic substitutions to the ENTIRE resolved type.
-             *
-             * **Why this is needed:**
-             * When a type has generic supertypes (e.g., `Entity<T> = Drawable & Serializable<T>`),
-             * resolving the reference gives us `Drawable & Serializable<T>` where `T` is still
-             * unsubstituted. We need to apply the substitutions from the reference type
-             * (e.g., `Entity<string>` → `{T: string}`) to ALL parts of the resolved type,
-             * including supertypes.
-             *
-             * **Example:**
-             * ```
-             * type Entity<T> = Drawable & Serializable<T>
-             * let e: Entity<string> = ...
-             * e.serialize()  // Should return `string`, not `T`
-             * ```
-             *
-             * **What happens:**
-             * 1. baseType starts as `ReferenceType{Entity, genericArgs:[string]}`
-             * 2. After resolve: `JoinType{Drawable, Serializable<T>}`  ← T is still generic!
-             * 3. After substitution: `JoinType{Drawable, Serializable<string>}`  ← T → string ✓
-             *
-             * Without this step, methods from `Serializable<T>` would return `T` instead of `string`.
-             */
-            baseType = this.resolveAndSubstituteReference(refType);
+            // Check if this reference points to a class currently being inferred
+            const refDecl = baseType.declaration;
+            if (refDecl && ast.isTypeDeclaration(refDecl) && ast.isClassType(refDecl.definition)) {
+                const targetClassNode = refDecl.definition;
+                if (this.inferringClasses.has(targetClassNode)) {
+                    // The referenced class is currently being inferred
+                    // Get its partial type directly from the cache (which includes stub methods)
+                    const partialClassType = this.getType(targetClassNode);
+                    if (isClassType(partialClassType)) {
+                        // Build generic substitutions for the partial type
+                        genericSubstitutions = this.buildGenericSubstitutions(baseType);
+                        
+                        // Apply substitutions to the partial class type
+                        if (genericSubstitutions && genericSubstitutions.size > 0) {
+                            baseType = this.typeUtils.substituteGenerics(partialClassType, genericSubstitutions);
+                        } else {
+                            baseType = partialClassType;
+                        }
+                        
+                        // Now continue with member lookup on the partial type
+                        // This will use the stub methods, preventing the cycle
+                    }
+                } else {
+                    // Normal case: resolve the reference fully
+                    const refType = baseType;
+                    genericSubstitutions = this.buildGenericSubstitutions(refType);
+                    baseType = this.resolveAndSubstituteReference(refType);
+                }
+            } else {
+                // Not a class reference - resolve normally
+                const refType = baseType;
+                genericSubstitutions = this.buildGenericSubstitutions(refType);
+                baseType = this.resolveAndSubstituteReference(refType);
+            }
         }
 
         // If base type is a variant constructor type (e.g., Option<u32>.Some), extract generic substitutions
@@ -2195,7 +2281,57 @@ export class TypeCTypeProvider {
         // Variable to hold the resolved member type
         let memberType: TypeDescription | undefined;
 
-        // Get the target node
+        // CRITICAL FIX: Resolve from type when we're inferring METHOD bodies
+        // This prevents Langium's linker cycle detection when accessing class members
+        // during method inference. For normal cases, we use Langium's ref which handles overloads correctly.
+        const isInMethodInferenceContext = this.inferringMethods.size > 0;
+        
+        if (isClassType(baseType) && isInMethodInferenceContext) {
+            // We're accessing a member of a class type while inferring ANY class
+            // Resolve directly from the type to avoid Langium's cycle detection
+            
+            // Check attributes first
+            const attribute = baseType.attributes.find(a => a.name === memberName);
+            if (attribute) {
+                memberType = attribute.type;
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                }
+                // Wrap in nullable if using optional chaining
+                if (node.isNullable || baseIsNullable) {
+                    memberType = factory.createNullableType(memberType, node);
+                }
+                return memberType;
+            }
+            
+            // Check methods - note: may return stub methods during inference
+            const method = baseType.methods.find(m => m.names.includes(memberName));
+            if (method) {
+                // Convert method to function type
+                memberType = factory.createFunctionType(
+                    method.parameters,
+                    method.returnType,
+                    'fn',
+                    method.genericParameters,
+                    method.node
+                );
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                }
+                // Wrap in nullable if using optional chaining
+                if (node.isNullable || baseIsNullable) {
+                    memberType = factory.createNullableType(memberType, node);
+                }
+                return memberType;
+            }
+            
+            // Member not found in the class type
+            return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
+        }
+
+        // Normal case: Get the target node via Langium's linker (handles overload resolution)
         const targetRef = node.element.ref;
         if (!targetRef) {
             return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);

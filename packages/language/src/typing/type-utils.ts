@@ -611,7 +611,10 @@ export class TypeCTypeUtils {
 
         // Class/Interface subtyping
         if (isClassType(from) && isClassType(to)) {
-            if (from === to) {
+            // Classes are equal if they're the same object OR have the same AST node
+            // This is critical for handling partial class types during inference
+            // (stub methods with void return types vs fully inferred methods)
+            if (from === to || (from.node && to.node && from.node === to.node)) {
                 return success();
             }
             return failure(`Class types differ: ${from.toString()} vs ${to.toString()}`);

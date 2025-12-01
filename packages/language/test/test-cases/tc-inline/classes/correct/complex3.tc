@@ -1,0 +1,12 @@
+type Box<T> = class {
+    let value: T
+    
+    // Method calling another method in the same class
+    fn getValue() {
+        return this.v()
+    }
+
+    fn v() {
+        return this.value
+    }
+}

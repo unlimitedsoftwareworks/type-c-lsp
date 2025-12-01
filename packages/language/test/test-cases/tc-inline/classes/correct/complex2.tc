@@ -1,0 +1,511 @@
+
+// ============================================================================
+// Type System Stress Test
+// Comprehensive test of Type-C's type system features
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1. Generic Classes with 'this' References
+// ----------------------------------------------------------------------------
+
+type Box<T> = class {
+    let value: T
+    // Should infer T from field access
+    fn getValue() {
+        return this.value
+    }
+
+    fn setValue(v: T){
+        this.value = v
+    }
+
+    fn clone() = this
+}
+
+// ----------------------------------------------------------------------------
+// 2. Nested Generic Classes
+// ----------------------------------------------------------------------------
+
+type Container<T> = class {
+    let inner: Box<T>
+    
+    // Should infer Container<T> from 'this'
+    fn getContainer() = this
+    
+    // Should access nested generics
+    fn getInnerValue() {
+        return this.inner.getValue()
+    }
+    
+    // Method chaining with nested generics
+    fn setInnerValue(v: T) -> Container<T> {
+        this.inner.setValue(v)
+        return this
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 3. Multiple Generic Parameters
+// ----------------------------------------------------------------------------
+
+type Pair<K, V> = class {
+    let key: K
+    let value: V
+    
+    fn getKey() = this.key
+    fn getValue() = this.value
+    
+    // Should infer Pair<K, V>
+    fn clone() = this
+    
+    // Swap types
+    fn swap() -> Pair<V, K> = new Pair<V, K>()
+}
+
+// ----------------------------------------------------------------------------
+// 4. Generic Interface (no generic methods in interfaces)
+// ----------------------------------------------------------------------------
+
+type Comparable<T> = interface {
+    fn compare(other: T) -> i32
+}
+
+type SortedBox<T> = class {
+    let value: T
+    
+    fn getValue() = this.value
+    fn getBox() = this
+    
+    fn compare(other: T) -> i32 = 0
+}
+
+// ----------------------------------------------------------------------------
+// 5. Recursive Generic Types
+// ----------------------------------------------------------------------------
+
+type LinkedList<T> = class {
+    let value: T
+    let next: LinkedList<T>?
+    
+    fn head() = this.value
+    fn tail() = this.next
+    fn getList() = this
+}
+
+// ----------------------------------------------------------------------------
+// 6. Generic Methods in Generic Classes
+// ----------------------------------------------------------------------------
+
+type Transformer<T> = class {
+    let data: T
+    
+    fn getData() = this.data
+    
+    // Generic method within generic class
+    fn map<U>(f: fn(T) -> U) -> Transformer<U> {
+        return new Transformer<U>()
+    }
+    
+    // Should infer Transformer<T>
+    fn identity() = this
+}
+
+// ----------------------------------------------------------------------------
+// 7. Multiple 'this' References in Single Method
+// ----------------------------------------------------------------------------
+
+type MultiThis<T> = class {
+    let a: T
+    let b: T
+    let c: T
+    
+    fn sum() {
+        return this.a
+    }
+    
+    fn complex() {
+        let x = this.a
+        let y = this.b
+        let z = this.c
+        return x
+    }
+    
+    fn chain() -> MultiThis<T> {
+        let temp = this
+        return temp
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 8. Generic Interface (interfaces can be generic)
+// ----------------------------------------------------------------------------
+
+type Mappable<T> = interface {
+    fn get() -> T
+    fn set(value: T) -> void
+}
+
+type MyMappable<T> = class {
+    let value: T
+    
+    fn get() -> T {
+        return this.value
+    }
+    
+    fn set(value: T) -> void {
+        this.value = value
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 9. Nullable Generic Fields
+// ----------------------------------------------------------------------------
+
+type Optional<T> = class {
+    let value: T?
+    
+    fn get() = this.value
+    fn getSafe() -> T? = this.value
+    
+    fn map<U>(f: fn(T) -> U) -> Optional<U> {
+        return new Optional<U>()
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 10. Complex Method Chaining
+// ----------------------------------------------------------------------------
+
+type Builder<T> = class {
+    let data: T
+    
+    fn withData(d: T) -> Builder<T> {
+        this.data = d
+        return this
+    }
+    
+    fn build() -> T {
+        return this.data
+    }
+    
+    fn reset() -> Builder<T> {
+        return this
+    }
+    
+    fn chain() -> Builder<T> {
+        return this.reset().withData(this.data)
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 11. Generic Class with Static Methods
+// ----------------------------------------------------------------------------
+
+type Factory<T> = class {
+    let value: T
+    
+    static fn create<U>(v: U) -> Factory<U> {
+        return new Factory<U>()
+    }
+    
+    fn getInstance() = this
+    fn getValue() = this.value
+}
+
+// ----------------------------------------------------------------------------
+// 12. Deeply Nested Generic Access
+// ----------------------------------------------------------------------------
+
+type Deep<T> = class {
+    let level1: Container<Box<T> >
+    
+    fn getDeep() {
+        return this.level1.getInnerValue()
+    }
+    
+    fn getSelf() = this
+}
+
+// ----------------------------------------------------------------------------
+// 13. Generic Struct Fields in Classes
+// ----------------------------------------------------------------------------
+
+type Point<T> = struct {
+    x: T,
+    y: T
+}
+
+type Shape<T> = class {
+    let center: Point<T>
+    
+    fn getCenter() = this.center
+    fn getX() = this.center.x
+    fn getY() = this.center.y
+}
+
+// ----------------------------------------------------------------------------
+// 14. Variant Types with Generics
+// ----------------------------------------------------------------------------
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type ResultWrapper<T, E> = class {
+    let result: Result<T, E>
+    
+    fn getResult() = this.result
+    fn unwrap() = this
+}
+
+// ----------------------------------------------------------------------------
+// 15. Array Fields with Generics
+// ----------------------------------------------------------------------------
+
+type Collection<T> = class {
+    let items: T[]
+    
+    fn getItems() = this.items
+    fn getFirst() = this.items[0]
+    fn getSelf() = this
+}
+
+// ----------------------------------------------------------------------------
+// 16. Generic Interface without Generic Methods
+// ----------------------------------------------------------------------------
+
+type Serializable<T> = interface {
+    fn serialize() -> string
+    fn getData() -> T
+}
+
+type SerializableBox<T> = class {
+    let value: T
+    
+    fn getValue() = this.value
+    fn getBox() = this
+    fn serialize() -> string = "test"
+    fn getData() -> T = this.value
+}
+
+// ----------------------------------------------------------------------------
+// 17. Multiple Interface Implementation
+// ----------------------------------------------------------------------------
+
+type Cloneable<T> = interface {
+    fn clone() -> T
+}
+
+type Stringable = interface {
+    fn toString() -> string
+}
+
+type FullBox<T> = class {
+    let value: T
+    
+    fn clone() -> FullBox<T> = this
+    fn toString() -> string = "FullBox"
+    fn getValue() = this.value
+}
+
+// ----------------------------------------------------------------------------
+// 18. Generic Tuple Fields
+// ----------------------------------------------------------------------------
+
+type TupleBox<T, U> = class {
+    let data: {t: T, u: U}
+    
+    fn getData() = this.data
+    fn getBox() = this
+}
+
+// ----------------------------------------------------------------------------
+// 19. Operator Overloading with Generics
+// ----------------------------------------------------------------------------
+
+type Vector<T> = class {
+    let x: T
+    let y: T
+    
+    fn +(other: Vector<T>) -> Vector<T> {
+        return this
+    }
+    
+    fn getX() = this.x
+    fn getY() = this.y
+}
+
+// ----------------------------------------------------------------------------
+// 20. Coroutine Fields and Methods
+// ----------------------------------------------------------------------------
+
+type Generator<T> = class {
+    let seed: T
+    
+    fn getSeed() = this.seed
+    fn getGen() = this
+}
+
+// ----------------------------------------------------------------------------
+// 21. Mixed Generic and Non-Generic Methods
+// ----------------------------------------------------------------------------
+
+type Mixed<T> = class {
+    let generic: T
+    let fixed: u32
+    
+    fn getGeneric() = this.generic
+    fn getFixed() = this.fixed
+    fn getBoth() = this
+}
+
+// ----------------------------------------------------------------------------
+// 22. Recursive Method Calls with 'this'
+// ----------------------------------------------------------------------------
+
+type Recursive<T> = class {
+    let value: T
+    let count: u32
+    
+    fn process() {
+        return this.value
+    }
+    
+    fn chain() -> Recursive<T> {
+        return this
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 23. Generic Class with Nullable 'this' Operations
+// ----------------------------------------------------------------------------
+
+type NullableOps<T> = class {
+    let value: T?
+    
+    fn get() = this.value
+    fn getThis() = this
+}
+
+// ----------------------------------------------------------------------------
+// 24. Generic Function Parameters
+// ----------------------------------------------------------------------------
+
+type Processor<T> = class {
+    let data: T
+    
+    fn apply(f: fn(T) -> T) -> Processor<T> {
+        return this
+    }
+    
+    fn getData() = this.data
+}
+
+// ----------------------------------------------------------------------------
+// 25. Complex Return Type Inference
+// ----------------------------------------------------------------------------
+
+type Complex<T> = class {
+    let value: T
+    
+    // Should infer from conditional
+    fn conditional(flag: bool) {
+        return this.value
+    }
+    
+    // Should infer from match
+    fn matchValue(x: u32) {
+        return match x {
+            0 => this.value,
+            _ => this.value
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// 26. Interface Hierarchy with Generics
+// ----------------------------------------------------------------------------
+
+type Reader<T> = interface {
+    fn read() -> T
+}
+
+type Writer<T> = interface {
+    fn write(value: T) -> void
+}
+
+type ReaderWriter<T> = interface {
+    fn read() -> T
+    fn write(value: T) -> void
+}
+
+type Storage<T> = class {
+    let data: T
+    
+    fn read() -> T = this.data
+    fn write(value: T) -> void {
+        this.data = value
+    }
+    fn getSelf() = this
+}
+
+// ----------------------------------------------------------------------------
+// 27. Chained Generic Transformations
+// ----------------------------------------------------------------------------
+
+type Pipeline<T> = class {
+    let value: T
+    
+    fn getValue() = this.value
+    
+    fn transform<U>(f: fn(T) -> U) -> Pipeline<U> {
+        return new Pipeline<U>()
+    }
+    
+    fn thenTransform<V>(f: fn(T) -> V) -> Pipeline<V> {
+        return new Pipeline<V>()
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Main Test Function
+// ----------------------------------------------------------------------------
+
+fn main() {
+    // Test Box
+    let box = new Box<u32>()
+    let boxClone = box.clone()
+    let val = box.getValue()
+    
+    // Test Container
+    let container = new Container<string>()
+    let innerVal = container.getInnerValue()
+    
+    // Test Pair
+    let pair = new Pair<u32, string>()
+    let key = pair.getKey()
+    let value = pair.getValue()
+    
+    // Test LinkedList
+    let list = new LinkedList<i32>()
+    let head = list.head()
+    let tail = list.tail()
+    
+    // Test Builder pattern
+    let builder = new Builder<u32>()
+    let built = builder.withData(42u32).build()
+    
+    // Test Collection
+    let collection = new Collection<f64>()
+    let items = collection.getItems()
+    
+    // Test Vector operator
+    let v1 = new Vector<i32>()
+    let v2 = new Vector<i32>()
+    let v3 = v1 + v2
+    
+    // Test Pipeline
+    let pipeline = new Pipeline<u32>()
+    let pipeValue = pipeline.getValue()
+}

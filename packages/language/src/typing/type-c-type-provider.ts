@@ -697,7 +697,8 @@ export class TypeCTypeProvider {
                 )
             ) ?? [];
 
-            // Create stub methods with void return types to allow method-to-method calls
+            // Create stub methods to allow method-to-method calls during inference
+            // Use explicit return types when available, void as placeholder otherwise
             const stubMethods = node.methods?.map(m => {
                 const methodHeader = m.method;
                 const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
@@ -707,10 +708,16 @@ export class TypeCTypeProvider {
                     arg.isMut
                 )) ?? [];
 
+                // If method has explicit return type, use it for better accuracy
+                // Otherwise use void as placeholder to break cycles
+                const returnType = methodHeader.header?.returnType
+                    ? this.getType(methodHeader.header.returnType)
+                    : factory.createVoidType(m);
+
                 return {
                     names: methodHeader.names,
                     parameters: params,
-                    returnType: factory.createVoidType(m), // Placeholder void type
+                    returnType: returnType,
                     node: methodHeader,
                     genericParameters: genericParams,
                     isStatic: m.isStatic ?? false,

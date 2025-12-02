@@ -19,12 +19,13 @@ import { ErrorCode } from "../codes/errors.js";
  * - Duplicate variable declarations within the same scope
  * - Duplicate struct field names in struct type definitions
  * - Duplicate field names in struct construction expressions
+ * - Duplicate type declarations within the same scope (Module/Namespace)
  *
  * Examples:
  * ```tc
  * fn add(a: u32, a: u32) -> u32 { ... }  // ❌ Error - duplicate parameter 'a'
  * fn add(a: u32, b: u32) -> u32 { ... }  // ✅ OK - unique parameters
- * 
+ *
  * type Callback = fn(x: u32, x: u32) -> void  // ❌ Error - duplicate parameter 'x'
  * type Callback = fn(u32, u32) -> void        // ✅ OK - unnamed parameters
  * type Callback = fn(x: u32, y: u32) -> void  // ✅ OK - unique named parameters
@@ -39,6 +40,10 @@ import { ErrorCode } from "../codes/errors.js";
  * let x = 1; let x = 2  // ❌ Error - duplicate variable 'x' in same scope
  * { let x = 1 } { let x = 1 }  // ✅ OK - different scopes
  * let x = 1; { let x = 2 }  // ✅ OK - shadowing allowed
+ *
+ * type Point = u32; type Point = f32  // ❌ Error - duplicate type 'Point'
+ * namespace N { type T = u32; type T = f32 }  // ❌ Error - duplicate type 'T'
+ * type Point = u32; namespace N { type Point = f32 }  // ✅ OK - different scopes
  * ```
  */
 export class DuplicateValidator extends TypeCBaseValidation {
@@ -53,8 +58,8 @@ export class DuplicateValidator extends TypeCBaseValidation {
             LambdaExpression: this.checkLambdaParameters,
             FunctionType: this.checkFunctionTypeParameters,
             VariablesDeclarations: this.checkVariableDeclarationsInStatement,
-            Module: this.checkVariablesInScope,
-            NamespaceDecl: this.checkVariablesInScope,
+            Module: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope],
+            NamespaceDecl: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope],
             BlockStatement: this.checkVariablesInScope,
             StructType: this.checkStructTypeFields,
             NamedStructConstructionExpression: this.checkStructConstructionFields
@@ -424,6 +429,36 @@ export class DuplicateValidator extends TypeCBaseValidation {
                     );
                 } else {
                     seenFields.set(fieldName, field);
+                }
+            }
+        }
+    }
+
+    /**
+     * Check for duplicate type declarations within a scope (Module or Namespace).
+     * Example: type Point = u32; type Point = f32;
+     */
+    checkTypeDeclarationsInScope = (node: ast.Module | ast.NamespaceDecl, accept: ValidationAcceptor): void => {
+        const seenTypes = new Map<string, ast.TypeDeclaration>();
+
+        // Get all definitions in this scope
+        for (const def of node.definitions) {
+            if (ast.isTypeDeclaration(def)) {
+                const typeName = def.name;
+                
+                if (seenTypes.has(typeName)) {
+                    // Found a duplicate type in the same scope
+                    const errorCode = ErrorCode.TC_DUPLICATE_TYPE_DECLARATION;
+                    accept('error',
+                        `Duplicate type '${typeName}': Type is already declared in this scope.`,
+                        {
+                            node: def,
+                            property: 'name',
+                            code: errorCode
+                        }
+                    );
+                } else {
+                    seenTypes.set(typeName, def);
                 }
             }
         }

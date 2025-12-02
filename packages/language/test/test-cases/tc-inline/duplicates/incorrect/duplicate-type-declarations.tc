@@ -1,0 +1,64 @@
+// Test duplicate type declarations - should report errors
+
+// Duplicate types in module
+type Point = u32
+/// @Error(TCE088): Duplicate type 'Point'
+type Point = f32
+
+// Multiple duplicates
+type Vec2 = struct { x: u32, y: u32 }
+type Vec3 = struct { x: u32, y: u32, z: u32 }
+/// @Error(TCE088): Duplicate type 'Vec2'
+type Vec2 = struct { x: f32, y: f32 }
+/// @Error(TCE088): Duplicate type 'Vec3'
+type Vec3 = u64
+
+// Duplicate type with three declarations
+type Counter = u32
+/// @Error(TCE088): Duplicate type 'Counter'
+type Counter = u64
+/// @Error(TCE088): Duplicate type 'Counter'
+type Counter = i32
+
+// Duplicate types in namespace
+namespace Math {
+    type Vector = struct { x: f32, y: f32 }
+    /// @Error(TCE088): Duplicate type 'Vector'
+    type Vector = struct { x: f64, y: f64 }
+}
+
+// Multiple duplicates in namespace
+namespace Graphics {
+    type Color = u32
+    type Size = struct { width: u32, height: u32 }
+    /// @Error(TCE088): Duplicate type 'Color'
+    type Color = struct { r: u8, g: u8, b: u8 }
+    /// @Error(TCE088): Duplicate type 'Size'
+    type Size = u64
+}
+
+// Nested namespace with duplicates
+namespace Outer {
+    type Data = u32
+    /// @Error(TCE088): Duplicate type 'Data'
+    type Data = f32
+    
+    namespace Inner {
+        type Info = string
+        /// @Error(TCE088): Duplicate type 'Info'
+        type Info = u32
+    }
+}
+
+// Different types of type declarations
+type BasicType = u32
+/// @Error(TCE088): Duplicate type 'BasicType'
+type BasicType = struct { value: u32 }
+
+type FuncType = fn(u32) -> u32
+/// @Error(TCE088): Duplicate type 'FuncType'
+type FuncType = fn(f32) -> f32
+
+type UnionType = u32 | f32
+/// @Error(TCE088): Duplicate type 'UnionType'
+type UnionType = u64 | f64

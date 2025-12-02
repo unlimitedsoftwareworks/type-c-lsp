@@ -1,0 +1,24 @@
+// Test type shadowing imported modules - should show info notes (not errors)
+
+from duplicates.correct.file import Stream, File as F
+
+// Type shadows imported 'Stream' module
+/// @Info(TCI001): Type 'Stream' shadows an imported module
+type Stream = struct {
+    data: u8[]
+}
+
+// Type shadows imported 'F' (aliased from File)
+/// @Info(TCI001): Type 'F' shadows an imported module
+type F = u32
+
+// Type File doesn't shadow (original was imported as 'F', not 'File')
+type File = f32
+// These don't shadow - should be fine
+type Point = struct { x: u32, y: u32 }
+type Vector = struct { x: f32, y: f32, z: f32 }
+
+namespace Math {
+    // Namespace types don't shadow module imports
+    type Stream = f32  // OK - different scope, no import here
+}

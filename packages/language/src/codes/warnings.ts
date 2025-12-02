@@ -10,3 +10,10 @@
 export enum WarningCode {
     TCW001 = 'CLASS_NAME_SHOULD_START_WITH_CAPITAL',
 }
+
+/**
+ * Info codes for helpful notifications that don't indicate problems.
+ */
+export enum InfoCode {
+    TYPE_SHADOWS_IMPORTED_MODULE = 'TCI001',
+}

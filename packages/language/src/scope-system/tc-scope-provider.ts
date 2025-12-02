@@ -216,7 +216,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
         const document = AstUtils.getDocument(context.container);
         const parseResult = document.parseResult.value;
-        if (!ast.isProgram(parseResult)) {
+        if (!ast.isModule(parseResult)) {
             return EMPTY_SCOPE;
         }
         const model = parseResult;

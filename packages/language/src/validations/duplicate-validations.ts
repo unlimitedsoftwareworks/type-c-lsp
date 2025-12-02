@@ -9,6 +9,7 @@ import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import { ErrorCode } from "../codes/errors.js";
+import { InfoCode } from "../codes/warnings.js";
 
 /**
  * Validator for duplicate declarations.
@@ -20,6 +21,7 @@ import { ErrorCode } from "../codes/errors.js";
  * - Duplicate struct field names in struct type definitions
  * - Duplicate field names in struct construction expressions
  * - Duplicate type declarations within the same scope (Module/Namespace)
+ * - Type declarations shadowing imported module names (info-level diagnostic)
  *
  * Examples:
  * ```tc
@@ -44,6 +46,9 @@ import { ErrorCode } from "../codes/errors.js";
  * type Point = u32; type Point = f32  // ❌ Error - duplicate type 'Point'
  * namespace N { type T = u32; type T = f32 }  // ❌ Error - duplicate type 'T'
  * type Point = u32; namespace N { type Point = f32 }  // ✅ OK - different scopes
+ *
+ * from pkg.lib import Stream
+ * type Stream = u32  // ℹ️ Info - type shadows imported module 'Stream'
  * ```
  */
 export class DuplicateValidator extends TypeCBaseValidation {
@@ -436,10 +441,29 @@ export class DuplicateValidator extends TypeCBaseValidation {
 
     /**
      * Check for duplicate type declarations within a scope (Module or Namespace).
+     * Also checks if a type shadows an imported module name (info-level diagnostic).
      * Example: type Point = u32; type Point = f32;
      */
     checkTypeDeclarationsInScope = (node: ast.Module | ast.NamespaceDecl, accept: ValidationAcceptor): void => {
         const seenTypes = new Map<string, ast.TypeDeclaration>();
+        
+        // Collect imported module names (only at Module level)
+        const importedModuleNames = new Set<string>();
+        if (ast.isModule(node)) {
+            for (const imp of node.imports) {
+                if (imp.modules) {
+                    // Named imports: from pkg.lib import Module1, Module2 as M2
+                    for (const subModule of imp.modules) {
+                        // Use alias if provided, otherwise use the reference name
+                        const moduleName = subModule.alias || subModule.reference.$refText;
+                        if (moduleName) {
+                            importedModuleNames.add(moduleName);
+                        }
+                    }
+                }
+                // Note: importAll (*) doesn't give us specific names to check against
+            }
+        }
 
         // Get all definitions in this scope
         for (const def of node.definitions) {
@@ -459,6 +483,19 @@ export class DuplicateValidator extends TypeCBaseValidation {
                     );
                 } else {
                     seenTypes.set(typeName, def);
+                    
+                    // Check if type shadows an imported module (only at module level)
+                    if (importedModuleNames.has(typeName)) {
+                        const infoCode = InfoCode.TYPE_SHADOWS_IMPORTED_MODULE;
+                        accept('info',
+                            `Type '${typeName}' shadows an imported module with the same name. Consider using a different name to avoid confusion.`,
+                            {
+                                node: def,
+                                property: 'name',
+                                code: infoCode
+                            }
+                        );
+                    }
                 }
             }
         }

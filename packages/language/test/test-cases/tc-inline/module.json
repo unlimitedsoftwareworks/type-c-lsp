@@ -1,0 +1,15 @@
+{
+    "name": "Type-C LSP test set",
+    "version": "1.0.0",
+    "author": "praisethemoon",
+    "dependencies": {
+        "@type-c/stdlib": "=0.0.1"
+    },
+    "description": "A type-c test case",
+    "compiler": {
+        "target": "runnable",
+        "entry": "test.tc"
+    },
+    "dependenciesFolder": "./",
+    "sourceFolder": "./"
+}

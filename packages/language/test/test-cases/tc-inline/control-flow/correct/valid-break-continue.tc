@@ -1,0 +1,134 @@
+// Test valid break and continue statements - only within loops
+
+// Break in for loop
+fn testBreakInFor() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        if i == 5 {
+            break
+        }
+    }
+}
+
+// Continue in for loop
+fn testContinueInFor() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        if i == 5 {
+            continue
+        }
+    }
+}
+
+// Break in while loop
+fn testBreakInWhile() {
+    let x = 0
+    /// @NoError
+    while x < 10 {
+        x = x + 1
+        if x == 5 {
+            break
+        }
+    }
+}
+
+// Continue in while loop
+fn testContinueInWhile() {
+    let x = 0
+    /// @NoError
+    while x < 10 {
+        x = x + 1
+        if x == 5 {
+            continue
+        }
+    }
+}
+
+// Break in do-while loop
+fn testBreakInDoWhile() {
+    let x = 0
+    /// @NoError
+    do {
+        x = x + 1
+        if x == 5 {
+            break
+        }
+    } while x < 10
+}
+
+// Continue in do-while loop
+fn testContinueInDoWhile() {
+    let x = 0
+    /// @NoError
+    do {
+        x = x + 1
+        if x == 5 {
+            continue
+        }
+    } while x < 10
+}
+
+// Break in foreach loop
+fn testBreakInForeach() {
+    /// @NoError
+    foreach item in [1, 2, 3, 4, 5] {
+        if 3 == 3 {
+            break
+        }
+    }
+}
+
+// Continue in foreach loop
+fn testContinueInForeach() {
+    /// @NoError
+    foreach item in [1, 2, 3, 4, 5] {
+        if 3 == 3 {
+            continue
+        }
+    }
+}
+
+// Nested loops with break/continue
+fn testNestedLoops() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        for let j = 0; j < 10; j = j + 1 {
+            if j == 5 {
+                break  // Breaks inner loop
+            }
+            if i == 3 {
+                continue  // Continues inner loop
+            }
+        }
+    }
+}
+
+// Break/continue in nested blocks within loops
+fn testBreakContinueInNestedBlocks() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        {
+            {
+                if i == 5 {
+                    break  // OK - still within loop
+                }
+            }
+        }
+        if i == 3 {
+            continue  // OK - within loop
+        }
+    }
+}
+
+// Break and continue in same loop
+fn testBreakAndContinue() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        if i == 3 {
+            continue
+        }
+        if i == 7 {
+            break
+        }
+    }
+}

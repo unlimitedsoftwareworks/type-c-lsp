@@ -11,6 +11,7 @@ import { FunctionOverloadValidator } from './validations/function-overload-valid
 import { TypeCVariableUsageValidator } from './validations/variable-usage-validation.js';
 import { TypeCVariableInitializerValidator } from './validations/variable-initializer-validation.js';
 import { DuplicateValidator } from './validations/duplicate-validations.js';
+import { TypeCControlFlowValidator } from './validations/control-flow-validation.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
@@ -34,7 +35,8 @@ export type TypeCAddedServices = {
         FunctionOverloadValidator: FunctionOverloadValidator,
         VariableUsageValidator: TypeCVariableUsageValidator,
         VariableInitializerValidator: TypeCVariableInitializerValidator,
-        DuplicateValidator: DuplicateValidator
+        DuplicateValidator: DuplicateValidator,
+        ControlFlowValidator: TypeCControlFlowValidator
     },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
@@ -58,7 +60,8 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services),
         VariableUsageValidator: () => new TypeCVariableUsageValidator(),
         VariableInitializerValidator: () => new TypeCVariableInitializerValidator(),
-        DuplicateValidator: (services: TypeCServices) => new DuplicateValidator(services)
+        DuplicateValidator: (services: TypeCServices) => new DuplicateValidator(services),
+        ControlFlowValidator: () => new TypeCControlFlowValidator()
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),

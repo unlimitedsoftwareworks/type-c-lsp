@@ -1,0 +1,151 @@
+// Test invalid break and continue statements - outside loops
+
+
+// Break in function without loop
+fn testBreakOutsideLoop() {
+    /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+    break
+}
+
+// Continue in function without loop
+fn testContinueOutsideLoop() {
+    /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+    continue
+}
+
+// Break in if statement (not in loop)
+fn testBreakInIf() {
+    let x = 5
+    if x == 5 {
+        /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+        break
+    }
+}
+
+// Continue in if statement (not in loop)
+fn testContinueInIf() {
+    let x = 5
+    if x == 5 {
+        /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+        continue
+    }
+}
+
+// Break in block statement (not in loop)
+fn testBreakInBlock() {
+    {
+        /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+        break
+    }
+}
+
+// Continue in block statement (not in loop)
+fn testContinueInBlock() {
+    {
+        /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+        continue
+    }
+}
+
+// Break in lambda/nested function
+fn testBreakInLambda() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        let lambda = fn() {
+            /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+            break  // Error - not in loop context, function boundary crossed
+        }
+    }
+}
+
+// Continue in lambda/nested function
+fn testContinueInLambda() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        let lambda = fn() {
+            /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+            continue  // Error - not in loop context, function boundary crossed
+        }
+    }
+}
+
+// Break after loop
+fn testBreakAfterLoop() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        break  // OK - inside loop
+    }
+    /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+    break  // Error - outside loop
+}
+
+// Continue after loop
+fn testContinueAfterLoop() {
+    /// @NoError
+    for let i = 0; i < 10; i = i + 1 {
+        continue  // OK - inside loop
+    }
+    /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+    continue  // Error - outside loop
+}
+
+// Break in match expression (not in loop)
+fn testBreakInMatch() {
+    let x = 5
+    match x {
+        5 {
+            /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+            break
+        },
+
+        _ { 
+            /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+            continue
+        }
+    }
+}
+
+// Continue in match expression (not in loop)
+fn testContinueInMatch() {
+    let x = 5
+    match x {
+        5 {
+            /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+            continue
+        },
+        _ { }
+    }
+}
+
+// Break in nested blocks outside loop
+fn testBreakInNestedBlocksOutsideLoop() {
+    {
+        {
+            {
+                /// @Error(TCE090): Control flow error: 'break' statement can only be used inside a loop
+                break
+            }
+        }
+    }
+}
+
+// Continue in nested blocks outside loop
+fn testContinueInNestedBlocksOutsideLoop() {
+    {
+        {
+            {
+                /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+                continue
+            }
+        }
+    }
+
+    for let i = 0u32; i < 10; i++ {
+        let x = fn() {
+            /// @Error(TCE091): Control flow error: 'continue' statement can only be used inside a loop
+            continue
+        }
+        break
+        continue
+    }
+}

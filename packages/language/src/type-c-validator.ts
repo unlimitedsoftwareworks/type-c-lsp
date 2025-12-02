@@ -12,6 +12,7 @@ export function registerValidationChecks(services: TypeCServices) {
         services.validation.VariableUsageValidator,
         services.validation.DuplicateValidator,
         services.validation.VariableInitializerValidator,
+        services.validation.ControlFlowValidator,
     ]
     for (const validation of validations) {
         registry.register(validation.getChecks(), validation);

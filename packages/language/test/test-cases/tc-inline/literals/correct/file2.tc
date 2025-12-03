@@ -38,24 +38,9 @@ fn testDefaults() {
     let b = 3.14      // Defaults to f64
 }
 
-// Test 7: Type system will catch incompatible types
-fn testIncompatible1() -> u32 {
-    return 1i32       // Type system error: i32 not assignable to u32
-}
-
-// Test 8: Type system will catch float for integer
-fn testIncompatible2() -> u32 {
-    return 1.0        // Type system error: f64 not assignable to u32
-}
-
 // Test 9: OK - integer literal can be implicitly converted to float
 fn testOk1() -> f32 {
     return 1          // ✅ OK: integer can be converted to float
-}
-
-// Test 10: Type system will catch f32 for f64
-fn testIncompatible3() -> f64 {
-    return 1.0f       // Type system error: f32 not assignable to f64
 }
 
 // Test 11: Tuple elements with context

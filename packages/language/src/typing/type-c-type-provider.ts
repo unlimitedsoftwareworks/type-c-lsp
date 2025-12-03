@@ -442,6 +442,57 @@ export class TypeCTypeProvider {
             }
         }
 
+        // Lambda parameter inference: fn(x) -> ... where lambda is expected to have type fn(T) -> U
+        // If the lambda is passed to a function expecting a specific function type, use that
+        if (parent && ast.isLambdaExpression(parent)) {
+            const expectedLambdaType = this.getExpectedType(parent);
+            if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
+                // Check if this node is one of the lambda's parameters
+                const paramIndex = parent.header.args?.findIndex(arg => arg === node);
+                if (paramIndex !== undefined && paramIndex >= 0 && paramIndex < expectedLambdaType.parameters.length) {
+                    return expectedLambdaType.parameters[paramIndex].type;
+                }
+            }
+        }
+
+        // Lambda body expression: fn(x) = expr where lambda is expected to have return type U
+        // If the lambda has an expected function type, propagate return type to body expression
+        if (parent && ast.isLambdaExpression(parent) && parent.expr === node) {
+            const expectedLambdaType = this.getExpectedType(parent);
+            if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
+                // Return the expected return type for the lambda's body expression
+                return expectedLambdaType.returnType;
+            }
+        }
+
+        // Yield expression: yield expr in coroutine
+        // Should use the coroutine's declared yield type
+        if (parent && ast.isYieldExpression(parent) && parent.expr === node) {
+            // Find the containing coroutine (function or lambda with cfn type)
+            const containingFn = AstUtils.getContainerOfType(parent, ast.isFunctionDeclaration);
+            if (containingFn && containingFn.fnType === 'cfn' && containingFn.header.returnType) {
+                // For coroutines, returnType is actually the yield type
+                return this.getType(containingFn.header.returnType);
+            }
+            
+            const containingLambda = AstUtils.getContainerOfType(parent, ast.isLambdaExpression);
+            if (containingLambda && containingLambda.fnType === 'cfn' && containingLambda.header.returnType) {
+                // For coroutine lambdas, returnType is actually the yield type
+                return this.getType(containingLambda.header.returnType);
+            }
+        }
+
+        // Do expression final value: do { ... expr }
+        // The final expression should match the expected type of the do expression
+        if (parent && ast.isDoExpression(parent)) {
+            // Check if this is the last statement/expression in the block
+            // For now, we'll propagate the do expression's expected type to all expressions
+            const expectedDoType = this.getExpectedType(parent);
+            if (expectedDoType) {
+                return expectedDoType;
+            }
+        }
+
         // No expected type found
         return undefined;
     }

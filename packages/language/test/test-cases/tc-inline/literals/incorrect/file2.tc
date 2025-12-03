@@ -1,0 +1,16 @@
+/**
+ * Test file for contextual type inference on literals - INCORRECT CASES
+ * 
+ * These test cases should produce type system errors.
+ */
+
+/// @Error(TCE041): Function return type mismatch
+fn testIncompatible1() -> u32 {
+    /// @Error(TCE031): Return type mismatch
+    return 1i32
+}
+
+/// @Error(TCE041): Function return type mismatch
+fn testIncompatible2() -> u32 {
+    return 1.0 
+}

@@ -40,7 +40,7 @@ ExternFFIDecl:
     '}';
 
 ExternMethodHeader infers FFIMethodHeader:
-    'fn' name=ID header=FnHeader;
+    'fn' name=ID header=FnHeader<true> ;
 
 
 NamespaceDecl:
@@ -63,7 +63,7 @@ FnDecl<allowLocal> returns FunctionDeclaration:
     fnType='fn' 
     name=ID 
     GenericDecl? 
-    header=FnHeader 
+    header=FnHeader<true> 
     (
         ('=' expr=TupleExpression) | 
         (body=BlockStatement)
@@ -74,7 +74,7 @@ CFnDecl<allowLocal> returns FunctionDeclaration:
     fnType='cfn' 
     name=ID 
     GenericDecl? 
-    header=FnHeader 
+    header=FnHeader<true> 
     (
         ('=' expr=TupleExpression) | 
         (body=BlockStatement)
@@ -91,8 +91,12 @@ interface FunctionTypeHeader {
     returnType: DataType;
 }
 
-FnHeader returns FunctionHeader:
-    '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' ('->' returnType=DataType<true>)?;
+/**
+ * Either regular, where args are (x: u32)
+ * or a lambda where arg types could be inferred: map([1u32], fn(x) = x*2)
+ */
+FnHeader<regular> returns FunctionHeader:
+    '(' ((args+=FnParam<regular>) (',' args+=FnParam<regular>)*)? ')' ('->' returnType=DataType<true>)?;
 
 FnTypeHeader returns FunctionTypeHeader:
     '(' ((args+=FnTypeParam) (',' args+=FnTypeParam)*)? ')' ('->' returnType=DataType<true>)?;
@@ -101,10 +105,13 @@ FnTypeHeader returns FunctionTypeHeader:
 interface FunctionParameter {
     isMut: boolean;
     name: string;
-    type: DataType;
+    type?: DataType;
 }
-FnParam returns FunctionParameter:
-    (isMut?='mut')? name=ID ':' type=DataType<false>;
+FnParam<regular> returns FunctionParameter:
+    (<regular> (isMut?='mut')? name=ID ':' type=DataType<false>) |
+    (isMut?='mut')? name=ID( ':' type=DataType<false>)?
+    ;
+   
 
 
 interface FunctionTypeParameter {
@@ -354,7 +361,7 @@ DoExpression infers Expression:
     {infer DoExpression} 'do' body=BlockStatement ;
 
 LambdaExpression infers Expression:
-    {infer LambdaExpression} fnType=('fn' | 'cfn') header=FnHeader (body=BlockStatement | '=' expr=TupleExpression);
+    {infer LambdaExpression} fnType=('fn' | 'cfn') header=FnHeader<false> (body=BlockStatement | '=' expr=TupleExpression);
 
 // Example literal
 LiteralExpression infers LiteralExpression:
@@ -565,10 +572,10 @@ ImplementationMethodDecl:
 
 
 FunctionType:
-    fnType=('fn'|'cfn') header=(FnHeader|FnTypeHeader);
+    fnType=('fn'|'cfn') header=(FnTypeHeader | FnHeader<true>);
 
 CoroutineType:
-    'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader '>';
+    'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader<true>  '>';
 
 ReturnType:
     'ReturnType' '(' returnType=DataType<false> ')';
@@ -592,7 +599,7 @@ interface MethodHeader {
 }
 
 MethodHeader<withinClass> returns MethodHeader:
-    'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader) | <!withinClass> header=FnHeader);
+    'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader<true> ) | <!withinClass> header=FnHeader<true> );
 
 fragment ClassAttributesDecl:
     'let' attributes+=ClassAttributeDecl (',' attributes+=ClassAttributeDecl)*;
@@ -779,7 +786,7 @@ BuiltinDefinition:
 
 BuiltinSymbol:
     {infer BuiltinSymbolID} name=ID ':' type=DataType<false> |
-    {infer BuiltinSymbolFn} 'fn' MethodNames GenericDecl? '(' ((args+=FnParam) (',' args+=FnParam)*)? ')' '->' returnType=DataType<true>;
+    {infer BuiltinSymbolFn} 'fn' MethodNames GenericDecl? '(' ((args+=FnParam<true>) (',' args+=FnParam<true>)*)? ')' '->' returnType=DataType<true>;
 
 
  

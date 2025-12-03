@@ -71,10 +71,10 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         declarations.push(...container.header?.args ?? []);  
     }
     else if (ast.isLambdaExpression(container)) {
-        declarations.push(...container.header.args ?? []);
+        declarations.push(...container.header?.args ?? []);
     }
     else if (ast.isBuiltinSymbolFn(container)) {
-        declarations.push(...container.genericParameters ?? []);
+        declarations.push(...container?.genericParameters ?? []);
     }
     else if (ast.isBlockStatement(container)) {
         //console.log('Found block statement');

@@ -1,0 +1,201 @@
+/**
+ * Contextual type inference for complex types
+ * 
+ * Demonstrates that contextual typing works with:
+ * - Classes (constructor arguments, method returns)
+ * - Interfaces (method implementations, struct compatibility)
+ * - Variants (constructor calls, pattern matching)
+ * - Generics with complex types
+ */
+
+// ============================================================================
+// CLASSES
+// ============================================================================
+
+// Test 1: Class constructor with contextual typing
+type Point = class {
+    let x: f32
+    let y: f32
+}
+
+fn testClassConstructor() {
+    // Constructor arguments infer from class attributes
+    let p = new Point(1.0, 2.0)  // Both infer as f32
+    let q = new Point(3, 4)       // Integers coerce to f32
+}
+
+// Test 2: Generic class with contextual typing
+type Box<T> = class {
+    let value: T
+}
+
+fn testGenericClass() {
+    // Constructor argument infers as u32 from generic instantiation
+    let box = new Box<u32>(42)
+}
+
+// Test 3: Class method return type contextual typing
+type Counter = class {
+    let count: u32
+    
+    fn increment() -> u32 = this.count + 1  // 1 infers as u32
+    
+    fn add(n: u32) -> u32 = this.count + n  // Uses parameter type
+}
+
+// ============================================================================
+// INTERFACES
+// ============================================================================
+
+// Test 4: Interface with generic methods
+type Serializable<T> = interface {
+    fn serialize() -> T
+    fn deserialize(data: T) -> void
+}
+
+// Test 5: Class implementing interface (method bodies use interface types)
+type User = class : Serializable<string> {
+    let name: string
+    
+    fn serialize() -> string = this.name  // return type from interface
+    
+    fn deserialize(data: string) {
+        // data type from interface parameter
+    }
+}
+
+// Test 6: Structural interface compatibility with structs
+type Drawable = interface {
+    fn draw() -> {x: f32, y: f32}
+}
+
+type Shape = class : Drawable {
+    fn draw() -> {x: f32, y: f32} = {
+        x: 1.0,  // Infers f32 from interface return type
+        y: 2.0   // Infers f32 from interface return type
+    }
+}
+
+// ============================================================================
+// VARIANTS
+// ============================================================================
+
+// Test 7: Variant constructors with contextual typing
+type Result<T, E> = variant {
+    Ok(T),
+    Err(E)
+}
+
+fn testVariantConstructors() {
+    // Constructor arguments infer types, generic args inferred from usage
+    let success = Result.Ok(42)           // Result<i32, never>
+    let failure = Result.Err("error")     // Result<never, string>
+    
+    // Explicit generic args provide context
+    let typed: Result<u32, string> = Result.Ok(10)  // 10 infers as u32
+}
+
+// Test 8: Variant in array (common type inference)
+fn testVariantArray() -> Result<u32, string>[] {
+    // Array elements use contextual typing from return type
+    return [
+        Result.Ok(1),      // 1 infers as u32
+        Result.Err("bad")  // "bad" infers as string
+    ]
+}
+
+// Test 9: Option variant (common pattern)
+type Option<T> = variant {
+    Some(T),
+    None
+}
+
+fn testOption() -> Option<f32> {
+    // Pattern matching with contextual typing
+    return match true {
+        true => Option.Some(3.14),  // 3.14 infers as f32
+        false => Option.None
+    }
+}
+
+// ============================================================================
+// COMPLEX NESTED TYPES
+// ============================================================================
+
+// Test 10: Nested generics with classes and variants
+type Container<T> = class {
+    let items: T[]
+}
+
+fn testNestedGenerics() -> Container<Option<u32>> {
+    return new Container([
+        Option.Some(1),  // 1 infers as u32
+        Option.Some(2),  // 2 infers as u32
+        Option.None
+    ])
+}
+
+// Test 11: Interface with variant return type
+type Repository<T, E> = interface {
+    fn fetch(id: u64) -> Result<T, E>
+}
+
+type UserRepo = class : Repository<User, string> {
+    fn fetch(id: u64) -> Result<User, string> {
+        // id inferred as u64 from interface
+        return match id {
+            0 => Result.Err("not found"),  // Infers string from interface
+            _ => Result.Ok(new User())      // Constructs User
+        }
+    }
+}
+
+// Test 12: Struct with variant fields
+type Response = {
+    status: u32,
+    data: Option<string>
+}
+
+fn testStructWithVariant() -> Response {
+    return {
+        status: 200,                    // Infers u32 from struct type
+        data: Option.Some("success")    // Infers Option<string>
+    }
+}
+
+// Test 13: Lambda returning complex type
+fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
+    return f()
+}
+
+fn testLambdaComplexReturn() {
+    let result = processResult(fn() -> Result.Ok(42))
+    // Lambda return type infers from processResult's parameter
+    // 42 infers from Result.Ok's generic parameter
+}
+
+// Test 14: Class with method returning interface
+type Validator = interface {
+    fn isValid() -> bool
+}
+
+type EmailValidator = class : Validator {
+    fn isValid() -> bool = true  // true infers bool from interface
+}
+
+type ValidatorFactory = class {
+    fn create() -> Validator = new EmailValidator()
+}
+
+// Test 15: Variant with struct fields
+type Event = variant {
+    Click({x: u32, y: u32}),
+    KeyPress({key: string, code: u32})
+}
+
+fn testVariantWithStruct() -> Event {
+    return Event.Click({
+        x: 100,  // Infers u32 from variant constructor field type
+        y: 200   // Infers u32 from variant constructor field type
+    })
+}

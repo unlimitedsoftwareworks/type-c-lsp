@@ -2846,9 +2846,53 @@ export class TypeCTypeProvider {
     }
 
     private inferAnonymousStructConstruction(node: ast.AnonymousStructConstructionExpression): TypeDescription {
-        // Anonymous struct with just expressions - create tuple
-        const types = node.expressions?.map(e => this.inferExpression(e)) ?? [];
-        return factory.createTupleType(types, node);
+        // Get the expected type from context
+        const expectedType = this.getExpectedType(node);
+        
+        // Resolve reference types if needed
+        let resolvedExpectedType = expectedType;
+        if (expectedType && isReferenceType(expectedType)) {
+            resolvedExpectedType = this.resolveReference(expectedType);
+        }
+        
+        // Check if expected type is a struct (could be a struct or join type resolving to struct)
+        const expectedStruct = resolvedExpectedType ? this.typeUtils.asStructType(resolvedExpectedType) : undefined;
+        
+        if (expectedStruct) {
+            // Infer as anonymous struct based on expected type
+            const expressions = node.expressions ?? [];
+            
+            // Check if the number of expressions matches the number of fields
+            if (expressions.length !== expectedStruct.fields.length) {
+                return factory.createErrorType(
+                    `Anonymous struct has ${expressions.length} value(s), but expected struct type has ${expectedStruct.fields.length} field(s)`,
+                    undefined,
+                    node
+                );
+            }
+            
+            // Map expressions to struct fields in order
+            const fields = expressions.map((expr, index) => {
+                const expectedField = expectedStruct.fields[index];
+                const inferredType = this.inferExpression(expr);
+                
+                return factory.createStructField(
+                    expectedField.name,  // Use expected field name
+                    inferredType,        // Use inferred type (will be validated later)
+                    expr                 // Use expression as node
+                );
+            });
+            
+            return factory.createStructType(fields, true, node);
+        }
+        
+        // No expected type or not a struct - cannot infer
+        return factory.createErrorType(
+            `Cannot infer type of anonymous struct literal {${node.expressions?.length ?? 0} values}. ` +
+            `Anonymous struct literals require a known struct type context (e.g., from return type or variable annotation)`,
+            undefined,
+            node
+        );
     }
 
     private inferNewExpression(node: ast.NewExpression): TypeDescription {

@@ -1,12 +1,5 @@
-type Collectible<T> = interface {
-    fn collect() -> T
-}
-
-
-
-type Pokemon = class {
-    fn collect() -> {x: u32, y: u32} {
-        //return {1, 2}
-        return {x: 1u32, y: 2u32}
-    }
+ fn collect() -> {x: u32, y: u32} {
+    let x: u32 = 1
+    let y: u32 = 1
+    return {x, y}
 }

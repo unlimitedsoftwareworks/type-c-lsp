@@ -1,0 +1,7 @@
+
+/// @Error(TCE040): Cannot infer type of anonymous struct literal
+fn collect() {
+    let x: u32 = 1
+    let y: u32 = 1
+    return {x, y}
+}

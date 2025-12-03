@@ -1,0 +1,109 @@
+// Comprehensive test cases for lambda contextual typing
+
+// Test 1: Lambda parameter inference from expected function type
+fn map<T, U>(arr: T[], f: fn(a: T) -> U) -> U[] {
+    let result: U[] = []
+    return result
+}
+
+fn test1() {
+    // Parameter 'x' inferred as i32 from array element type
+    let doubled = map([1, 2, 3], fn(x) = x * 2)
+}
+
+// Test 2: Lambda return type inference with contextual typing
+fn filter<T>(arr: T[], predicate: fn(a: T) -> bool) -> T[] {
+    let result: T[] = []
+    return result
+}
+
+fn test2() {
+    // Lambda infers parameter and return types from context
+    let evens = filter([1, 2, 3, 4], fn(x) = x % 2 == 0)
+}
+
+// Test 3: Nested lambda inference
+fn compose<A, B, C>(f: fn(a: B) -> C, g: fn(a: A) -> B) -> fn(a: A) -> C {
+    return fn(x) = f(g(x))
+}
+
+fn test3() {
+    let double = fn(x: i32) = x * 2
+    let addTen = fn(x: i32) = x + 10
+    let combined = compose(double, addTen)
+}
+
+// Test 4: Lambda with struct return type
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+fn transform(points: Point[], f: fn(a: Point) -> Point) -> Point[] {
+    let result: Point[] = []
+    return result
+}
+
+fn test4() {
+    let points: Point[] = []
+    let scaled = transform(points, fn(p) = {x: p.x * 2.0f, y: p.y * 2.0f})
+}
+
+// Test 5: Lambda with variant return type
+type Option<T> = variant {
+    Some(value: T),
+    None()
+}
+
+fn findFirst<T>(arr: T[], predicate: fn(a: T) -> bool) -> Option<T> {
+    return Option.None()
+}
+
+fn test5() {
+    let found = findFirst([1, 2, 3], fn(x) = x > 2)
+}
+
+// Test 6: Lambda with explicit generic arguments
+fn reduce<T, U>(arr: T[], initial: U, f: fn(acc: U, item: T) -> U) -> U {
+    return initial
+}
+
+fn test6() {
+    let sum = reduce([1, 2, 3], 0, fn(acc, x) = acc + x)
+}
+
+// Test 7: Lambda capturing with contextual typing
+fn test7() {
+    let multiplier = 10
+    let multiply = fn(x: i32) = x * multiplier
+    let arr = map([1, 2, 3], multiply)
+}
+
+// Test 8: Lambda with tuple return
+fn zipWith<A, B, C>(a: A[], b: B[], f: fn(x: A, y: B) -> C) -> C[] {
+    let result: C[] = []
+    return result
+}
+
+fn test8() {
+    let pairs = zipWith([1, 2], [3, 4], fn(x, y) = (x, y))
+}
+
+// Test 9: Lambda assigned to variable with explicit type
+fn test9() {
+    let adder: fn(a: i32, b: i32) -> i32 = fn(x, y) = x + y
+}
+
+// Test 10: Lambda with nullable types
+fn mapOption<T, U>(opt: Option<T>, f: fn(a: T) -> U) -> Option<U> {
+    return match opt {
+        Option.Some(v) => Option.Some(f(v)),
+        Option.None() => Option.None(),
+        _ => Option.None()
+    }
+}
+
+fn test10() {
+    let opt: Option<i32> = Option.Some(42)
+    let doubled = mapOption(opt, fn(x) = x * 2)
+}

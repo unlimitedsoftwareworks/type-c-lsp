@@ -383,11 +383,11 @@ FloatingPointLiteral:
     value=DOUBLE_LITERAL { infer DoubleLiteral };
 
 BooleanLiteral:
-    TRUE_LITERAL { infer TrueBooleanLiteral } |
-    FALSE_LITERAL { infer FalseBooleanLiteral };
+    'true' { infer TrueBooleanLiteral } |
+    'false' { infer FalseBooleanLiteral };
 
 NullLiteral:
-    NULL { infer NullLiteralExpression };
+    'null' { infer NullLiteralExpression };
 
 BinaryStringLiteral:
     value=BINARY_STRING { infer BinaryStringLiteralExpression };
@@ -590,7 +590,7 @@ PrimitiveType:
     voidType='void' |
     stringType='string' |
     neverType='never' |
-    nullType=NULL;
+    nullType='null';
 
 interface MethodHeader {
     header: FunctionHeader;
@@ -830,9 +830,6 @@ terminal BINARY_STRING: /b"[^"]*"/;
 // regular string: "hello", treated as std interface/class
 terminal STRING: /"[^"]*"/;
 
-terminal TRUE_LITERAL: 'true';
-terminal FALSE_LITERAL: 'false';
-terminal NULL: 'null';
 terminal ID: /(_[a-zA-Z0-9_]+|[a-zA-Z][a-zA-Z0-9_]*)/;
 terminal WILDCARD: '_';
 terminal UPPERCASE_ID: /[A-Z][a-zA-Z0-9_]*[?!]?/;

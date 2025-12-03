@@ -1,0 +1,129 @@
+// Comprehensive test cases for array contextual typing
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+// Test 1: Empty array with contextual typing
+fn test1() {
+    let arr: i32[] = []
+    let arr2: u32[] = []
+}
+
+// Test 2: Array element inference from context
+fn test2() {
+    let numbers: u32[] = [1u32, 2u32, 3u32]
+}
+
+// Test 3: Array of variants with unified types
+fn test3() {
+    let results: Result<i32, string>[] = [
+        Result.Ok(1),
+        Result.Ok(2),
+        Result.Err("error")
+    ]
+}
+
+// Test 4: Nested arrays
+fn test4() {
+    let matrix: i32[][] = [[1, 2], [3, 4]]
+}
+
+// Test 5: Array with struct elements
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+fn test5() {
+    let points: Point[] = [
+        {x: 0.0f, y: 0.0f},
+        {x: 1.0f, y: 1.0f}
+    ]
+}
+
+// Test 6: Array in function parameter
+fn sum(arr: i32[]) -> i32 {
+    return 0
+}
+
+fn test6() {
+    let total = sum([1, 2, 3, 4])
+}
+
+// Test 7: Generic function with array
+fn map<T, U>(arr: T[], f: fn(a: T) -> U) -> U[] {
+    let result: U[] = []
+    return result
+}
+
+fn test7() {
+    let doubled = map([1, 2, 3], fn(x: i32) = x * 2)
+}
+
+// Test 8: Array of lambdas
+fn test8() {
+    let operations: (fn(a: i32) -> i32)[] = [
+        fn(x: i32) = x + 1,
+        fn(x: i32) = x * 2,
+        fn(x: i32) = x - 1
+    ]
+}
+
+// Test 9: Array spread/concatenation
+fn test9() {
+    let arr1: i32[] = [1, 2, 3]
+    let arr2: i32[] = [4, 5, 6]
+}
+
+// Test 10: Multi-dimensional arrays with contextual typing
+fn test10() {
+    let grid: i32[][] = [
+        [1, 2, 3],
+        [4, 5, 6],
+        [7, 8, 9]
+    ]
+}
+
+// Test 11: Array with nullable elements
+fn test11() {
+    let nullable: i32?[] = []
+}
+
+// Test 12: Array return type inference
+fn makeArray() -> i32[] {
+    return [1, 2, 3]
+}
+
+fn test12() {
+    let arr = makeArray()
+}
+
+// Test 13: Array with ~~tuple elements~~ tuples are only for returns
+fn test13() {
+}
+
+// Test 14: Array with option elements
+fn test14() {
+    let options: Option<i32>[] = [
+        Option.Some(1),
+        Option.Some(2),
+        Option.None
+    ]
+}
+
+// Test 15: Array comprehension style with contextual typing
+fn filter<T>(arr: T[], predicate: fn(a: T) -> bool) -> T[] {
+    let result: T[] = []
+    return result
+}
+
+fn test15() {
+    let evens: i32[] = filter([1, 2, 3, 4], fn(x: i32) = x % 2 == 0)
+}

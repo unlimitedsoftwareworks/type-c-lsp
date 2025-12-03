@@ -1,0 +1,133 @@
+// Comprehensive test cases for struct contextual typing
+
+type Point2D = struct {
+    x: f32,
+    y: f32
+}
+
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+type Color = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+}
+
+// Test 1: Anonymous struct with contextual typing
+fn createPoint(factory: fn() -> Point2D) -> Point2D {
+    return factory()
+}
+
+fn test1() {
+    let point = createPoint(fn() = {x: 1.0f, y: 2.0f})
+}
+
+// Test 2: Struct spread with contextual typing
+fn test2() {
+    let base: Point2D = {x: 1.0f, y: 2.0f}
+    let extended: Point3D = {...base, z: 3.0f}
+}
+
+// Test 3: Nested structs
+type Entity = struct {
+    position: Point2D,
+    color: Color
+}
+
+fn test3() {
+    let entity: Entity = {
+        position: {x: 10.0f, y: 20.0f},
+        color: {r: 255u8, g: 0u8, b: 0u8, a: 255u8}
+    }
+}
+
+// Test 4: Array of structs with contextual typing
+fn test4() {
+    let points: Point2D[] = [
+        {x: 0.0f, y: 0.0f},
+        {x: 1.0f, y: 1.0f},
+        {x: 2.0f, y: 2.0f}
+    ]
+}
+
+// Test 5: Struct in variant
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn test5() {
+    let result: Result<Point2D, string> = Result.Ok({x: 1.0f, y: 2.0f})
+}
+
+// Test 6: Generic function with struct
+fn map<T, U>(opt: T, f: fn(a: T) -> U) -> U {
+    return f(opt)
+}
+
+fn test6() {
+    let p: Point2D = {x: 1.0f, y: 2.0f}
+    let scaled = map(p, fn(point) = {x: point.x * 2.0f, y: point.y * 2.0f})
+}
+
+// Test 7: Struct field inference from context
+type Transform = struct {
+    translate: Point2D,
+    scale: Point2D,
+    rotation: f32
+}
+
+fn test7() {
+    let transform: Transform = {
+        translate: {x: 10.0f, y: 20.0f},
+        scale: {x: 2.0f, y: 2.0f},
+        rotation: 0.0f
+    }
+}
+
+// Test 8: Struct as function return with contextual typing
+fn makeColor(r: u8, g: u8, b: u8) -> Color {
+    return {r: r, g: g, b: b, a: 255u8}
+}
+
+fn test8() {
+    let red = makeColor(255u8, 0u8, 0u8)
+}
+
+// Test 9: Struct destructuring with contextual typing
+fn test9() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let (x, y) = (point.x, point.y)
+}
+
+// Test 10: Join types (intersection) with structs
+type Drawable = struct {
+    visible: bool,
+    opacity: f32
+}
+
+type Positioned = struct {
+    x: f32,
+    y: f32
+}
+
+fn render(obj: Drawable & Positioned) {
+    // Can access all fields from both types
+    let _ = obj.visible
+    let _ = obj.x
+}
+
+fn test10() {
+    let obj: Drawable & Positioned = {
+        visible: true,
+        opacity: 1.0f,
+        x: 10.0f,
+        y: 20.0f
+    }
+    render(obj)
+}

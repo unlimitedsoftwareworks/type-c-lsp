@@ -1,0 +1,174 @@
+// Test cases for array contextual typing errors
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+// ERROR: Empty array without type context
+fn test1() {
+    // ERROR: Cannot infer type of empty array
+    let arr = []
+}
+
+// ERROR: Array element type mismatch
+fn test2() {
+    // ERROR: Cannot have mixed i32 and string in same array
+    let arr: i32[] = [1, 2, "hello"]
+}
+
+// ERROR: Array type doesn't match declaration
+fn test3() {
+    // ERROR: Array of strings but declared as i32[]
+    let arr: i32[] = ["hello", "world"]
+}
+
+// ERROR: Nested array depth mismatch
+fn test4() {
+    // ERROR: Expected i32[][] but got i32[][][]
+    let matrix: i32[][] = [[[1, 2], [3, 4]]]
+}
+
+// ERROR: Array with wrong struct element type
+fn test5() {
+    // ERROR: Point expects f32 but got i32
+    let points: Point[] = [
+        {x: 1.0f, y: 2.0f},
+        {x: 3, y: 4.0f}
+    ]
+}
+
+// ERROR: Array in function parameter with wrong type
+fn sum(arr: i32[]) -> i32 {
+    return 0
+}
+
+fn test6() {
+    // ERROR: Passing string[] where i32[] expected
+    let total = sum(["hello", "world"])
+}
+
+// ERROR: Generic function array type mismatch
+fn map<T, U>(arr: T[], f: fn(a: T) -> U) -> U[] {
+    let result: U[] = []
+    return result
+}
+
+fn test7() {
+    // ERROR: Function expects i32 but array has strings
+    let result = map(["hello", "world"], fn(x: i32) = x * 2)
+}
+
+// ERROR: Array of lambdas with wrong signature
+fn test8() {
+    // ERROR: Second lambda has wrong return type
+    let operations: fn(a: i32) -> i32[] = [
+        fn(x: i32) = x + 1,
+        fn(x: i32) = "hello"
+    ]
+}
+
+// ERROR: Multi-dimensional array element type mismatch
+fn test9() {
+    // ERROR: Inner arrays have mixed types
+    let grid: i32[][] = [
+        [1, 2, 3],
+        ["a", "b", "c"]
+    ]
+}
+
+// ERROR: Array with nullable elements type mismatch
+fn test10() {
+    // ERROR: Array expects i32? but got string
+    let arr: i32?[] = [1, 2, "hello"]
+}
+
+// ERROR: Array return type mismatch
+fn makeArray() -> u32[] {
+    // ERROR: Returns i32[] but declared as u32[]
+    return [1, 2, 3]
+}
+
+fn test11() {
+    let arr = makeArray()
+}
+
+// ERROR: Array with tuple elements type mismatch
+fn test12() {
+    // ERROR: Second tuple has wrong types
+    let pairs: (i32, string)[] = [
+        (1, "one"),
+        ("two", 2)
+    ]
+}
+
+// ERROR: Array with variant elements wrong type
+fn test13() {
+    // ERROR: Cannot unify Result<i32, never> with Result<string, never>
+    let results: Result<i32, string>[] = [
+        Result.Ok(1),
+        Result.Ok("hello")
+    ]
+}
+
+// ERROR: Array filter with wrong predicate return type
+fn filter<T>(arr: T[], predicate: fn(a: T) -> bool) -> T[] {
+    let result: T[] = []
+    return result
+}
+
+fn test14() {
+    // ERROR: Predicate returns i32 instead of bool
+    let filtered = filter([1, 2, 3, 4], fn(x: i32) = x * 2)
+}
+
+// ERROR: Array size mismatch in assignment
+fn test15() {
+    // ERROR: Array literal has wrong element types
+    let arr: u32[] = [1u32, 2u32, "three"]
+}
+
+// ERROR: Array with incompatible generic types
+fn test16() {
+    // ERROR: Result<i32, string> not compatible with Result<i32, bool>
+    let arr: Result<i32, bool>[] = [
+        Result.Ok(1),
+        Result.Err("error")
+    ]
+}
+
+// ERROR: Nested array with wrong inner type
+fn test17() {
+    // ERROR: Inner arrays have wrong types
+    let nested: u32[][] = [
+        [1u32, 2u32],
+        ["hello", "world"]
+    ]
+}
+
+// ERROR: Array construction in lambda with wrong type
+fn test18() {
+    // ERROR: Lambda returns string[] but declared as i32[]
+    let f: fn() -> i32[] = fn() = ["hello", "world"]
+}
+
+// ERROR: Array method call with wrong type
+fn test19() {
+    let arr: i32[] = [1, 2, 3]
+    // ERROR: map expects fn(i32) -> T but got fn(string) -> string
+    // Note: This would be caught by method validation, not array validation
+}
+
+// ERROR: Complex nested structure with array type error
+fn test20() {
+    // ERROR: Inner Result has wrong error type
+    let complex: Result<Point[], string>[] = [
+        Result.Ok([{x: 1.0f, y: 2.0f}]),
+        Result.Err(404)
+    ]
+}

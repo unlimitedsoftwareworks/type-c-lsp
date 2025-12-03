@@ -1,0 +1,91 @@
+// Comprehensive test cases for variant contextual typing
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+// Test 1: Basic variant constructor inference from context
+fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
+    return f()
+}
+
+fn test1() {
+    // Result.Ok(42) infers to Result<i32, never>
+    // which is assignable to Result<i32, string> via covariance
+    let result = processResult(fn() = Result.Ok(42))
+}
+
+// Test 2: Lambda with explicit return type matching variant
+fn test2() {
+    let f: fn() -> Result<u32, string> = fn() = Result.Ok(10u32)
+    let r = f()
+}
+
+// Test 3: Array of variant constructors with unified types
+fn test3() {
+    // Should infer as Result<i32, string>[]
+    let results: Result<i32, string>[] = [Result.Ok(1), Result.Err("error")]
+}
+
+// Test 4: Nested variant types
+type NestedResult<T> = Result<Result<T, string>, string>
+
+fn test4() {
+    let nested: NestedResult<i32> = Result.Ok(Result.Ok(42))
+}
+
+// Test 5: Option with struct inside
+fn test5() {
+    let opt: Option<{x: u32, y: u32}> = Option.Some({x: 10u32, y: 20u32})
+}
+
+// Test 6: Variant in function parameter
+fn processOption<T>(opt: Option<T>) -> T {
+    return match opt {
+        Option.Some(v) => v,
+        Option.None => throw "No value"
+    }
+}
+
+fn test6() {
+    let value = processOption(Option.Some(42))
+}
+
+// Test 7: Higher-order functions with variants
+fn mapResult<T, U, E>(r: Result<T, E>, f: fn(a: T) -> U) -> Result<U, E> {
+    return match r {
+        Result.Ok(v) => Result.Ok(f(v)),
+        Result.Err(e) => Result.Err(e)
+    }
+}
+
+fn test7() {
+    let r: Result<i32, string> = Result.Ok(10)
+    let doubled = mapResult(r, fn(x: i32) = x * 2)
+}
+
+// Test 8: Contextual typing in variable declarations
+fn test8() {
+    let r1: Result<u32, string> = Result.Ok(42u32)
+    let r2: Result<i32, bool> = Result.Err(true)
+}
+
+// Test 9: Match expression with variant inference
+fn test9() {
+    let r: Result<i32, string> = Result.Ok(42)
+    let value = match r {
+        Result.Ok(v) => v,
+        Result.Err(_) => 0
+    }
+}
+
+// Test 10: Tuple with variants
+fn test10() {
+    let tuple: (Result<i32, string>, Option<u32>) = (Result.Ok(1), Option.Some(2u32))
+}

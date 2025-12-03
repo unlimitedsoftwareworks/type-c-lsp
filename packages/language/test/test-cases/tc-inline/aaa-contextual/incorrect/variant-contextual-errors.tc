@@ -1,0 +1,97 @@
+// Test cases for variant contextual typing errors
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Result2 = variant {
+    Oks(value: u32),
+    Errs(message: string)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+// ERROR: Wrong variant type in lambda return
+fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
+    return f()
+}
+
+fn test1() {
+    // ERROR: Result2.Oks returns Result2, not Result<u32, never>
+    let f = >>fn() -> Result<u32, never> = Result2.Oks(42u32)<<
+}
+
+// ERROR: Mismatched generic arguments
+fn test2() {
+    // ERROR: Result.Ok(42) returns Result<i32, never>, not assignable to Result<string, never>
+    let f: fn() -> Result<string, never> = >>fn() = Result.Ok(42)<<
+}
+
+// ERROR: Wrong constructor for variant
+fn test3() {
+    // ERROR: Result.Ok returns Ok, but we expect Err
+    let err: Result<i32, string> = >>Result.Ok(42)<<
+}
+
+// ERROR: Array element type mismatch with variants
+fn test4() {
+    // ERROR: Cannot unify Result<i32, never> with Result<string, never>
+    let arr: Result<i32, string>[] = >>[Result.Ok(1), Result.Ok("hello")]<<
+}
+
+// ERROR: Nested variant type mismatch
+fn test5() {
+    // ERROR: Inner type is Result2, not Result
+    let nested: Result<Result<i32, string>, string> = >>Result.Ok(Result2.Oks(42u32))<<
+}
+
+// ERROR: Generic constraint violation
+fn identity<T>(x: T) -> T {
+    return x
+}
+
+fn test6() {
+    // ERROR: Cannot pass Result<i32, never> where Result<string, bool> is expected
+    let r1: Result<i32, never> = Result.Ok(42)
+    let r2: Result<string, bool> = >>identity(r1)<<
+}
+
+// ERROR: Variant in wrong function parameter type
+fn processOption<T>(opt: Option<T>) -> T {
+    return match opt {
+        Option.Some(v) => v,
+        Option.None => throw "No value"
+    }
+}
+
+fn test7() {
+    // ERROR: Result is not Option
+    let value = >>processOption(Result.Ok(42))<<
+}
+
+// ERROR: Lambda return type doesn't match variant
+fn test8() {
+    // ERROR: Lambda returns i32, but declared as Result<i32, string>
+    let f: fn() -> Result<i32, string> = >>fn() = 42<<
+}
+
+// ERROR: Variant with incompatible struct field
+type Point = struct {
+    x: i32,
+    y: i32
+}
+
+fn test9() {
+    // ERROR: Field types don't match (f32 vs i32)
+    let opt: Option<Point> = >>Option.Some({x: 1.0f, y: 2.0f})<<
+}
+
+// ERROR: Multiple variant type errors in single expression
+fn test10() {
+    // ERROR: Multiple issues - wrong variant type and wrong generic args
+    let f: fn() -> Result<u32, bool> = >>fn() -> Result<i32, string> = Result2.Oks(42u32)<<
+}

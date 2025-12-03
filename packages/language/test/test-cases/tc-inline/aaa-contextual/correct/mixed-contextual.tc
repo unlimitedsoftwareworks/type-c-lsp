@@ -1,0 +1,155 @@
+// Comprehensive mixed contextual typing test cases
+// Combines variants, lambdas, structs, arrays, and more
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+// Test 1: Array of variants with lambda mapping
+fn test1() {
+    let results: Result<i32, string>[] = [Result.Ok(1), Result.Ok(2)]
+    let values = results
+}
+
+// Test 2: Lambda returning struct in variant
+fn test2() {
+    let f: fn() -> Result<Point, string> = fn() = Result.Ok({x: 1.0f, y: 2.0f})
+}
+
+// Test 3: Higher-order function with complex types
+fn mapResult<T, U, E>(r: Result<T, E>, f: fn(a: T) -> U) -> Result<U, E> {
+    return match r {
+        Result.Ok(v) => Result.Ok(f(v)),
+        Result.Err(e) => Result.Err(e)
+    }
+}
+
+fn test3() {
+    let r: Result<Point, string> = Result.Ok({x: 1.0f, y: 2.0f})
+    let scaled = mapResult(r, fn(p) = {x: p.x * 2.0f, y: p.y * 2.0f})
+}
+
+// Test 4: Array of lambdas returning variants
+fn test4() {
+    let operations: fn() -> Result<i32, string>[] = [
+        fn() = Result.Ok(1),
+        fn() = Result.Ok(2),
+        fn() = Result.Err("error")
+    ]
+}
+
+// Test 5: Nested structures with full contextual typing
+type Entity = struct {
+    position: Point,
+    velocity: Point,
+    health: i32
+}
+
+fn test5() {
+    let entities: Result<Entity[], string> = Result.Ok([
+        {
+            position: {x: 0.0f, y: 0.0f},
+            velocity: {x: 1.0f, y: 0.0f},
+            health: 100
+        }
+    ])
+}
+
+// Test 6: Lambda chain with variant and struct
+fn test6() {
+    let process: fn(a: Point) -> Result<Point, string> = fn(p) = Result.Ok({
+        x: p.x * 2.0f,
+        y: p.y * 2.0f
+    })
+}
+
+// Test 7: Array of tuples with variants
+fn test7() {
+    let pairs: (Result<i32, string>, Option<u32>)[] = [
+        (Result.Ok(1), Option.Some(2u32)),
+        (Result.Err("error"), Option.None)
+    ]
+}
+
+// Test 8: Generic function with multiple constraints
+fn flatMap<T, U, E>(r: Result<T, E>, f: fn(a: T) -> Result<U, E>) -> Result<U, E> {
+    return match r {
+        Result.Ok(v) => f(v),
+        Result.Err(e) => Result.Err(e)
+    }
+}
+
+fn test8() {
+    let r: Result<i32, string> = Result.Ok(42)
+    let result = flatMap(r, fn(x) = Result.Ok(x * 2))
+}
+
+// Test 9: Complex match with contextual typing
+fn test9() {
+    let value: Result<Point[], string> = Result.Ok([{x: 1.0f, y: 2.0f}])
+    let processed = match value {
+        Result.Ok(points) => Result.Ok(points),
+        Result.Err(e) => Result.Err(e)
+    }
+}
+
+// Test 10: Lambda returning array of variants in struct
+type Container = struct {
+    items: Result<i32, string>[]
+}
+
+fn test10() {
+    let make: fn() -> Container = fn() = {
+        items: [Result.Ok(1), Result.Ok(2), Result.Err("error")]
+    }
+}
+
+// Test 11: Chained operations with full inference
+fn test11() {
+    let points: Point[] = [{x: 1.0f, y: 2.0f}, {x: 3.0f, y: 4.0f}]
+    let results: Result<Point, string>[] = [Result.Ok({x: 1.0f, y: 2.0f})]
+}
+
+// Test 12: Lambda with captured variant
+fn test12() {
+    let default: Result<i32, string> = Result.Ok(0)
+    let getOrDefault = fn(opt: Option<i32>) = match opt {
+        Option.Some(v) => Result.Ok(v),
+        Option.None => default
+    }
+}
+
+// Test 13: Nested lambdas with structs and variants
+fn test13() {
+    let f: fn(a: Point) -> fn() -> Result<Point, string> = fn(p) = fn() = Result.Ok(p)
+}
+
+// Test 14: Array comprehension style with mixed types
+fn test14() {
+    let points: Point[] = [{x: 1.0f, y: 2.0f}]
+    let wrapped: Result<Point, string>[] = [Result.Ok({x: 1.0f, y: 2.0f})]
+}
+
+// Test 15: Complex tuple with everything
+fn test15() {
+    let complex: (
+        Result<Point[], string>,
+        fn(a: i32) -> Option<i32>,
+        Entity[]
+    ) = (
+        Result.Ok([{x: 1.0f, y: 2.0f}]),
+        fn(x) = Option.Some(x),
+        []
+    )
+}

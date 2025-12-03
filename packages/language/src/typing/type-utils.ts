@@ -506,9 +506,11 @@ export class TypeCTypeUtils {
             return this.isAssignable(from, to.baseType);
         }
 
-        // Array covariance (for now, arrays are invariant in element type)
+        // Array element type compatibility
+        // Uses structural typing: element types must be assignable, not strictly equal
+        // This allows struct literals to be compatible with named struct type aliases
         if (isArrayType(from) && isArrayType(to)) {
-            const elementResult = this.areTypesEqual(from.elementType, to.elementType);
+            const elementResult = this.isAssignable(from.elementType, to.elementType);
             if (!elementResult.success) {
                 return failure(`Array element types are not compatible: ${elementResult.message}`);
             }
@@ -538,13 +540,20 @@ export class TypeCTypeUtils {
             return this.isStructAssignable(fromStruct, toStruct);
         }
 
-        // Struct to named struct reference (duck typing)
+        // Struct to named struct reference (structural typing)
         // Anonymous struct {x: 5.0, y: 10.0} can be assigned to Point if structurally compatible
         if (fromStruct && isReferenceType(to)) {
-            // We need a type provider to resolve the reference, but we don't have access to it here
-            // For now, we'll just return true and let the validator handle it
-            // TODO: This should properly resolve the reference and check structural compatibility
-            return success();
+            // Resolve the reference to get the actual struct type
+            const resolvedTo = this.typeProvider().resolveReference(to);
+            const toResolvedStruct = this.asStructType(resolvedTo);
+            
+            if (toResolvedStruct) {
+                // Both are structs - use structural typing
+                return this.isStructAssignable(fromStruct, toResolvedStruct);
+            }
+            
+            // If reference doesn't resolve to a struct, not compatible
+            return failure(`Cannot assign struct to non-struct type '${to.toString()}'`);
         }
 
         // assignability (contravariant in parameters, covariant in return type)

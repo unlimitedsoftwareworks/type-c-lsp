@@ -54,7 +54,7 @@ type Serializable<T> = interface {
 }
 
 // Test 5: Class implementing interface (method bodies use interface types)
-type User = class : Serializable<string> {
+type User = class Serializable <string> {
     let name: string
     
     fn serialize() -> string = this.name  // return type from interface
@@ -69,7 +69,7 @@ type Drawable = interface {
     fn draw() -> {x: f32, y: f32}
 }
 
-type Shape = class : Drawable {
+type Shape = class Drawable {
     fn draw() -> {x: f32, y: f32} = {
         x: 1.0,  // Infers f32 from interface return type
         y: 2.0   // Infers f32 from interface return type
@@ -82,8 +82,8 @@ type Shape = class : Drawable {
 
 // Test 7: Variant constructors with contextual typing
 type Result<T, E> = variant {
-    Ok(T),
-    Err(E)
+    Ok(value: T),
+    Err(message: E)
 }
 
 fn testVariantConstructors() {

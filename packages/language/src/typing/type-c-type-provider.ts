@@ -259,12 +259,109 @@ export class TypeCTypeProvider {
         // Function call argument
         // foo(expr)
         if (ast.isFunctionCall(parent)) {
-            const fnType = this.inferExpression(parent.expr);
+            let fnType = this.inferExpression(parent.expr);
+            
+            // Resolve reference types first
+            fnType = isReferenceType(fnType) ? this.resolveReference(fnType) : fnType;
+            
             if (isFunctionType(fnType)) {
                 // Find which argument position this is
                 const argIndex = parent.args?.findIndex(arg => arg === node);
                 if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
-                    return fnType.parameters[argIndex].type;
+                    let expectedParamType = fnType.parameters[argIndex].type;
+                    
+                    // If the function has generic parameters and we're inferring an expression that needs context,
+                    // perform iterative partial generic inference from other arguments
+                    const genericParams = fnType.genericParameters || [];
+                    const needsContext = ast.isExpression(node) && this.expressionNeedsContextualTyping(node);
+                    
+                    if (genericParams.length > 0 && needsContext) {
+                        const args = parent.args || [];
+                        const parameterTypes = fnType.parameters.map(p => p.type);
+                        const genericParamNames = genericParams.map(p => p.name);
+                        
+                        // Iterative inference: keep trying to infer more generics until we can't make progress
+                        let substitutions = new Map<string, TypeDescription>();
+                        let madeProgress = true;
+                        let maxIterations = args.length; // Prevent infinite loops
+                        let iteration = 0;
+                        
+                        while (madeProgress && iteration < maxIterations) {
+                            madeProgress = false;
+                            iteration++;
+                            
+                            const argumentTypes: TypeDescription[] = [];
+                            
+                            // Collect types of arguments, using current substitutions
+                            for (let i = 0; i < args.length; i++) {
+                                if (i === argIndex) {
+                                    // Skip the current argument
+                                    argumentTypes.push(factory.createErrorType('__contextual_placeholder__', undefined, node));
+                                } else if (this.expressionNeedsContextualTyping(args[i])) {
+                                    // Try to infer contextual argument with current substitutions
+                                    // Apply current substitutions to parameter type
+                                    const paramTypeWithSubs = this.typeUtils.substituteGenerics(
+                                        parameterTypes[i],
+                                        substitutions
+                                    );
+                                    
+                                    // For lambdas, only check if PARAMETER types have unresolved generics
+                                    // Return type generics are fine - they'll be inferred from the lambda body
+                                    let hasUnresolvedGenerics: boolean;
+                                    if (isFunctionType(paramTypeWithSubs)) {
+                                        // Only check lambda parameter types, not return type
+                                        hasUnresolvedGenerics = paramTypeWithSubs.parameters.some(p =>
+                                            this.typeContainsGenerics(p.type, genericParamNames)
+                                        );
+                                    } else {
+                                        // For non-function types, check the entire type
+                                        hasUnresolvedGenerics = this.typeContainsGenerics(paramTypeWithSubs, genericParamNames);
+                                    }
+                                    
+                                    if (hasUnresolvedGenerics) {
+                                        // Still has unresolved generics - skip for now
+                                        argumentTypes.push(factory.createErrorType('__contextual_placeholder__', undefined, args[i]));
+                                    } else {
+                                        // All generics resolved - try to infer this argument's type
+                                        // Temporarily set the expected type for contextual expressions
+                                        const argType = this.inferExpressionWithContext(args[i], paramTypeWithSubs);
+                                        argumentTypes.push(argType);
+                                        
+                                        // If we successfully inferred a non-error type, we made progress
+                                        if (!isErrorType(argType) || !argType.message.includes('placeholder')) {
+                                            madeProgress = true;
+                                        }
+                                    }
+                                } else {
+                                    // Non-contextual argument - infer normally
+                                    argumentTypes.push(this.inferExpression(args[i]));
+                                }
+                            }
+                            
+                            // Infer generics from current argument types
+                            const newSubstitutions = this.inferGenericsFromArguments(
+                                genericParamNames,
+                                parameterTypes,
+                                argumentTypes
+                            );
+                            
+                            // Check if we learned anything new
+                            for (const [key, value] of newSubstitutions) {
+                                const existing = substitutions.get(key);
+                                if (!existing || existing.kind === TypeKind.Never) {
+                                    if (value.kind !== TypeKind.Never) {
+                                        substitutions.set(key, value);
+                                        madeProgress = true;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Apply final substitutions to the expected parameter type
+                        expectedParamType = this.typeUtils.substituteGenerics(expectedParamType, substitutions);
+                    }
+                    
+                    return expectedParamType;
                 }
             }
         }
@@ -3156,11 +3253,34 @@ export class TypeCTypeProvider {
     }
 
     private inferLambdaExpression(node: ast.LambdaExpression): TypeDescription {
-        const params = node.header.args?.map(arg => factory.createFunctionParameterType(
-            arg.name,
-            this.getType(arg.type),
-            arg.isMut
-        )) ?? [];
+        // Get expected lambda type for parameter inference
+        const expectedLambdaType = this.getExpectedType(node);
+        const expectedFnType = expectedLambdaType && isFunctionType(expectedLambdaType) ? expectedLambdaType : undefined;
+        
+        const params = node.header.args?.map((arg, index) => {
+            let paramType: TypeDescription;
+            
+            if (arg.type) {
+                // Explicit type annotation
+                paramType = this.getType(arg.type);
+            } else if (expectedFnType && index < expectedFnType.parameters.length) {
+                // Infer from expected function type (with partial generic inference)
+                paramType = expectedFnType.parameters[index].type;
+            } else {
+                // No type available
+                paramType = factory.createErrorType(
+                    `Parameter '${arg.name}' requires type annotation or must be in a context where type can be inferred`,
+                    undefined,
+                    arg
+                );
+            }
+            
+            return factory.createFunctionParameterType(
+                arg.name,
+                paramType,
+                arg.isMut
+            );
+        }) ?? [];
         
         const isCoroutine = node.fnType === 'cfn';
         
@@ -3918,6 +4038,120 @@ export class TypeCTypeProvider {
         // a?.b! asserts non-null, subsequent accesses are non-optional
         // No recursion needed
         
+        return false;
+    }
+
+    /**
+     * Determines if an expression needs contextual typing to be properly inferred.
+     *
+     * These expressions should be skipped during the first pass of generic inference
+     * to avoid circular dependencies.
+     *
+     * Examples:
+     * - Lambda without type annotations: `fn(x) = x * 2`
+     * - Empty array literal: `[]`
+     * - Array with ambiguous elements that need context: `[1, 2, 3]` when element type is generic
+     * - Anonymous struct literal: `{expr1, expr2}`
+     */
+    private expressionNeedsContextualTyping(expr: ast.Expression): boolean {
+        // Lambda expressions without full type annotations
+        if (ast.isLambdaExpression(expr)) {
+            // Check if any parameter lacks a type annotation
+            const hasUntypedParams = expr.header.args?.some(arg => !arg.type) ?? false;
+            if (hasUntypedParams) {
+                return true;
+            }
+        }
+        
+        // Empty array literals always need context
+        if (ast.isArrayConstructionExpression(expr)) {
+            if (!expr.values || expr.values.length === 0) {
+                return true;
+            }
+        }
+        
+        // Anonymous struct literals always need context
+        if (ast.isAnonymousStructConstructionExpression(expr)) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Helper to infer an expression's type with a given expected type context.
+     * Used during iterative generic inference.
+     */
+    private inferExpressionWithContext(expr: ast.Expression, expectedType: TypeDescription): TypeDescription {
+        // For lambdas, we can infer the full type if we have the expected function type
+        if (ast.isLambdaExpression(expr)) {
+            if (isFunctionType(expectedType)) {
+                // Use the expected type to infer lambda parameters and return type
+                return this.inferExpression(expr);
+            }
+        }
+        
+        // For arrays, we can use expected element type
+        if (ast.isArrayConstructionExpression(expr)) {
+            if (isArrayType(expectedType)) {
+                return this.inferExpression(expr);
+            }
+        }
+        
+        // For anonymous structs, use expected struct type
+        if (ast.isAnonymousStructConstructionExpression(expr)) {
+            const structType = this.typeUtils.asStructType(expectedType);
+            if (structType) {
+                return this.inferExpression(expr);
+            }
+        }
+        
+        // Default: try to infer normally
+        return this.inferExpression(expr);
+    }
+
+    /**
+     * Check if a type contains any of the specified generic type parameters.
+     * Used to determine if we have enough information to infer a contextual expression.
+     */
+    private typeContainsGenerics(type: TypeDescription, genericNames: string[]): boolean {
+        if (isGenericType(type)) {
+            return genericNames.includes(type.name);
+        }
+        
+        if (isArrayType(type)) {
+            return this.typeContainsGenerics(type.elementType, genericNames);
+        }
+        
+        if (isNullableType(type)) {
+            return this.typeContainsGenerics(type.baseType, genericNames);
+        }
+        
+        if (isFunctionType(type)) {
+            // Check parameters and return type
+            for (const param of type.parameters) {
+                if (this.typeContainsGenerics(param.type, genericNames)) {
+                    return true;
+                }
+            }
+            return this.typeContainsGenerics(type.returnType, genericNames);
+        }
+        
+        if (isTupleType(type)) {
+            return type.elementTypes.some(t => this.typeContainsGenerics(t, genericNames));
+        }
+        
+        const structType = this.typeUtils.asStructType(type);
+        if (structType) {
+            return structType.fields.some(f => this.typeContainsGenerics(f.type, genericNames));
+        }
+        
+        if (isReferenceType(type)) {
+            // Check generic arguments
+            return type.genericArgs.some(arg => this.typeContainsGenerics(arg, genericNames));
+        }
+        
+        // Other types don't contain generics
         return false;
     }
 }

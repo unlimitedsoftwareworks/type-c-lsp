@@ -27,7 +27,7 @@ fn reduce<T, U>(arr: T[], init: U, f: fn(U, T) -> U) -> U {
 fn testLambdaMultiParam() {
     let nums: i32[] = [1, 2, 3]
     // Parameters should infer: acc as i32, x as i32
-    let sum = reduce(nums, 0, fn(acc, x) -> acc + x)
+    let sum = reduce(nums, 0, fn(acc, x) = acc + x)
 }
 
 // Test 3: Yield expression with contextual type
@@ -39,7 +39,7 @@ cfn generator() -> u32 {
 
 // Test 4: Yield in coroutine lambda
 fn testYieldLambda() {
-    let gen: fn() -> u32 = cfn() -> u32 {
+    let gen: cfn() -> u32 = cfn() -> u32 {
         yield 10   // Should infer as u32
         yield 20   // Should infer as u32
     }
@@ -57,8 +57,8 @@ fn testNestedLambda() {
     // Second lambda: y inferred as f32, returns bool
     let result = processArray(
         nums,
-        fn(x) -> x as f32 * 1.5,
-        fn(y) -> y > 2.0
+        fn(x) = x as f32 * 1.5,
+        fn(y) = y > 2.0
     )
 }
 
@@ -74,7 +74,7 @@ fn testLambdaComplexReturn() {
     let nums: u32[] = [1, 2, 3]
     // Lambda parameter 'n' inferred as u32
     // Return type inferred as Point from function signature
-    let points = mapPoints(nums, fn(n) -> {x: n as f32, y: n as f32})
+    let points = mapPoints(nums, fn(n) = {x: n as f32, y: n as f32})
 }
 
 // Test 7: Contextual typing with generics and arrays
@@ -85,7 +85,7 @@ fn testGenericArrayContext() -> f32[] {
 
 // Test 8: Lambda in variable with type annotation
 fn testLambdaVariable() {
-    let transform: fn(u32) -> f32 = fn(x) -> x as f32 * 2.0
+    let transform: fn(u32) -> f32 = fn(x) = x as f32 * 2.0
     // x should infer as u32 from variable type annotation
 }
 
@@ -98,8 +98,8 @@ cfn tupleGenerator() -> (u32, f32) {
 // Test 10: Lambda body expression infers from expected return type
 fn testLambdaBodyInference() {
     // Lambda body expression should infer u32 from expected function type
-    let f: fn(u32) -> u32 = fn(x) -> 1       // 1 should infer as u32, not i32
-    let g: fn(u32) -> f32 = fn(x) -> 3.14    // 3.14 should infer as f32
+    let f: fn(u32) -> u32 = fn(x) = 1       // 1 should infer as u32, not i32
+    let g: fn(u32) -> f32 = fn(x) = 3.14    // 3.14 should infer as f32
     let h: fn(u32) -> u32 = fn(x: u32) = 1   // Expression-body: 1 infers as u32
 }
 
@@ -111,7 +111,7 @@ fn createConfig(f: fn(u32) -> Config) -> Config {
 }
 
 fn testLambdaStructReturn() {
-    let cfg = createConfig(fn(base) -> {
+    let cfg = createConfig(fn(base) = {
         timeout: base,      // base inferred as u32
         retries: base / 10  // Should infer operation result as u32
     })

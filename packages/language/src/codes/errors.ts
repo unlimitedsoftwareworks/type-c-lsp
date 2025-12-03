@@ -94,4 +94,8 @@ export enum ErrorCode {
 
     // New Expression Errors (TCE100-TCE109)
     TC_NEW_EXPRESSION_REQUIRES_CLASS = 'TCE100',
+
+    // Literal Type Errors (TCE110-TCE119)
+    TC_LITERAL_SUFFIX_MISMATCH = 'TCE110',
+    TC_LITERAL_TYPE_MISMATCH = 'TCE111',
 }

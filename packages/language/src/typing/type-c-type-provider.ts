@@ -276,6 +276,7 @@ export class TypeCTypeProvider {
 
             // Comparison and arithmetic operators: use the OTHER operand's type
             // BUT: Only use contextual typing for literals to avoid infinite recursion
+            // AND: Only for primitive types (not classes/interfaces with operator overloads)
             const binaryOps = ['<', '>', '<=', '>=', '==', '!=', '+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>'];
             if (binaryOps.includes(parent.op) && (ast.isIntegerLiteral(node) || ast.isFloatingPointLiteral(node))) {
                 // This is a literal - try to use the other operand's type
@@ -283,7 +284,160 @@ export class TypeCTypeProvider {
 
                 // Only infer from the other operand if it's NOT also a literal (avoid circular inference)
                 if (!ast.isIntegerLiteral(otherOperand) && !ast.isFloatingPointLiteral(otherOperand)) {
-                    return this.inferExpression(otherOperand);
+                    const otherType = this.inferExpression(otherOperand);
+                    // Resolve references to check for class/interface types
+                    const resolvedOtherType = isReferenceType(otherType) ? this.resolveReference(otherType) : otherType;
+                    
+                    // Only use as context if it's a primitive type (not class/interface with operator overloads)
+                    if (!isClassType(resolvedOtherType) && !this.typeUtils.asInterfaceType(resolvedOtherType)) {
+                        return otherType;
+                    }
+                }
+            }
+        }
+
+        // Array element in array construction: [expr1, expr2, ...]
+        // If parent array has expected type T[], propagate T to elements
+        if (parent && ast.isArrayElementExpression(parent)) {
+            const arrayExpr = parent.$container;
+            if (ast.isArrayConstructionExpression(arrayExpr)) {
+                const expectedArrayType = this.getExpectedType(arrayExpr);
+                if (expectedArrayType && isArrayType(expectedArrayType)) {
+                    return expectedArrayType.elementType;
+                }
+            }
+        }
+
+        // Match expression case body: match x { pattern => expr }
+        // If match has expected type, propagate to all case bodies
+        if (parent && ast.isMatchCaseExpression(parent) && parent.body === node) {
+            const matchExpr = parent.$container;
+            if (ast.isMatchExpression(matchExpr)) {
+                const expectedMatchType = this.getExpectedType(matchExpr);
+                if (expectedMatchType) {
+                    return expectedMatchType;
+                }
+            }
+        }
+
+        // Match expression default body: match x { _ => expr }
+        if (parent && ast.isMatchExpression(parent) && parent.defaultExpr === node) {
+            const expectedMatchType = this.getExpectedType(parent);
+            if (expectedMatchType) {
+                return expectedMatchType;
+            }
+        }
+
+        // Conditional expression branches: if cond => expr1 else expr2
+        // If conditional has expected type, propagate to all branches
+        if (parent && ast.isConditionalExpression(parent)) {
+            // Check if node is one of the then expressions or the else expression
+            const isExpr = ast.isExpression(node);
+            if (isExpr) {
+                const isThenExpr = parent.thens?.some(thenExpr => thenExpr === node);
+                const isElseExpr = parent.elseExpr === node;
+                
+                if (isThenExpr || isElseExpr) {
+                    const expectedCondType = this.getExpectedType(parent);
+                    if (expectedCondType) {
+                        return expectedCondType;
+                    }
+                }
+            }
+        }
+
+        // Struct field in named struct construction: {x: expr, y: expr}
+        // If the struct has expected type, propagate field types
+        if (parent && ast.isStructFieldKeyValuePair(parent)) {
+            const structExpr = parent.$container;
+            if (ast.isNamedStructConstructionExpression(structExpr)) {
+                const expectedStructType = this.getExpectedType(structExpr);
+                if (expectedStructType) {
+                    // Resolve reference types
+                    const resolvedExpected = isReferenceType(expectedStructType)
+                        ? this.resolveReference(expectedStructType)
+                        : expectedStructType;
+                    
+                    // Get the struct type (handles both direct structs and join types)
+                    const structType = this.typeUtils.asStructType(resolvedExpected);
+                    if (structType) {
+                        // Find the field with this name
+                        const field = structType.fields.find(f => f.name === parent.name);
+                        if (field) {
+                            return field.type;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Anonymous struct field: {expr1, expr2, ...}
+        // If the struct has expected type, propagate field types by position
+        if (parent && ast.isAnonymousStructConstructionExpression(parent)) {
+            const expectedStructType = this.getExpectedType(parent);
+            if (expectedStructType) {
+                // Resolve reference types
+                const resolvedExpected = isReferenceType(expectedStructType)
+                    ? this.resolveReference(expectedStructType)
+                    : expectedStructType;
+                
+                // Get the struct type
+                const structType = this.typeUtils.asStructType(resolvedExpected);
+                if (structType && ast.isExpression(node)) {
+                    // Find the index of this expression
+                    const index = parent.expressions?.indexOf(node);
+                    if (index !== undefined && index >= 0 && index < structType.fields.length) {
+                        return structType.fields[index].type;
+                    }
+                }
+            }
+        }
+
+        // Tuple element: (expr1, expr2, ...)
+        // If tuple has expected type (T1, T2, ...), propagate types by position
+        if (parent && ast.isTupleExpression(parent)) {
+            const expectedTupleType = this.getExpectedType(parent);
+            if (expectedTupleType && isTupleType(expectedTupleType) && ast.isExpression(node)) {
+                // Find the index of this expression
+                const index = parent.expressions.indexOf(node);
+                if (index >= 0 && index < expectedTupleType.elementTypes.length) {
+                    return expectedTupleType.elementTypes[index];
+                }
+            }
+        }
+
+        // Let-in expression body: let x = ... in expr
+        // The final expression uses the expected type of the let-in
+        if (parent && ast.isLetInExpression(parent) && parent.expr === node) {
+            const expectedLetInType = this.getExpectedType(parent);
+            if (expectedLetInType) {
+                return expectedLetInType;
+            }
+        }
+
+        // New expression arguments: new MyClass(arg1, arg2, ...)
+        // Arguments should match class attributes in order
+        if (parent && ast.isNewExpression(parent) && parent.args && ast.isExpression(node)) {
+            // Check if this node is one of the arguments
+            const argIndex = parent.args.findIndex(arg => arg === node);
+            if (argIndex >= 0 && parent.instanceType) {
+                // Get the class type being instantiated
+                const classRefType = this.getType(parent.instanceType);
+                
+                // Resolve reference types to get the actual class
+                const resolvedClassType = isReferenceType(classRefType)
+                    ? this.resolveReference(classRefType)
+                    : classRefType;
+                
+                // If it's a class type, get the attribute at this position
+                if (isClassType(resolvedClassType)) {
+                    // Filter out static attributes - they're not part of instance construction
+                    const instanceAttributes = resolvedClassType.attributes.filter(attr => !attr.isStatic);
+                    
+                    if (argIndex < instanceAttributes.length) {
+                        // Return the attribute's type (already has generic substitutions applied)
+                        return instanceAttributes[argIndex].type;
+                    }
                 }
             }
         }
@@ -1909,10 +2063,18 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Check if a type is a float type (f32 or f64).
+     */
+    private isFloatType(type: TypeDescription): boolean {
+        return type.kind === TypeKind.F32 || type.kind === TypeKind.F64;
+    }
+
+    /**
      * Infer the type of a floating-point literal.
-     * 
+     *
      * Uses contextual typing when available:
      * - `let x: f32 = 3.14` → infers 3.14 as f32
+     * - `let x: f64 = 3.14` → infers 3.14 as f64
      * - `let x = 3.14` → defaults to f64
      * - Explicit suffix overrides context: `3.14f` → always f32
      */
@@ -1924,8 +2086,9 @@ export class TypeCTypeProvider {
 
         // Try to use contextual typing
         const expectedType = this.getExpectedType(node);
-        if (expectedType && expectedType.kind === TypeKind.F32) {
-            return factory.createF32Type(node);
+        if (expectedType && this.isFloatType(expectedType)) {
+            // Use the expected float type (f32 or f64)
+            return expectedType;
         }
 
         // Default to f64 (double precision)

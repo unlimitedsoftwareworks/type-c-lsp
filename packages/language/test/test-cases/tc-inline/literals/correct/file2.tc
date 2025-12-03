@@ -1,0 +1,79 @@
+/**
+ * Test file for contextual type inference on literals
+ * 
+ * This demonstrates how literals now infer their type from context,
+ * reducing the need for explicit type suffixes.
+ */
+
+// Test 1: Match expression with expected type
+fn getValues1() -> u32[] = match 1 {
+    0 => [1],      // Should infer as u32 from return type
+    1 => [1],      // Should infer as u32 from return type
+    _ => [0]       // Should infer as u32 from return type
+}
+
+// Test 2: Array literal elements with expected type
+fn getValues2() -> u32[] {
+    let arr: u32[] = [1, 2, 3, 4, 5]  // Should infer as u32 from annotation
+    return arr
+}
+
+// Test 3: Conditional expression with expected type
+fn getValueConditional(b: bool) -> u32 = 
+    if b => 10 else 20  // Should infer as u32 from return type
+
+// Test 4: Binary operations with context
+fn testBinaryOps(n: u32) -> u32 {
+    let x = n + 1    // 1 should infer as u32 from n's type
+    let y = n < 2    // 2 should infer as u32 from n's type
+    return x
+}
+
+// Test 5: Float literals with context
+fn testFloats() -> f32[] = [1.0, 2.0, 3.0]  // Should infer as f32 from return type
+
+// Test 6: Mixed literals (should still work with defaults)
+fn testDefaults() {
+    let a = 42        // Defaults to i32
+    let b = 3.14      // Defaults to f64
+}
+
+// Test 7: Type system will catch incompatible types
+fn testIncompatible1() -> u32 {
+    return 1i32       // Type system error: i32 not assignable to u32
+}
+
+// Test 8: Type system will catch float for integer
+fn testIncompatible2() -> u32 {
+    return 1.0        // Type system error: f64 not assignable to u32
+}
+
+// Test 9: OK - integer literal can be implicitly converted to float
+fn testOk1() -> f32 {
+    return 1          // ✅ OK: integer can be converted to float
+}
+
+// Test 10: Type system will catch f32 for f64
+fn testIncompatible3() -> f64 {
+    return 1.0f       // Type system error: f32 not assignable to f64
+}
+
+// Test 11: Tuple elements with context
+fn getTuple() -> (u32, f32, bool) = (1, 2.0, true)  // Infers types from tuple signature
+
+// Test 12: Named struct fields
+fn getStruct1() -> {x: u32, y: u32, z: f32} = {x: 1, y: 2, z: 3.0}
+
+// Test 13: Anonymous struct fields (by position)
+fn getStruct2() -> {x: u32, y: u32, z: f32} = {1, 2, 3.0}
+
+// Test 14: New expression with generics
+type Point<T> = class {
+    let x: T
+    let y: T
+}
+
+fn getPoint() -> Point<u32> = new Point<u32>(10, 20)  // Arguments infer as u32
+
+// Test 15: Let-in expression
+fn letInTest() -> u32 = let x = 5 in 10  // Both 5 and 10 can infer context

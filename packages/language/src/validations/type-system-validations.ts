@@ -9,13 +9,20 @@ import {
     isClassType,
     isCoroutineType,
     isErrorType,
+    isFloatType,
     isFunctionType,
+    isIntegerType,
     isInterfaceType,
     isJoinType,
+    isMetaClassType,
     isNullableType,
     isReferenceType,
     isStructType,
-    isVariantConstructorType
+    isTupleType,
+    isUnionType,
+    isVariantConstructorType,
+    isVariantType,
+    isEnumType
 } from "../typing/type-c-types.js";
 import * as factory from "../typing/type-factory.js";
 import { TypeCBaseValidation } from "./base-validation.js";
@@ -59,6 +66,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             MemberAccess: this.checkMemberAccess,
             DenullExpression: this.checkDenullExpression,
             NamedStructConstructionExpression: this.checkStructSpreadFieldTypes,
+            NewExpression: this.checkNewExpression,
         };
     }
 
@@ -1547,5 +1555,77 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 }
             }
         }
+    }
+
+    /**
+     * Check new expression for proper class instantiation.
+     *
+     * Rules:
+     * 1. `new` can only be used with class types
+     * 2. Cannot use `new` with interfaces, structs, primitives, or other types
+     *
+     * Examples:
+     * ```tc
+     * class Person { let name: string }
+     * let p = new Person("Alice")           // ✅ OK
+     * let x = new u32()                     // ❌ Error - cannot instantiate primitive
+     * let s = new {x: u32}()                // ❌ Error - cannot instantiate struct type
+     * interface I { fn foo() }
+     * let i = new I()                       // ❌ Error - cannot instantiate interface
+     * ```
+     */
+    checkNewExpression = (node: ast.NewExpression, accept: ValidationAcceptor): void => {
+        // If no instance type is specified, we can't validate it here
+        // The type provider will handle implicit type inference
+        if (!node.instanceType) {
+            return;
+        }
+
+        // Get the type that's being instantiated
+        const instanceType = this.typeProvider.getType(node.instanceType);
+
+        // Resolve reference types to get the actual type
+        let resolvedType = instanceType;
+        if (isReferenceType(instanceType)) {
+            const resolved = this.typeProvider.resolveReference(instanceType);
+            if (resolved) {
+                resolvedType = resolved;
+            }
+        }
+
+        // Check if it's a class type (the only valid type for `new`)
+        if (!isClassType(resolvedType) && !isMetaClassType(resolvedType)) {
+            const errorCode = ErrorCode.TC_NEW_EXPRESSION_REQUIRES_CLASS;
+            const typeKindName = this.getTypeKindName(resolvedType);
+            accept('error',
+                `Invalid use of 'new': Can only instantiate classes, but got ${typeKindName} '${resolvedType.toString()}'. Use appropriate construction syntax for this type.`,
+                {
+                    node: node.instanceType,
+                    code: errorCode
+                }
+            );
+        }
+    }
+
+    /**
+     * Helper method to get a user-friendly name for a type kind.
+     */
+    private getTypeKindName(type: TypeDescription): string {
+        if (isInterfaceType(type)) return 'interface';
+        if (isStructType(type)) return 'struct';
+        if (isEnumType(type)) return 'enum';
+        if (isVariantType(type)) return 'variant';
+        if (isFunctionType(type)) return 'function';
+        if (isCoroutineType(type)) return 'coroutine';
+        if (isArrayType(type)) return 'array type';
+        if (isNullableType(type)) return 'nullable type';
+        if (isUnionType(type)) return 'union type';
+        if (isJoinType(type)) return 'join type';
+        if (isTupleType(type)) return 'tuple type';
+        if (isIntegerType(type) || isFloatType(type)) return 'primitive type';
+        if (type.kind === TypeKind.Bool) return 'primitive type';
+        if (type.kind === TypeKind.String) return 'primitive type';
+        if (type.kind === TypeKind.Void) return 'primitive type';
+        return 'type';
     }
 }

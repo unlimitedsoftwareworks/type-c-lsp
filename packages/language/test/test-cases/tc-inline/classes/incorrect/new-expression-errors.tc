@@ -1,0 +1,44 @@
+/**
+ * Test cases for new expression validation
+ * new can only be used with classes
+ */
+
+type Person = class {
+    let name: string
+    let age: u32
+
+    fn init(name: string, age: u32) {
+        this.name = name
+        this.age = age
+    }
+}
+
+type IPerson = interface {
+    fn getName() -> string
+}
+
+type Point = {x: u32, y: u32}
+
+type MyStruct = struct {x: u32, y: u32}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn main() {
+    // ✅ Correct: Using new with a class
+    let person1 = new Person("Alice", 25u32)
+
+    /// @Error(TCE100): Invalid use of 'new'
+    let person2 = new IPerson()
+
+    /// @Error(TCE100): Invalid use of 'new'
+    let point1 = new Point()
+
+    /// @Error(TCE100): Invalid use of 'new'
+    let s1 = new MyStruct()
+
+    /// @Error(TCE100): Invalid use of 'new'
+    let r1 = new Result<u32, string>()
+}

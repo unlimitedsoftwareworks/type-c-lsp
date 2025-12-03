@@ -49,6 +49,7 @@ fn testCustomIterable() {
     }
     
     // With value only
+    /// @Type(item): string
     foreach item in list {
         let z: string = item   // @type(string)
     }
@@ -65,7 +66,12 @@ fn testGenericIterable() {
     let map: KeyValueMap<string, i32> = new KeyValueMap<string, i32>()
     
     // With index (key) and value
-    foreach key, value in map {
+    foreach 
+        /// @Type(key): string
+        key, 
+        /// @Type(value): i32
+        value 
+    in map {
         let k: string = key     // @type(string)
         let v: i32 = value      // @type(i32)
     }
@@ -106,12 +112,22 @@ fn testInterfaceIterable() {
     let seq: MySequence<string> = new MySequence<string>()
     let arr = [{x: 1u32, y: 1u32}, {x: 1u32}]
     
-    foreach idx, value in seq {
+    foreach 
+        /// @Type(idx): u64
+        idx, 
+        /// @Type(value): string
+        value 
+    in seq {
         let i: u64 = idx        // @type(u64)
         let v: string = value      // @type(f32)
     }
 
-    foreach idx, value in arr {
+    foreach 
+        /// @Type(idx): u64
+        idx, 
+        /// @type(value): struct { x: u32 }
+        value 
+    in arr {
 
     }
 }

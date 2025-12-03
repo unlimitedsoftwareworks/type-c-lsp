@@ -91,4 +91,7 @@ export enum ErrorCode {
     // Control Flow Errors (TCE090-TCE099)
     TC_BREAK_OUTSIDE_LOOP = 'TCE090',
     TC_CONTINUE_OUTSIDE_LOOP = 'TCE091',
+
+    // New Expression Errors (TCE100-TCE109)
+    TC_NEW_EXPRESSION_REQUIRES_CLASS = 'TCE100',
 }

@@ -1,0 +1,12 @@
+type Collectible<T> = interface {
+    fn collect() -> T
+}
+
+
+
+type Pokemon = class {
+    fn collect() -> {x: u32, y: u32} {
+        //return {1, 2}
+        return {x: 1u32, y: 2u32}
+    }
+}

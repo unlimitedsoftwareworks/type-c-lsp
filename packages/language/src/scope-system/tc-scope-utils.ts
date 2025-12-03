@@ -15,7 +15,8 @@ type ReferencableSymbol =
     ast.ClassAttributeDecl |
     ast.ClassMethod |
     ast.MethodHeader |
-    ast.VariantConstructor;  // TODO: Make this context-sensitive later
+    ast.VariantConstructor |
+    ast.IteratorVar;  // TODO: Make this context-sensitive later
 
 
 export function isMemberResolution(container: AstNode, context: ReferenceInfo): boolean {
@@ -121,6 +122,13 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         if (container.init) {
             declarations.push(...getDeclarationsFromContainer(container.init));
         }
+    }
+    else if (ast.isForeachStatement(container)){
+        if(container.indexVar){
+            declarations.push(container.indexVar)
+        }
+
+        declarations.push(container?.valueVar)
     }
     else if (ast.isClassType(container)) {
         // Add class attributes and methods

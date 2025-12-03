@@ -428,7 +428,10 @@ ForStatement:
     kind='for' (init=Statement)? ';' (condition=Expression)? ';' (update=Expression)? body=BlockStatement;
 
 ForeachStatement:
-    kind='foreach'((index=ID ',' value=ID)|(value=ID)) 'in' (collection=Expression) body=BlockStatement;
+    kind='foreach'(indexVar=IteratorVar ',')? valueVar=IteratorVar  'in' (collection=Expression) body=BlockStatement;
+
+IteratorVar:
+    {infer IteratorVar} name=ID;
 
 FunctionDeclarationStatement:
     fn=(FnDecl<false> | CFnDecl<false>);
@@ -696,7 +699,8 @@ type IdentifiableReference =
     StructField |         // For named struct type fields
     StructFieldKeyValuePair |  // For duck-typed struct literal fields
     BuiltinSymbolID |
-    BuiltinSymbolFn;
+    BuiltinSymbolFn |
+    IteratorVar;
 
 // Qualified reference that can handle all complex cases
 QualifiedReference:

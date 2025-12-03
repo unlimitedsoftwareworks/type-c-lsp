@@ -81,8 +81,11 @@ fn testBreakInForeach() {
 // Continue in foreach loop
 fn testContinueInForeach() {
     /// @NoError
-    foreach item in [1, 2, 3, 4, 5] {
+    foreach index, item in [1, 2, 3, 4, 5] {
         if 3 == 3 {
+            if index == 1 {
+                return 
+            }
             continue
         }
     }

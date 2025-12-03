@@ -693,6 +693,13 @@ export class TypeCTypeUtils {
             return this.isVariantConstructorAssignableToVariantConstructor(from, to);
         }
 
+        // Variant type to variant type assignability (CRITICAL for covariance!)
+        // variant { Ok(value: i32), Err(message: never) } <: variant { Ok(value: i32), Err(message: string) }
+        // This happens when Result<i32, never> and Result<i32, string> are both resolved to VariantTypes
+        if (isVariantType(from) && isVariantType(to)) {
+            return this.isVariantAssignableToVariant(from, to);
+        }
+
         // Reference type assignability
         // Result<i32, never> <: Result<i32, string> (never is compatible with any type)
         if (isReferenceType(from) && isReferenceType(to)) {
@@ -981,6 +988,71 @@ export class TypeCTypeUtils {
             const result = this.isAssignable(fromArg, toArg);
             if (!result.success) {
                 return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
+            }
+        }
+
+        return success();
+    }
+
+    /**
+     * Checks if one variant type is assignable to another variant type using STRUCTURAL TYPING.
+     *
+     * Type-C uses structural typing for variants (similar to structs):
+     * - Source variant is assignable to target variant if ALL constructors of source exist in target
+     * - Target can have MORE constructors than source (source is a structural subset)
+     * - For each matching constructor, parameter names and types must match exactly
+     *
+     * Covariance rules for constructor parameters:
+     * - Parameter types must be assignable (with covariance support)
+     * - `never` in source is compatible with any type in target (bottom type)
+     *
+     * Examples:
+     * - variant { Ok(value: i32), Err(message: never) } <: variant { Ok(value: i32), Err(message: string) } ✓
+     * - variant { Ok(i32) } <: variant { Ok(i32), Err(string) } ✓ (target has more constructors)
+     * - variant { Ok(i32), Err(string) } <: variant { Ok(i32) } ✗ (source has Err, target doesn't)
+     * - variant { Ok(value: u32) } <: variant { Ok(value: i32) } ✗ (u32 not assignable to i32)
+     *
+     * This method is called when both types are already resolved VariantTypeDescriptions,
+     * typically after resolving Result<i32, never> and Result<i32, string> to their definitions.
+     */
+    isVariantAssignableToVariant(
+        from: VariantTypeDescription,
+        to: VariantTypeDescription
+    ): TypeCheckResult {
+        // STRUCTURAL TYPING: All constructors of 'from' must exist in 'to'
+        // Target can have extra constructors (structural subtyping)
+        for (const fromConstructor of from.constructors) {
+            const toConstructor = to.constructors.find(c => c.name === fromConstructor.name);
+            
+            if (!toConstructor) {
+                return failure(`${from.toString()} is not assignable to ${to.toString()}: Constructor '${fromConstructor.name}' from source variant not found in target variant`);
+            }
+
+            // Check that parameter counts match
+            if (fromConstructor.parameters.length !== toConstructor.parameters.length) {
+                return failure(`${from.toString()} is not assignable to ${to.toString()}: Constructor '${fromConstructor.name}' has ${fromConstructor.parameters.length} parameter(s), but target has ${toConstructor.parameters.length}`);
+            }
+
+            // Check each parameter name and type
+            for (let i = 0; i < fromConstructor.parameters.length; i++) {
+                const fromParam = fromConstructor.parameters[i];
+                const toParam = toConstructor.parameters[i];
+
+                // Parameter names must match (structural requirement)
+                if (fromParam.name !== toParam.name) {
+                    return failure(`${from.toString()} is not assignable to ${to.toString()}: Constructor '${fromConstructor.name}' parameter at position ${i} has name '${fromParam.name}' but target expects '${toParam.name}'`);
+                }
+
+                // If from is never, it's compatible with any target type
+                if (isNeverType(fromParam.type)) {
+                    continue;
+                }
+
+                // Check assignability with covariance
+                const result = this.isAssignable(fromParam.type, toParam.type);
+                if (!result.success) {
+                    return failure(`${from.toString()} is not assignable to ${to.toString()}: Constructor '${fromConstructor.name}' parameter '${fromParam.name}' type incompatible - ${result.message}`);
+                }
             }
         }
 

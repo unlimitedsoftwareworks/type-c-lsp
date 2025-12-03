@@ -24,16 +24,18 @@ fn testVariantTypeMismatch() {
     // ERROR: This should NOT be valid
     // Result2.Oks(42) returns Result2, not Result<i32, never>
     // Result and Result2 are different variant types
+    // This should now be caught by the lambda return type validation
     let f2 = fn() -> Result<i32, never> = Result2.Oks(42)
+    
+    // ERROR: Cannot pass f2 to processResult because it has wrong type
+    // This would also be an error even without the lambda validation
     let result2 = processResult(f2)
 }
 
 fn testDirectAssignment() {
     // ERROR: Cannot assign Result2 to Result<u32, string>
-    let r1: Result2<u32, string> = Result2.Oks(42)
+    let r1: Result<u32, string> = Result2.Oks(42)
     
     // ERROR: Cannot assign Result to Result2
-    let r2: Result<i32, never> = Result.Ok(42)
+    let r2: Result2 = Result.Ok(42)
 }
-
-fn f() -> Result2<i32, never> = Result2.Oks(42)

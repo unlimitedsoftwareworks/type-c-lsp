@@ -264,6 +264,48 @@ export class TypeCTypeProvider {
             // Resolve reference types first
             fnType = isReferenceType(fnType) ? this.resolveReference(fnType) : fnType;
             
+            // Handle variant constructor calls (e.g., Result.Ok(42) where Result<u32, string> is expected)
+            // This enables contextual typing for constructor arguments
+            // Variant constructors are FunctionTypes with VariantConstructorType as return type
+            if (isFunctionType(fnType) && isVariantConstructorType(fnType.returnType)) {
+                const constructorType = fnType.returnType;
+                
+                // Get the expected type for the whole call (e.g., Result<u32, string>)
+                const expectedCallType = this.getExpectedType(parent);
+                
+                if (expectedCallType) {
+                    // Extract generic substitutions from the expected type
+                    let substitutions: Map<string, TypeDescription> | undefined;
+                    
+                    if (isReferenceType(expectedCallType) && expectedCallType.genericArgs.length > 0) {
+                        // Build substitution map from the expected type's generic args
+                        const variantDecl = constructorType.variantDeclaration;
+                        if (variantDecl && variantDecl.genericParameters) {
+                            substitutions = new Map<string, TypeDescription>();
+                            variantDecl.genericParameters.forEach((param, i) => {
+                                if (i < expectedCallType.genericArgs.length) {
+                                    substitutions!.set(param.name, expectedCallType.genericArgs[i]);
+                                }
+                            });
+                        }
+                    }
+                    
+                    // Find the parameter type for this argument
+                    const argIndex = parent.args?.findIndex(arg => arg === node);
+                    if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
+                        // Get the parameter type from the function (which has generic types like T)
+                        let paramType = fnType.parameters[argIndex].type;
+                        
+                        // Apply generic substitutions if we have them
+                        if (substitutions && substitutions.size > 0) {
+                            paramType = this.typeUtils.substituteGenerics(paramType, substitutions);
+                        }
+                        
+                        return paramType;
+                    }
+                }
+            }
+            
             if (isFunctionType(fnType)) {
                 // Find which argument position this is
                 const argIndex = parent.args?.findIndex(arg => arg === node);
@@ -3850,9 +3892,52 @@ export class TypeCTypeProvider {
             }
         }
 
-
         if (isGenericType(parameterType)) {
             SET(genericMap, parameterType.name, argumentType);
+        }
+
+        // Handle ReferenceType BEFORE resolving - extract generics from generic arguments
+        // Example: Result<T, string> vs Result<i32, never> → extract T = i32
+        if (isReferenceType(parameterType) && isReferenceType(argumentType)) {
+            // Both must reference the same declaration to be comparable
+            if (parameterType.declaration === argumentType.declaration) {
+                // Extract from each generic argument position
+                const numArgs = Math.min(parameterType.genericArgs.length, argumentType.genericArgs.length);
+                for (let i = 0; i < numArgs; i++) {
+                    this.extractGenericArgsFromTypeDescription(parameterType.genericArgs[i], argumentType.genericArgs[i], genericMap);
+                }
+                return; // Don't resolve and continue - we've handled this case
+            }
+        }
+
+        // Handle VariantConstructorType BEFORE resolving
+        // Example: Result.Ok<T, string> vs Result.Ok<i32, never> → extract T = i32
+        if (isVariantConstructorType(parameterType) && isVariantConstructorType(argumentType)) {
+            // Both must be the same constructor to be comparable
+            if (parameterType.constructorName === argumentType.constructorName) {
+                // Extract from each generic argument position
+                const numArgs = Math.min(parameterType.genericArgs.length, argumentType.genericArgs.length);
+                for (let i = 0; i < numArgs; i++) {
+                    this.extractGenericArgsFromTypeDescription(parameterType.genericArgs[i], argumentType.genericArgs[i], genericMap);
+                }
+                return; // Don't resolve and continue - we've handled this case
+            }
+        }
+
+        // Handle MIXED case: ReferenceType (variant) vs VariantConstructorType
+        // Example: Result<T, string> vs Result.Ok<i32, never> → extract T = i32, string vs never
+        // This is the CRITICAL case for the bug fix!
+        if (isReferenceType(parameterType) && isVariantConstructorType(argumentType)) {
+            // Check if the ReferenceType points to the same variant declaration as the constructor
+            const argVariantDecl = argumentType.variantDeclaration;
+            if (argVariantDecl && parameterType.declaration === argVariantDecl) {
+                // Extract from each generic argument position
+                const numArgs = Math.min(parameterType.genericArgs.length, argumentType.genericArgs.length);
+                for (let i = 0; i < numArgs; i++) {
+                    this.extractGenericArgsFromTypeDescription(parameterType.genericArgs[i], argumentType.genericArgs[i], genericMap);
+                }
+                return; // Don't resolve and continue - we've handled this case
+            }
         }
 
         const resolvedParameterType = isReferenceType(parameterType) ? this.resolveReference(parameterType) : parameterType;
@@ -3884,13 +3969,38 @@ export class TypeCTypeProvider {
         }
 
         if(isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {
+            console.log(`[extractGenericArgs] Both are function types, extracting from parameters and return type`);
             for (let i = 0; i < Math.min(resolvedParameterType.parameters.length, resolvedArgumentType.parameters.length); i++) {
                 this.extractGenericArgsFromTypeDescription(resolvedParameterType.parameters[i].type, resolvedArgumentType.parameters[i].type, genericMap);
             }
             this.extractGenericArgsFromTypeDescription(resolvedParameterType.returnType, resolvedArgumentType.returnType, genericMap);
         }
 
-        // TODO: add more cases as needed (variant types, function types, etc.)
+        // Handle VariantTypes after resolution
+        // Example: variant { Ok(value: T), Err(message: string) } vs variant { Ok(value: i32), Err(message: never) }
+        // This extracts T = i32 by matching constructor parameters
+        if (isVariantType(resolvedParameterType) && isVariantType(resolvedArgumentType)) {
+            console.log(`[extractGenericArgs] Both are variant types, extracting from constructor parameters`);
+            
+            // Match constructors by name and extract generics from their parameters
+            for (const paramConstructor of resolvedParameterType.constructors) {
+                const argConstructor = resolvedArgumentType.constructors.find(c => c.name === paramConstructor.name);
+                
+                if (argConstructor) {
+                    console.log(`[extractGenericArgs] Matching constructor '${paramConstructor.name}'`);
+                    // Extract from each parameter
+                    const numParams = Math.min(paramConstructor.parameters.length, argConstructor.parameters.length);
+                    for (let i = 0; i < numParams; i++) {
+                        console.log(`[extractGenericArgs] Constructor param ${i}: ${paramConstructor.parameters[i].type.toString()} vs ${argConstructor.parameters[i].type.toString()}`);
+                        this.extractGenericArgsFromTypeDescription(
+                            paramConstructor.parameters[i].type,
+                            argConstructor.parameters[i].type,
+                            genericMap
+                        );
+                    }
+                }
+            }
+        }
     }
 
     // ========================================================================

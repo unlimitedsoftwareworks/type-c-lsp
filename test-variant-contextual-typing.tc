@@ -1,0 +1,38 @@
+// Test case for variant constructor generic inference bug fix
+// Bug: Result.Ok(42) returns Result<i32, never> which should be 
+// assignable to Result<i32, string> via covariance
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(message: E)
+}
+
+fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
+    return f()
+}
+
+fn testLambdaComplexReturn() {
+    // This should work: Result.Ok(42) infers to Result<i32, never>
+    // which is assignable to Result<i32, string> (never is compatible with string)
+    let f1 = fn() = Result.Ok(42)
+    let result1 = processResult(f1)
+    
+    // The generic T should be inferred as i32
+    // So result1 should be Result<i32, string>
+}
+
+// Additional test cases
+fn processResultDirect<T, E>(r: Result<T, E>) -> Result<T, E> {
+    return r
+}
+
+fn testDirectVariantConstructor() {
+    // Direct variant constructor call with generic inference
+    let x = processResultDirect(Result.Ok(42))  // Should infer Result<i32, never>
+    let y = processResultDirect(Result.Err("error"))  // Should infer Result<never, string>
+}
+
+fn testMixedConstructors() {
+    // Array of mixed constructors - should unify to Result<i32, string>
+    let results = [Result.Ok(42), Result.Err("error")]
+}

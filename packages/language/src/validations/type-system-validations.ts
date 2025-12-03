@@ -58,6 +58,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
             ClassMethod: this.checkClassMethod,
+            LambdaExpression: this.checkLambdaExpression,
             IndexSet: this.checkIndexSet,
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
@@ -727,6 +728,82 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: ErrorCode.TC_METHOD_RETURN_TYPE_MISMATCH
                 });
             }
+        }
+    }
+
+    /**
+     * Check lambda expressions for return type issues.
+     *
+     * Validates:
+     * 1. If explicit return type → ensure inferred type matches declared type
+     * 2. Similar to function/method validation but for lambdas
+     *
+     * Examples:
+     * ```
+     * let f1 = fn() -> u32 = 42                    // ✅ Explicit type matches
+     * let f2 = fn() -> Result<i32, never> = Result2.Oks(42)  // ❌ Error - Result2 ≠ Result
+     * ```
+     */
+    checkLambdaExpression = (node: ast.LambdaExpression, accept: ValidationAcceptor): void => {
+        // Only validate if there's an explicit return type annotation
+        if (!node.header.returnType) {
+            return;
+        }
+
+        const isCoroutine = node.fnType === 'cfn';
+        
+        // Infer the return type from the lambda body/expression
+        let inferredReturnType: TypeDescription;
+        
+        if (node.expr) {
+            // Expression-body lambda: fn() = expr
+            inferredReturnType = this.typeProvider.getType(node.expr);
+        } else if (node.body) {
+            // Block-body lambda: fn() { ... }
+            if (isCoroutine) {
+                // For coroutines, infer from yield expressions
+                inferredReturnType = this.inferYieldTypeFromBody(node.body);
+            } else {
+                // For regular functions, infer from return statements
+                inferredReturnType = this.inferReturnTypeFromBody(node.body);
+            }
+        } else {
+            // No body or expression (shouldn't happen for valid lambdas)
+            return;
+        }
+
+        // Check if inferred return type is an error
+        if (isErrorType(inferredReturnType)) {
+            const errorType = inferredReturnType;
+            const message = errorType.message || (isCoroutine ? 'Cannot infer yield type' : 'Cannot infer return type');
+
+            // Don't report recursion placeholder errors
+            if (message === '__recursion_placeholder__') {
+                return;
+            }
+
+            const errorCode = isCoroutine ? ErrorCode.TC_COROUTINE_YIELD_TYPE_INFERENCE_FAILED : ErrorCode.TC_FUNCTION_RETURN_TYPE_INFERENCE_FAILED;
+            accept('error', message, {
+                node: node,
+                code: errorCode
+            });
+            return;
+        }
+
+        // Validate that inferred type matches declared type
+        const declaredReturnType = this.typeProvider.getType(node.header.returnType);
+
+        const compatResult = this.isTypeCompatible(inferredReturnType, declaredReturnType);
+        if (!compatResult.success) {
+            const typeKind = isCoroutine ? 'yield' : 'return';
+            const errorCode = isCoroutine ? ErrorCode.TC_COROUTINE_YIELD_TYPE_MISMATCH : ErrorCode.TC_FUNCTION_RETURN_TYPE_MISMATCH;
+            const errorMsg = compatResult.message
+                ? `Lambda ${typeKind} type mismatch: ${compatResult.message}`
+                : `Lambda ${typeKind} type mismatch: Declared '${declaredReturnType.toString()}', but inferred '${inferredReturnType.toString()}'`;
+            accept('error', errorMsg, {
+                node: node.expr ?? node.header.returnType,
+                code: errorCode
+            });
         }
     }
 

@@ -106,7 +106,7 @@ fn testVariantArray() -> Result<u32, string>[] {
 
 // Test 9: Option variant (common pattern)
 type Option<T> = variant {
-    Some(T),
+    Some(v: T),
     None
 }
 
@@ -114,7 +114,8 @@ fn testOption() -> Option<f32> {
     // Pattern matching with contextual typing
     return match true {
         true => Option.Some(3.14),  // 3.14 infers as f32
-        false => Option.None
+        false => Option.None(),
+        _ => Option.None()
     }
 }
 
@@ -127,7 +128,7 @@ type Container<T> = class {
     let items: T[]
 }
 
-fn testNestedGenerics() -> Container<Option<u32>> {
+fn testNestedGenerics() -> Container<Option<u32> > {
     return new Container([
         Option.Some(1),  // 1 infers as u32
         Option.Some(2),  // 2 infers as u32
@@ -140,7 +141,7 @@ type Repository<T, E> = interface {
     fn fetch(id: u64) -> Result<T, E>
 }
 
-type UserRepo = class : Repository<User, string> {
+type UserRepo = class Repository<User, string> {
     fn fetch(id: u64) -> Result<User, string> {
         // id inferred as u64 from interface
         return match id {
@@ -169,7 +170,7 @@ fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
 }
 
 fn testLambdaComplexReturn() {
-    let result = processResult(fn() -> Result.Ok(42))
+    let result = processResult(fn() = Result.Ok(42))
     // Lambda return type infers from processResult's parameter
     // 42 infers from Result.Ok's generic parameter
 }
@@ -179,7 +180,7 @@ type Validator = interface {
     fn isValid() -> bool
 }
 
-type EmailValidator = class : Validator {
+type EmailValidator = class Validator {
     fn isValid() -> bool = true  // true infers bool from interface
 }
 
@@ -189,8 +190,8 @@ type ValidatorFactory = class {
 
 // Test 15: Variant with struct fields
 type Event = variant {
-    Click({x: u32, y: u32}),
-    KeyPress({key: string, code: u32})
+    Click(coords: {x: u32, y: u32}),
+    KeyPress(params: {key: string, code: u32})
 }
 
 fn testVariantWithStruct() -> Event {

@@ -479,23 +479,22 @@ TypeDecl<allowLocal> returns TypeDeclaration:
 
 DataType<allowTuples>:
     (<allowTuples> TupleType) |
-    NullableType;
+    UnionType;
 
 // cannot have nested tuples
 TupleType infers DataType:
-    {infer TupleType} '(' types+=NullableType (',' types+=NullableType)+ ')';
-
-NullableType infers DataType:
-    UnionType ({infer NullableType.baseType = current} '?')?;
+    {infer TupleType} '(' types+=UnionType (',' types+=UnionType)+ ')';
 
 UnionType infers DataType:
     JoinType ({infer UnionType.left = current} '|' right=JoinType)*;
 
 JoinType infers DataType:
-    ArrayType ({infer JoinType.left = current} '&' right=ArrayType)*;
+    PostfixType ({infer JoinType.left = current} '&' right=PostfixType)*;
 
-ArrayType infers DataType:
-    GroupType ({infer ArrayType.arrayOf = current} '['']')*;
+// PostfixType handles both [] and ? operators at the same precedence level
+// This allows both Type[]? (nullable array) and Type?[] (array of nullables)
+PostfixType infers DataType:
+    GroupType ({infer ArrayType.arrayOf = current} '['']' | {infer NullableType.baseType = current} '?')*;
 
 GroupType infers DataType:
     '(' DataType<false> ')' |

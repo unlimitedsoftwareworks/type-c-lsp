@@ -6,3 +6,20 @@ fn getValues1() -> u32[] = match 1 {
 
 fn getValues2() -> {x: u32, y: u32, z: f32} = {1, 1, 1.0f}
 fn getValues3() -> {x: u32, y: u32, z: f32} = {x: 1, y: 1, z: 1.0f}
+
+
+// Test 1: Lambda parameter inference from function signature
+
+/// @Type(mapU32): fn(arr: u32[], f: fn(_: u32) -> u32) -> u32[]
+fn mapU32(arr: u32[], f: fn(u32) -> u32) -> u32[] {
+    let result: u32[] = []
+    return result
+}
+
+fn testLambdaInference() {
+    let nums: u32[] = [1, 2, 3]
+    // Lambda parameter 'x' should infer as u32 from map's signature
+    
+    /// @Type(x): u32
+    let doubled = mapU32(nums, fn(x) = x * 2)  // x inferred as u32
+}

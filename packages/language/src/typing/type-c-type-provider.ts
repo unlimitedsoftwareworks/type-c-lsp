@@ -220,6 +220,26 @@ export class TypeCTypeProvider {
     private computeExpectedType(node: AstNode): TypeDescription | undefined {
         const parent = node.$container;
 
+        // Function parameter inference: fn(x) -> ... where lambda is expected to have type fn(T) -> U
+        // Special handling for FunctionParameter nodes
+        if (ast.isFunctionParameter(node)) {
+            // Parent is FunctionHeader, grandparent might be LambdaExpression
+            const header = parent;
+            if (header && ast.isFunctionHeader(header)) {
+                const lambda = header.$container;
+                if (lambda && ast.isLambdaExpression(lambda)) {
+                    const expectedLambdaType = this.getExpectedType(lambda);
+                    if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
+                        // Find parameter index
+                        const paramIndex = header.args?.findIndex(arg => arg === node);
+                        if (paramIndex !== undefined && paramIndex >= 0 && paramIndex < expectedLambdaType.parameters.length) {
+                            return expectedLambdaType.parameters[paramIndex].type;
+                        }
+                    }
+                }
+            }
+        }
+
         // Variable declaration with annotation
         // let x: T = expr
         if (ast.isVariableDeclaration(parent) && parent.annotation && parent.initializer === node) {
@@ -680,7 +700,25 @@ export class TypeCTypeProvider {
         if (ast.isFunctionDeclaration(node)) return this.inferFunctionDeclaration(node);
         if (ast.isVariableDeclaration(node)) return this.inferVariableDeclaration(node);
         if (ast.isClassAttributeDecl(node)) return this.getType(node.type);
-        if (ast.isFunctionParameter(node)) return this.getType(node.type);
+        if (ast.isFunctionParameter(node)) {
+            // If parameter has explicit type annotation, use it
+            if (node.type) {
+                return this.getType(node.type);
+            }
+            
+            // Otherwise, try to infer from context (lambda passed to function expecting specific function type)
+            const expectedType = this.getExpectedType(node);
+            if (expectedType) {
+                return expectedType;
+            }
+            
+            // If we can't infer type from context, return error
+            return factory.createErrorType(
+                `Parameter '${node.name}' requires type annotation or must be in a context where type can be inferred`,
+                undefined,
+                node
+            );
+        }
         if (ast.isGenericType(node)) return this.inferGenericType(node);
         if (ast.isNamespaceDecl(node)) return factory.createNamespaceType(node.name, node, node);
         if (ast.isExternFFIDecl(node)) return this.inferFFIDecl(node);
@@ -1162,7 +1200,7 @@ export class TypeCTypeProvider {
 
     private inferFunctionType(node: ast.FunctionType): TypeDescription {
         const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
-            arg?.name ?? '[anonymous]',
+            arg?.name ?? '_',
             this.getType(arg.type),
             arg.isMut
         )) ?? [];

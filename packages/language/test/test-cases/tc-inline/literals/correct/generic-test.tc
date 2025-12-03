@@ -1,0 +1,10 @@
+fn map<T, U>(arr: T[], f: fn(T) -> U) -> U[] {
+    let result: U[] = []
+    return result
+}
+
+fn testLambdaInference() {
+    let nums: u32[] = [1, 2, 3]
+    // Lambda parameter 'x' should infer as u32 from map's signature
+    let doubled = map(nums, fn(x) = x * 2)  // x inferred as u32
+}

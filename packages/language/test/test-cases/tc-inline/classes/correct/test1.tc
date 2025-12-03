@@ -1,0 +1,21 @@
+type Object1D = interface {
+    fn getX() -> f32
+}
+
+type Object2D = interface Object1D {
+    fn getY() -> f32
+}
+
+type Object3D = interface Object2D {
+    fn getZ() -> f32
+}
+
+type Mesh = class Object3D {
+    fn getX() = 1.0f
+    fn getY() = 1.0f
+    fn getZ() = 1.0f
+}
+
+fn main() {
+    let obj: Object3D = new Mesh()
+}

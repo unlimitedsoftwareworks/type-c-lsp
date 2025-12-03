@@ -1,0 +1,76 @@
+// Test foreach with non-iterable types
+
+fn testNonIterableTypes() {
+    let x: u32 = 42
+    
+    // @error(Type 'u32' is not iterable)
+    foreach i, value in x {
+        let a = i
+    }
+}
+
+fn testNonIterableClass() {
+    type NonIterable = class {
+        let value: u32
+    }
+    
+    let obj: NonIterable = new NonIterable()
+    
+    // @error(Type 'NonIterable' is not iterable)
+    foreach item in obj {
+        let a = item
+    }
+}
+
+// Test with partially implemented Iterable (missing methods)
+type IncompleteIterable = class Iterable<u64, string> {
+    // Missing getIterator implementation
+}
+
+fn testIncompleteIterable() {
+    let obj: IncompleteIterable = new IncompleteIterable()
+    
+    // This might pass type checking but fail at runtime
+    // The type system sees it implements Iterable interface
+    foreach idx, value in obj {
+        let i: u64 = idx
+        let v: string = value
+    }
+}
+
+// Test with wrong generic argument count
+type BadIterator = class Iterator<u64> {  // Should have 2 type parameters
+    fn hasNext() -> bool = true
+    fn next() -> (u64, u64) = (0, 0)
+}
+
+// Test with string (not iterable in our system)
+fn testStringIteration() {
+    let str: string = "hello"
+    
+    // @error(Type 'string' is not iterable)
+    foreach ch in str {
+        let c = ch
+    }
+}
+
+// Test with primitives
+fn testPrimitiveIteration() {
+    let num: f32 = 3.14
+    
+    // @error(Type 'f32' is not iterable)
+    foreach item in num {
+        let x = item
+    }
+}
+
+// Test with struct (not iterable)
+fn testStructIteration() {
+    type Point = struct { x: i32, y: i32 }
+    let p: Point = {x: 1, y: 2}
+    
+    // @error(Type 'struct { x: i32, y: i32 }' is not iterable)
+    foreach field in p {
+        let f = field
+    }
+}

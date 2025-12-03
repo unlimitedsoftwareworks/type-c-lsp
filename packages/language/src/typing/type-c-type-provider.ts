@@ -554,6 +554,7 @@ export class TypeCTypeProvider {
         if (ast.isStructFieldKeyValuePair(node)) return this.inferStructFieldKeyValuePair(node);
         if (ast.isStructField(node)) return this.inferStructField(node);
         if (ast.isFFIMethodHeader(node)) return this.inferFFIMethodHeader(node);
+        if (ast.isIteratorVar(node)) return this.inferIteratorVar(node);
 
         return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
@@ -3124,6 +3125,141 @@ export class TypeCTypeProvider {
             [],
             node
         );
+    }
+
+    /**
+     * Infers the type of a foreach iterator variable (index or value).
+     *
+     * For arrays (T[]):
+     *   - indexVar: u64
+     *   - valueVar: T
+     *
+     * For Iterable<U, V>:
+     *   - indexVar: U
+     *   - valueVar: V
+     */
+    private inferIteratorVar(node: ast.IteratorVar): TypeDescription {
+        // Get the containing foreach statement
+        const foreachStmt = AstUtils.getContainerOfType(node, ast.isForeachStatement);
+        if (!foreachStmt) {
+            return factory.createErrorType('IteratorVar outside foreach statement', undefined, node);
+        }
+
+        // Infer the collection type
+        const collectionType = this.inferExpression(foreachStmt.collection);
+        
+        // Determine if this is the index or value variable
+        const isIndexVar = foreachStmt.indexVar === node;
+        
+        // Handle arrays: index is u64, value is element type
+        if (isArrayType(collectionType)) {
+            if (isIndexVar) {
+                return factory.createU64Type(node);
+            } else {
+                return collectionType.elementType;
+            }
+        }
+        
+        // Handle Iterable<U, V> - extract generics U and V
+        const iterableInfo = this.extractIterableInterface(collectionType);
+        if (iterableInfo) {
+            // iterableInfo contains { indexType: U, valueType: V }
+            if (isIndexVar) {
+                return iterableInfo.indexType; // U
+            } else {
+                return iterableInfo.valueType; // V
+            }
+        }
+        
+        return factory.createErrorType(
+            `Type '${collectionType.toString()}' is not iterable. ` +
+            `Expected array type or type implementing Iterable<U, V>`,
+            undefined,
+            node
+        );
+    }
+
+    /**
+     * Extracts Iterable<U, V> interface from a type using structural typing.
+     * Returns {indexType: U, valueType: V} if the type has a getIterator() method
+     * that returns Iterator<U, V>.
+     */
+    private extractIterableInterface(type: TypeDescription):
+        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+        
+        let resolvedType = isReferenceType(type) ? this.resolveReference(type) : type;
+        
+        // For classes: check if they have getIterator() method
+        if (isClassType(resolvedType)) {
+            const getIteratorMethod = resolvedType.methods.find(m => m.names.includes('getIterator'));
+            if (getIteratorMethod) {
+                return this.extractIteratorTypes(getIteratorMethod.returnType);
+            }
+        }
+        
+        // For interfaces: check methods (including inherited)
+        const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
+        if (interfaceType) {
+            return this.extractIterableFromInterface(interfaceType);
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Recursively searches for getIterator() method in interface hierarchy.
+     */
+    private extractIterableFromInterface(interfaceType: InterfaceTypeDescription):
+        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+        
+        // Find getIterator() in this interface
+        const getIteratorMethod = interfaceType.methods.find(m => m.names.includes('getIterator'));
+        if (getIteratorMethod) {
+            return this.extractIteratorTypes(getIteratorMethod.returnType);
+        }
+        
+        // Check supertypes recursively
+        for (const superType of interfaceType.superTypes) {
+            const resolvedSuper = isReferenceType(superType) ? this.resolveReference(superType) : superType;
+            const superInterface = this.typeUtils.asInterfaceType(resolvedSuper);
+            if (superInterface) {
+                const result = this.extractIterableFromInterface(superInterface);
+                if (result) return result;
+            }
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Extracts index and value types from Iterator<U, V> return type.
+     * Supports both nominal (Iterator<U, V>) and structural (has next() -> (U, V)) approaches.
+     */
+    private extractIteratorTypes(iteratorType: TypeDescription):
+        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+        
+        // If it's a reference to Iterator<U, V>, extract generics directly
+        if (isReferenceType(iteratorType) && iteratorType.genericArgs.length === 2) {
+            return {
+                indexType: iteratorType.genericArgs[0],
+                valueType: iteratorType.genericArgs[1]
+            };
+        }
+        
+        // Structural approach: check if it has next() -> (U, V)
+        let resolvedType = isReferenceType(iteratorType) ? this.resolveReference(iteratorType) : iteratorType;
+        const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
+        if (interfaceType) {
+            const nextMethod = interfaceType.methods.find(m => m.names.includes('next'));
+            if (nextMethod && isTupleType(nextMethod.returnType) && nextMethod.returnType.elementTypes.length === 2) {
+                return {
+                    indexType: nextMethod.returnType.elementTypes[0],
+                    valueType: nextMethod.returnType.elementTypes[1]
+                };
+            }
+        }
+        
+        return undefined;
     }
 
 

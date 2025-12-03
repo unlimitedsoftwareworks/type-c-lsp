@@ -1,0 +1,118 @@
+// Test foreach with arrays
+
+type Iterator<U, V> = interface {
+    fn hasNext() -> bool
+    fn next() -> (U, V)
+}
+
+type Iterable<U, V> = interface {
+    fn getIterator() -> Iterator<U, V>
+}
+
+fn testArrayForeach() {
+    let arr: u32[] = [1u32, 2u32, 3u32]
+    
+    // With index and value
+    foreach i, value in arr {
+        let x: u64 = i        // @type(u64)
+        let y: u32 = value    // @type(u32)
+    }
+    
+    // With value only
+    foreach value in arr {
+        let z: u32 = value    // @type(u32)
+    }
+}
+
+// Test foreach with custom Iterable implementation
+type MyIterator<U, V> = class {
+    let key: U
+    let value: V
+
+    fn hasNext() -> bool = true
+    fn next() -> (U, V) = (key, value)
+}
+
+type MyList<T> = class  {
+    fn getIterator() -> MyIterator<u64, T> {
+        return new MyIterator<u64, T>()
+    }
+}
+
+fn testCustomIterable() {
+    let list: MyList<string> = new MyList<string>()
+    
+    // With index and value
+    foreach idx, item in list {
+        let x: u64 = idx       // @type(u64)
+        let y: string = item   // @type(string)
+    }
+    
+    // With value only
+    foreach item in list {
+        let z: string = item   // @type(string)
+    }
+}
+
+// Test foreach with generic Iterable
+type KeyValueMap<K, V> = class Iterable<K, V> {
+    fn getIterator() -> Iterator<K, V> {
+        return new MyIterator<K, V>()
+    }
+}
+
+fn testGenericIterable() {
+    let map: KeyValueMap<string, i32> = new KeyValueMap<string, i32>()
+    
+    // With index (key) and value
+    foreach key, value in map {
+        let k: string = key     // @type(string)
+        let v: i32 = value      // @type(i32)
+    }
+    
+    // With value only
+    foreach value in map {
+        let v: i32 = value      // @type(i32)
+    }
+}
+
+// Test foreach with nested arrays
+fn testNestedArrays() {
+    let matrix: u32[][] = [[1u32, 2u32], [3u32, 4u32]]
+    
+    foreach i, row in matrix {
+        let idx: u64 = i        // @type(u64)
+        let r: u32[] = row      // @type(u32[])
+        
+        foreach j, value in row {
+            let j_idx: u64 = j   // @type(u64)
+            let val: u32 = value // @type(u32)
+        }
+    }
+}
+
+// Test foreach with interface that extends Iterable
+type Sequence<T> = interface Iterable<u64, T> {
+    fn getIterator() -> Iterator<u64, T>
+}
+
+type MySequence<T> = class Sequence<T> {
+    fn getIterator() -> Iterator<u64, T> {
+        return new MyIterator<u64, T>()
+    }
+}
+
+fn testInterfaceIterable() {
+    let seq: MySequence<string> = new MySequence<string>()
+    let arr = [{x: 1u32, y: 1u32}, {x: 1u32}]
+    
+    foreach idx, value in seq {
+        let i: u64 = idx        // @type(u64)
+        let v: string = value      // @type(f32)
+    }
+
+    foreach idx, value in arr {
+
+    }
+}
+

@@ -61,22 +61,26 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
         for (const container of containers) {
             const declarations = scopeUtils.getDeclarationsFromContainer(container);
             for (const declaration of declarations) {
-                const name = this.nameProvider.getName(declaration);
-                if (name) {
-                    symbols.add(container, this.descriptions.createDescription(declaration, name, document));
-                }
-                // Handle ClassMethod with multiple names (operator overloading)
-                // The name provider returns the first name, but we need to add all names to the scope
-                if (ast.isClassMethod(declaration) && declaration.method) {
-                    for(const name of declaration.method.names) {
+                try {
+                    const name = this.nameProvider.getName(declaration);
+                    if (name) {
                         symbols.add(container, this.descriptions.createDescription(declaration, name, document));
                     }
-                }
-                // Handle MethodHeader with multiple names (operator overloading) - for interfaces
-                else if (ast.isMethodHeader(declaration)) {
-                    for(const name of declaration.names) {
-                        symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                    // Handle ClassMethod with multiple names (operator overloading)
+                    // The name provider returns the first name, but we need to add all names to the scope
+                    if (ast.isClassMethod(declaration) && declaration.method) {
+                        for(const name of declaration.method.names) {
+                            symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                        }
                     }
+                    // Handle MethodHeader with multiple names (operator overloading) - for interfaces
+                    else if (ast.isMethodHeader(declaration)) {
+                        for(const name of declaration.names) {
+                            symbols.add(container, this.descriptions.createDescription(declaration, name, document));
+                        }
+                    }
+                } catch  {
+                    // DO nothing
                 }
             }
         }

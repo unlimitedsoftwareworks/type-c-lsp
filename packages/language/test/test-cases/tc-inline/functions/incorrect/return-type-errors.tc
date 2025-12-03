@@ -44,3 +44,20 @@ fn main() -> void {
     let a = goodInferred(0)
     let b = goodDeclared()
 }
+
+
+/// @Error(TCE041): Function return type mismatch
+fn getValues1() -> u32[] = match 1 {
+    0 => 1u32,
+    1 => 1u32,
+    _ => 0u32
+}
+
+
+/// @Error(TCE041): Function return type mismatch
+fn getValues2() -> u32[] = 1u32
+
+type X = class {
+    /// @Error(TCE045): Method return type mismatch
+    fn test() -> u32[] = 1u32 
+}

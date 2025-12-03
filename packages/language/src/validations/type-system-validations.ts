@@ -594,14 +594,27 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * ```
      */
     checkFunctionDeclaration = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
-        const fnType = this.typeProvider.getType(node);
-
-        if (!isFunctionType(fnType)) {
-            return; // Not a function type (shouldn't happen)
-        }
-
         const isCoroutine = node.fnType === 'cfn';
-        const inferredReturnType = fnType.returnType;
+        
+        // Independently infer the return type from the function body/expression
+        let inferredReturnType: TypeDescription;
+        
+        if (node.expr) {
+            // Expression-body function: fn foo() = expr
+            inferredReturnType = this.typeProvider.getType(node.expr);
+        } else if (node.body) {
+            // Block-body function: fn foo() { ... }
+            if (isCoroutine) {
+                // For coroutines, infer from yield expressions
+                inferredReturnType = this.inferYieldTypeFromBody(node.body);
+            } else {
+                // For regular functions, infer from return statements
+                inferredReturnType = this.inferReturnTypeFromBody(node.body);
+            }
+        } else {
+            // No body or expression (shouldn't happen for implemented functions)
+            return;
+        }
 
         // Check 1: If inferred return/yield type is an error, report it
         if (isErrorType(inferredReturnType)) {
@@ -634,7 +647,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     ? `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: ${compatResult.message}`
                     : `${isCoroutine ? 'Coroutine' : 'Function'} ${typeKind} type mismatch: Declared '${declaredReturnType.toString()}', but inferred '${inferredReturnType.toString()}'`;
                 accept('error', errorMsg, {
-                    node: node.header.returnType,
+                    node: node.expr ?? node.header.returnType,
                     code: errorCode
                 });
             }
@@ -710,7 +723,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     ? `Method return type mismatch: ${compatResult.message}`
                     : `Method return type mismatch: Declared '${declaredReturnType.toString()}', but inferred '${inferredReturnType.toString()}'`;
                 accept('error', errorMsg, {
-                    node: methodHeader.header.returnType,
+                    node: node.expr??methodHeader.header.returnType,
                     code: ErrorCode.TC_METHOD_RETURN_TYPE_MISMATCH
                 });
             }
@@ -778,6 +791,69 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         return returns;
+    }
+
+    /**
+     * Helper method to infer yield type from a coroutine body.
+     * Similar to inferReturnTypeFromBody but for yield expressions.
+     */
+    private inferYieldTypeFromBody(body: ast.BlockStatement): TypeDescription {
+        const yieldStatements = this.collectYieldExpressions(body);
+
+        if (yieldStatements.length === 0) {
+            return factory.createVoidType();
+        }
+
+        // Get types of all yield expressions
+        const allYieldTypes = yieldStatements
+            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : factory.createVoidType());
+
+        // Filter out recursion placeholders
+        const nonPlaceholderTypes = allYieldTypes.filter(type => {
+            if (isErrorType(type)) {
+                return type.message !== '__recursion_placeholder__';
+            }
+            return true;
+        });
+
+        const yieldTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allYieldTypes;
+
+        if (yieldTypes.length === 0) {
+            return factory.createVoidType();
+        }
+
+        // Find common type
+        return this.getCommonType(yieldTypes);
+    }
+
+    /**
+     * Collect all yield expressions from a block (only from this coroutine level).
+     */
+    private collectYieldExpressions(block: ast.BlockStatement): ast.YieldExpression[] {
+        const yields: ast.YieldExpression[] = [];
+
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function or coroutine - don't collect its yields!
+            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node)) {
+                return;
+            }
+
+            if (ast.isYieldExpression(node)) {
+                yields.push(node);
+            }
+
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+
+        return yields;
     }
 
     /**

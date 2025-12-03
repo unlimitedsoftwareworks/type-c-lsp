@@ -37,9 +37,9 @@ cfn coroutineWithReturn() {
 }
 
 // Void yield type but yielding values
-cfn voidYieldingValue() -> void {
+cfn voidYieldingValue() -> u32 {
     /// @Error(TCE035): Yield type mismatch
-    yield 42
+    yield 42.0f
 }
 
 // Non-void yield type but yielding nothing
@@ -49,7 +49,8 @@ cfn missingYieldValue() -> u32 {
 }
 
 // Struct with incompatible fields
-/// @Error(TCE042): Cannot infer common struct
+
+/// @Error(TCE042): Cannot infer common type
 cfn incompatibleStructs() {
     yield {x: 1u32, y: 2u32}
     yield {x: "oops", y: 4u32}

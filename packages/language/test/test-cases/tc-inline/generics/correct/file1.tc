@@ -1,5 +1,5 @@
-fn overloadedFn(a: u32) -> i32 {}
-fn overloadedFn(a: f32) -> f64 {}
+fn overloadedFn(a: u32) -> i32 = 1i32
+fn overloadedFn(a: f32) -> f64 = 1.0
 
 fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
     let result: V[] = []

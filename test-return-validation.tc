@@ -1,0 +1,10 @@
+// Test case 1: Block body with return - should show error
+fn getValues1() -> u32 {
+    return [1, 2]
+}
+
+// Test case 2: Expression body - should also show error now
+fn getValues2() -> u32 = [1, 2]
+
+// Test case 3: Correct usage - should be OK
+fn getValues3() -> i32[] = [1, 2]

@@ -1008,20 +1008,47 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return types[0];
         }
 
-        // Check if all types are identical
-        const firstType = types[0];
-        const allIdentical = types.every(t => t.toString() === firstType.toString());
+        // Separate null types from non-null types
+        const nullTypes = types.filter(t => t.kind === TypeKind.Null);
+        const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
 
-        if (allIdentical) {
-            return firstType;
+        // If all types are null, return null
+        if (nonNullTypes.length === 0) {
+            return factory.createNullType();
         }
 
-        // For more complex cases, return an error type
-        return factory.createErrorType(
-            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
-            undefined,
-            firstType.node
-        );
+        // Find common type of non-null types
+        let commonType: TypeDescription;
+
+        if (nonNullTypes.length === 1) {
+            commonType = nonNullTypes[0];
+        } else {
+            // Check if all non-null types are identical
+            const firstType = nonNullTypes[0];
+            const allIdentical = nonNullTypes.every(t => t.toString() === firstType.toString());
+
+            if (allIdentical) {
+                commonType = firstType;
+            } else {
+                // For more complex cases, return an error type
+                return factory.createErrorType(
+                    `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                    undefined,
+                    firstType.node
+                );
+            }
+        }
+
+        // If we had any nulls, wrap the common type in Nullable (but only once)
+        if (nullTypes.length > 0) {
+            // Don't double-wrap if commonType is already nullable
+            if (isNullableType(commonType)) {
+                return commonType;
+            }
+            return factory.createNullableType(commonType, types[0].node);
+        }
+
+        return commonType;
     }
 
     /**

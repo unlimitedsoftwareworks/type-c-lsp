@@ -501,6 +501,13 @@ export class TypeCTypeUtils {
             return success();
         }
 
+        // Both nullable: T? can be assigned to U? if T can be assigned to U
+        // This handles cases like u32[]? -> u32?[]? (nullable array with non-nullable elements
+        // to nullable array with nullable elements)
+        if (isNullableType(from) && isNullableType(to)) {
+            return this.isAssignable(from.baseType, to.baseType);
+        }
+
         // T can be assigned to T?
         if (isNullableType(to)) {
             return this.isAssignable(from, to.baseType);

@@ -1,3 +1,3 @@
-let nested3: (u32[])?[] = [
-    [1u32, 2u32], null, null, [1u32]
+let nested3: u32?[]?[] = [
+    [1u32, 1u32, null], [1u32]
 ]

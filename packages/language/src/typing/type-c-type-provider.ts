@@ -1825,49 +1825,135 @@ export class TypeCTypeProvider {
             return types[0];
         }
 
-        // Check if all types are identical
-        const firstType = types[0];
-        const allIdentical = types.every(t => t.toString() === firstType.toString());
+        // Separate null types from non-null types
+        const nullTypes = types.filter(t => t.kind === TypeKind.Null);
+        const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
 
-        if (allIdentical) {
-            return firstType;
+        // If all types are null, return null
+        if (nonNullTypes.length === 0) {
+            return factory.createNullType();
         }
 
-        // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
-        const structTypes = types.map(t => this.services.typing.TypeUtils.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
-        if (structTypes.length === types.length) {
-            // All types are structs or resolve to structs
-            return this.getCommonStructType(structTypes);
-        }
+        // Find common type of non-null types
+        let commonType: TypeDescription;
 
-        // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
-        // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
-        const allReferences = types.every(t => isReferenceType(t));
-        if (allReferences) {
-            const referenceTypes = types.filter(isReferenceType);
-            const firstDecl = referenceTypes[0].declaration;
+        if (nonNullTypes.length === 1) {
+            commonType = nonNullTypes[0];
+        } else {
+            // CRITICAL FIX: Handle arrays specially to recursively find common element types
+            // This allows u32?[] and u32[] to unify to u32?[]
+            const allArrays = nonNullTypes.every(t => isArrayType(t));
+            if (allArrays) {
+                const arrayTypes = nonNullTypes.filter(isArrayType);
+                const elementTypes = arrayTypes.map(a => a.elementType);
+                const commonElementType = this.getCommonType(elementTypes);
+                
+                if (isErrorType(commonElementType)) {
+                    return commonElementType;
+                }
+                
+                commonType = factory.createArrayType(commonElementType, types[0].node);
+            }
+            // CRITICAL FIX: Check if types differ only in nullability
+            // This allows u32? and u32 to unify to u32?
+            else {
+                // Unwrap any nullable types and check if base types are identical
+                const unwrappedTypes = nonNullTypes.map(t => ({
+                    original: t,
+                    base: isNullableType(t) ? t.baseType : t,
+                    wasNullable: isNullableType(t)
+                }));
 
-            // Check if all references point to the same declaration
-            const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
-            if (allSameDecl) {
-                // Unify generic arguments across all references
-                return this.getCommonReferenceType(referenceTypes);
+                const firstBase = unwrappedTypes[0].base;
+                const allBasesIdentical = unwrappedTypes.every(item =>
+                    item.base.toString() === firstBase.toString()
+                );
+
+                if (allBasesIdentical) {
+                    // All types have the same base type, possibly with different nullability
+                    commonType = firstBase;
+                    
+                    // If any were nullable, make the result nullable
+                    if (unwrappedTypes.some(item => item.wasNullable)) {
+                        commonType = factory.createNullableType(commonType, types[0].node);
+                    }
+                } else {
+                    // Check if all non-null types are identical (as string)
+                    const firstType = nonNullTypes[0];
+                    const allIdentical = nonNullTypes.every(t => t.toString() === firstType.toString());
+
+                    if (allIdentical) {
+                        commonType = firstType;
+                    } else {
+                        // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
+                const structTypes = nonNullTypes.map(t => this.services.typing.TypeUtils.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
+                if (structTypes.length === nonNullTypes.length) {
+                    // All types are structs or resolve to structs
+                    commonType = this.getCommonStructType(structTypes);
+                    // Check if getCommonStructType returned an error
+                    if (isErrorType(commonType)) {
+                        return commonType;
+                    }
+                } else {
+                    // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
+                    // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
+                    const allReferences = nonNullTypes.every(t => isReferenceType(t));
+                    if (allReferences) {
+                        const referenceTypes = nonNullTypes.filter(isReferenceType);
+                        const firstDecl = referenceTypes[0].declaration;
+
+                        // Check if all references point to the same declaration
+                        const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
+                        if (allSameDecl) {
+                            // Unify generic arguments across all references
+                            commonType = this.getCommonReferenceType(referenceTypes);
+                            // Check if getCommonReferenceType returned an error
+                            if (isErrorType(commonType)) {
+                                return commonType;
+                            }
+                        } else {
+                            // Different declarations - can't find common type
+                            return factory.createErrorType(
+                                `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                undefined,
+                                firstType.node
+                            );
+                        }
+                    } else {
+                        // Check if all are variant constructors - unify generic arguments
+                        const allVariantConstructors = nonNullTypes.every(t => isVariantConstructorType(t));
+                        if (allVariantConstructors) {
+                            commonType = this.getCommonVariantConstructorType(nonNullTypes.filter(isVariantConstructorType));
+                            // Check if getCommonVariantConstructorType returned an error
+                            if (isErrorType(commonType)) {
+                                return commonType;
+                            }
+                        } else {
+                            // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
+                            // For now, if types differ, it's an error
+                            return factory.createErrorType(
+                                `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                undefined,
+                                firstType.node
+                            );
+                        }
+                    }
+                        }
+                    }
+                }
             }
         }
 
-        // Check if all are variant constructors - unify generic arguments
-        const allVariantConstructors = types.every(t => isVariantConstructorType(t));
-        if (allVariantConstructors) {
-            return this.getCommonVariantConstructorType(types.filter(isVariantConstructorType));
+        // If we had any nulls, wrap the common type in Nullable (but only once)
+        if (nullTypes.length > 0) {
+            // Don't double-wrap if commonType is already nullable
+            if (isNullableType(commonType)) {
+                return commonType;
+            }
+            return factory.createNullableType(commonType, types[0].node);
         }
 
-        // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
-        // For now, if types differ, it's an error
-        return factory.createErrorType(
-            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
-            undefined,
-            firstType.node
-        );
+        return commonType;
     }
 
     /**

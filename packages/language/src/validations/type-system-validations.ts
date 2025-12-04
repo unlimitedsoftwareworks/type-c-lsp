@@ -52,8 +52,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     getChecks(): ValidationChecks<ast.TypeCAstType> {
         return {
             VariableDeclSingle: this.checkVariableDeclSingle,
-            BinaryExpression: this.checkBinaryExpression,
-            FunctionCall: this.checkFunctionCall,
+            BinaryExpression: [this.checkBinaryExpression, this.checkExpressionForErrors],
+            FunctionCall: [this.checkFunctionCall, this.checkExpressionForErrors],
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
@@ -64,10 +64,28 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: this.checkInterfaceInheritance,
             ClassType: this.checkClassImplementation,
-            MemberAccess: this.checkMemberAccess,
-            DenullExpression: this.checkDenullExpression,
-            NamedStructConstructionExpression: this.checkStructSpreadFieldTypes,
-            NewExpression: this.checkNewExpression,
+            MemberAccess: [this.checkMemberAccess, this.checkExpressionForErrors],
+            DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
+            NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
+            NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
+            UnaryExpression: this.checkExpressionForErrors,
+            IndexAccess: this.checkExpressionForErrors,
+            ReverseIndexAccess: this.checkExpressionForErrors,
+            PostfixOp: this.checkExpressionForErrors,
+            ConditionalExpression: this.checkExpressionForErrors,
+            MatchExpression: this.checkExpressionForErrors,
+            LetInExpression: this.checkExpressionForErrors,
+            DoExpression: this.checkExpressionForErrors,
+            TypeCastExpression: this.checkExpressionForErrors,
+            ArrayConstructionExpression: this.checkExpressionForErrors,
+            AnonymousStructConstructionExpression: this.checkExpressionForErrors,
+            TupleExpression: this.checkExpressionForErrors,
+            QualifiedReference: this.checkExpressionForErrors,
+            ThrowExpression: this.checkExpressionForErrors,
+            MutateExpression: this.checkExpressionForErrors,
+            CoroutineExpression: this.checkExpressionForErrors,
+            InstanceCheckExpression: this.checkExpressionForErrors,
+            ThisExpression: this.checkExpressionForErrors,
         };
     }
 
@@ -129,8 +147,52 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
+     * Check if an expression has an error type and report it as a validation error.
+     *
+     * This is a general-purpose validator that catches type inference failures
+     * and reports them to the user. It filters out internal error types that
+     * are used during type inference (like recursion placeholders).
+     *
+     * Each expression is validated separately - we only check the direct type,
+     * not nested types. Nested expressions will be validated by their own nodes.
+     *
+     * Examples of errors this catches:
+     * - Unresolved references: `unknownVar`
+     * - Type inference failures: `[]` without context
+     * - Invalid operations: array access on non-array types
+     */
+    checkExpressionForErrors = (node: ast.Expression, accept: ValidationAcceptor): void => {
+        console.log('[VALIDATION] Checking expression:', node.$type);
+        const exprType = this.typeProvider.getType(node);
+        console.log('[VALIDATION] Expression type:', exprType.toString(), 'Kind:', exprType.kind);
+        
+        // Check if this expression's type is an error
+        if (isErrorType(exprType)) {
+            const message = exprType.message;
+            console.log('[VALIDATION] Found error type with message:', message);
+            
+            // Skip internal error types used during type inference
+            if (message === '__recursion_placeholder__' ||
+                message === '__contextual_placeholder__' ||
+                message?.includes('placeholder')) {
+                console.log('[VALIDATION] Skipping placeholder error');
+                return;
+            }
+            
+            console.log('[VALIDATION] Reporting error:', message);
+            // Report the error
+            accept('error', message || 'Type error', {
+                node,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        } else {
+            console.log('[VALIDATION] Type is not an error, skipping');
+        }
+    }
+
+    /**
      * Check binary expressions for type compatibility.
-     * 
+     *
      * Examples:
      * - 1 + 2           // ✅ OK (i32 + i32)
      * - 1 + 2.0         // ✅ OK (i32 + f64, promotes to f64)

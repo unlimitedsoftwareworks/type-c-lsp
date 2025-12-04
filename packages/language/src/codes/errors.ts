@@ -98,4 +98,7 @@ export enum ErrorCode {
     // Literal Type Errors (TCE110-TCE119)
     TC_LITERAL_SUFFIX_MISMATCH = 'TCE110',
     TC_LITERAL_TYPE_MISMATCH = 'TCE111',
+
+    // Expression Type Errors (TCE120-TCE129)
+    TC_EXPRESSION_TYPE_ERROR = 'TCE120',
 }

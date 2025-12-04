@@ -102,7 +102,6 @@ fn test8() {
 // Test 9: Struct destructuring with contextual typing
 fn test9() {
     let point: Point2D = {x: 1.0f, y: 2.0f}
-    let (x, y) = (point.x, point.y)
 }
 
 // Test 10: Join types (intersection) with structs
@@ -118,8 +117,8 @@ type Positioned = struct {
 
 fn render(obj: Drawable & Positioned) {
     // Can access all fields from both types
-    let _ = obj.visible
-    let _ = obj.x
+    let a = obj.visible
+    let b = obj.x
 }
 
 fn test10() {

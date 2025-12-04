@@ -3222,6 +3222,13 @@ export class TypeCTypeProvider {
         // Infer element types from all elements and find common type
         const elementTypes = node.values.map(v => this.inferExpression(v.expr));
         const commonType = this.getCommonType(elementTypes);
+        
+        // If getCommonType returns an error, return it directly instead of wrapping in array
+        // This ensures type errors are properly propagated to validation
+        if (isErrorType(commonType)) {
+            return commonType;
+        }
+        
         return factory.createArrayType(commonType, node);
     }
 

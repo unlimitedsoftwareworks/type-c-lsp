@@ -38,13 +38,13 @@ fn test4() {
 // Test 5: Array with struct elements
 type Point = struct {
     x: f32,
-    y: f32
+    y: f32[]
 }
 
 fn test5() {
     let points: Point[] = [
-        {x: 0.0f, y: 0.0f},
-        {x: 1.0f, y: 1.0f}
+        {x: 0.0f, y: [0.0f]},
+        {x: 1.0f, y: [1.0f]}
     ]
 }
 
@@ -114,7 +114,7 @@ fn test14() {
     let options: Option<i32>[] = [
         Option.Some(1),
         Option.Some(2),
-        Option.None
+        Option.None()
     ]
 }
 

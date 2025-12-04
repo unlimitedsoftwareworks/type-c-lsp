@@ -49,7 +49,7 @@ fn test5() {
 fn processOption<T>(opt: Option<T>) -> T {
     return match opt {
         Option.Some(v) => v,
-        Option.None => throw "No value"
+        Option.None() => throw "No value"
     }
 }
 

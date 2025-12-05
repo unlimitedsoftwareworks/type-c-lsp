@@ -1,0 +1,62 @@
+// Test file for match expression scoping
+
+fn testSimpleMatch() -> u32 {
+    let x = 5u32
+    
+    // Simple variable pattern
+    match x {
+        a => a + 1u32,  // 'a' should be in scope here
+        _ => 0u32
+    }
+}
+
+fn testArrayPatternMatch() -> u32 {
+    let arr = [1u32, 2u32, 3u32]
+    
+    // Array destructuring pattern
+    match arr {
+        [first, second, third] => first + second + third,  // all should be in scope
+        [a, b] => a + b,
+        [single] => single,
+        _ => 0u32
+    }
+}
+
+fn testNestedArrayMatch() -> u32 {
+    let nested = [[1u32, 2u32], [3u32, 4u32]]
+    
+    match nested {
+        [[a, b], [c, d]] => a + b + c + d,  // all nested variables should be in scope
+        _ => 0u32
+    }
+}
+
+// Test with match statement (not expression)
+fn testMatchStatement() -> u32 {
+    let x = 10u32
+    let result = 0u32
+    
+    match x {
+        value {
+            // 'value' should be in scope in this block
+            let doubled = value * 2u32
+            result = doubled
+        }
+        _ {
+            result = 0u32
+        }
+    }
+    
+    result
+}
+
+// Test with guard expressions
+fn testMatchWithGuard() -> u32 {
+    let x = 15u32
+    
+    match x {
+        a if a > 10u32 => a * 2u32,  // 'a' should be in scope in guard
+        b => b,
+        _ => 0u32
+    }
+}

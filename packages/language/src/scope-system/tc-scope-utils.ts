@@ -1,4 +1,4 @@
-import { AstNode, ReferenceInfo } from "langium";
+import { AstNode, AstUtils, ReferenceInfo } from "langium";
 import * as ast from "../generated/ast.js";
 
 type ReferencableSymbol =
@@ -16,7 +16,8 @@ type ReferencableSymbol =
     ast.ClassMethod |
     ast.MethodHeader |
     ast.VariantConstructor |
-    ast.IteratorVar;  // TODO: Make this context-sensitive later
+    ast.IteratorVar |
+    ast.VariablePattern;
 
 
 export function isMemberResolution(container: AstNode, context: ReferenceInfo): boolean {
@@ -137,7 +138,51 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         // but MethodHeader is not, so Langium's reference type filtering will work correctly
         declarations.push(...container?.methods ?? []);
     }
+    else if (ast.isMatchCaseExpression(container)) {
+        // Extract all variable bindings from the pattern
+        declarations.push(...extractPatternVariables(container.pattern));
+    }
+    else if (ast.isMatchCaseStatement(container)) {
+        // Extract all variable bindings from the pattern
+        declarations.push(...extractPatternVariables(container.pattern));
+    }
     return declarations;
+}
+
+/**
+ * Extracts all variable bindings from a match pattern.
+ *
+ * Uses AstUtils.streamAllContents to traverse the pattern AST and collect
+ * all VariablePattern nodes, regardless of nesting depth. This automatically
+ * handles all pattern types including nested arrays, structs, and trail variables.
+ *
+ * **Examples:**
+ * - `a` → [VariablePattern{name: "a"}]
+ * - `[a, b]` → [VariablePattern{name: "a"}, VariablePattern{name: "b"}]
+ * - `[a, b, ...rest]` → [VariablePattern{name: "a"}, VariablePattern{name: "b"}, VariablePattern{name: "rest"}]
+ * - `[[a, b], c]` → [VariablePattern{name: "a"}, VariablePattern{name: "b"}, VariablePattern{name: "c"}]
+ * - `{x: y}` → [VariablePattern{name: "y"}]
+ * - `{name: "Bob", courses: [{name: courseName, ...tail}], ...rest}` → [VariablePattern{name: "courseName"}, VariablePattern{name: "tail"}, VariablePattern{name: "rest"}]
+ * - `Result.Ok(value)` → [VariablePattern{name: "value"}]
+ */
+export function extractPatternVariables(pattern: ast.MatchCasePattern | undefined): ReferencableSymbol[] {
+    console.log('extracting pattern', pattern?.$type)
+    if (!pattern) {
+        return [];
+    }
+
+    const variables: ReferencableSymbol[] = [];
+    
+    // Use AstUtils to stream all contents and filter for VariablePattern nodes
+    // This automatically handles all nesting levels and pattern types
+    AstUtils.streamAllContents(pattern)
+        .filter(node => ast.isVariablePattern(node))
+        .forEach(node => {
+            variables.push(node);
+        }
+    );
+    
+    return variables;
 }
 
 export function getVariableDeclarations(block: ast.BlockStatement): ReferencableSymbol[] {

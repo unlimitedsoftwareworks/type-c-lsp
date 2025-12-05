@@ -1,3 +1,26 @@
-let nested3: u32?[]?[] = [
-    [1u32, 1u32, null], [1u32]
-]
+// Comprehensive mixed contextual typing test cases
+// Combines variants, lambdas, structs, arrays, and more
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+// Test 9: Complex match with contextual typing
+fn test9() {
+    let value: Result<Point[], string> = Result.Ok([{x: 1.0f, y: 2.0f}])
+    let processed = match value {
+        Result.Ok(points) => Result.Ok(points),
+        Result.Err(e) => Result.Err(e)
+    }
+}

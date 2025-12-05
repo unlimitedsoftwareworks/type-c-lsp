@@ -16,5 +16,5 @@ fn main() {
     // More complex examples
     let nested1: u32?[]? = null
     let nested2: u32?[]? = [1u32, null, 3u32]
-    let nested3: ((u32[])?)[] = [[1u32, 2u32], null, [null]]
+    let nested3: u32[]?[] = [[1u32, 2u32], null, null]
 }

@@ -209,9 +209,11 @@ IfExpression infers Expression:
 // Match expression
 MatchExpression infers Expression:
     'match' { infer MatchExpression} target=Expression '{'
-        (cases+=MatchCaseExpression ',')*
-        // always a final trail case
-        WILDCARD '=>' defaultExpr=Expression ","?
+        cases+=MatchCaseExpression 
+        (',' cases+=MatchCaseExpression)*
+        // optional final trail case
+        (WILDCARD '=>' defaultExpr=Expression)?
+        ','?
     '}';
 
 MatchCaseExpression:
@@ -451,7 +453,7 @@ MatchStatement:
 
 
 MatchCaseStatement:
-    pattern=MatchCasePattern ('if' guard=Expression)? body=BlockStatement;
+    pattern=MatchCasePattern ('if' guard=Expression)? body=BlockStatement ','?;
 
 ReturnStatement:
     kind='return' expr=TupleExpression?;
@@ -690,11 +692,11 @@ ReferenceExpr:
 */
 
 // First define what can be referenced
-type IdentifiableReference = 
-    FunctionDeclaration | 
-    VariableDeclaration | 
-    NamespaceDecl | 
-    FunctionParameter | 
+type IdentifiableReference =
+    FunctionDeclaration |
+    VariableDeclaration |
+    NamespaceDecl |
+    FunctionParameter |
     TypeDeclaration |
     ClassAttributeDecl |  // Add class attributes
     ClassMethod |         // Add class methods
@@ -706,7 +708,8 @@ type IdentifiableReference =
     StructFieldKeyValuePair |  // For duck-typed struct literal fields
     BuiltinSymbolID |
     BuiltinSymbolFn |
-    IteratorVar;
+    IteratorVar |
+    VariablePattern;      // Variables bound in match patterns
 
 // Qualified reference that can handle all complex cases
 QualifiedReference:
@@ -726,11 +729,11 @@ fragment ExpressionList:
 
 // Also need to add back MatchCasePattern for pattern matching
 MatchCasePattern:
+    VariablePattern |
     LiteralPattern | 
     ArrayPattern |
     StructPattern |
     TypePattern |
-    VariablePattern |
     WildCardPattern;
 
 VariablePattern:
@@ -744,27 +747,25 @@ LiteralPattern:
     StringLiteral;
 
 ArrayPattern:
-    '[' pattners+=MatchCasePattern (',' pattners+=MatchCasePattern)* (',' '...' trailVariable=ID)? ']';
+    '[' pattners+=MatchCasePattern (',' pattners+=MatchCasePattern)* (',' '...' trailVariable=VariablePattern)? ']';
 
 StructPattern:
-    '{' fields+=StructFieldExpr (',' fields+=StructFieldExpr)* (',' '...' trailVariable=ID)? '}';
+    '{' fields+=StructPatternField (',' fields+=StructPatternField)* (',' '...' trailVariable=VariablePattern)? '}';
+
+StructPatternField:
+    name=ID ':' pattern=MatchCasePattern;
 
 TypePattern:
-    VariantConstructorPattern |
-    AnonymousVariantPattern |
-    TypeInstancePattern;
+    TypeInstancePattern ('(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')')?;
 
-VariantConstructorPattern:
-    base=[ReferenceType:ID] '.' constructor=[VariantConstructor:ID] '(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')';
-
-AnonymousVariantPattern:
+//AnonymousVariantPattern:
     // ignores the base! ::Ok(v)
     // useful when we know the base! 
     //match response 
     //  { ::Ok(v) => v,  ::Error(e) => e, _ => unreachable }
     // where response is a variant type
     // TODO: maybe remove the `::` prefix?
-    '::' base=[VariantConstructor:ID] '(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')';
+ //   '::' base=[VariantConstructor:ID] '(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')';
 
 TypeInstancePattern:
     type=DataType<false>;

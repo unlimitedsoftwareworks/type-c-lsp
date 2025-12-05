@@ -162,31 +162,31 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * - Invalid operations: array access on non-array types
      */
     checkExpressionForErrors = (node: ast.Expression, accept: ValidationAcceptor): void => {
-        console.log('[VALIDATION] Checking expression:', node.$type);
+        ///console.log('[VALIDATION] Checking expression:', node.$type);
         const exprType = this.typeProvider.getType(node);
-        console.log('[VALIDATION] Expression type:', exprType.toString(), 'Kind:', exprType.kind);
+        ///console.log('[VALIDATION] Expression type:', exprType.toString(), 'Kind:', exprType.kind);
         
         // Check if this expression's type is an error
         if (isErrorType(exprType)) {
             const message = exprType.message;
-            console.log('[VALIDATION] Found error type with message:', message);
+            ///console.log('[VALIDATION] Found error type with message:', message);
             
             // Skip internal error types used during type inference
             if (message === '__recursion_placeholder__' ||
                 message === '__contextual_placeholder__' ||
                 message?.includes('placeholder')) {
-                console.log('[VALIDATION] Skipping placeholder error');
+                ///console.log('[VALIDATION] Skipping placeholder error');
                 return;
             }
             
-            console.log('[VALIDATION] Reporting error:', message);
+            ///console.log('[VALIDATION] Reporting error:', message);
             // Report the error
             accept('error', message || 'Type error', {
                 node,
                 code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
             });
         } else {
-            console.log('[VALIDATION] Type is not an error, skipping');
+            ///console.log('[VALIDATION] Type is not an error, skipping');
         }
     }
 

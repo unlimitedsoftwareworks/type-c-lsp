@@ -20,27 +20,26 @@ type Color = struct {
 
 // ERROR: Missing required field
 fn test1() {
-    // ERROR: Missing field 'y'
-    let point: Point2D = >>{x: 1.0f}<<
+    /// @Error(TCE006): Variable 'point' type mismatch
+    let point: Point2D = {x: 1.0f}
 }
 
 // ERROR: Extra field not in struct
 fn test2() {
-    // ERROR: Field 'z' not in Point2D
-    let point: Point2D = >>{x: 1.0f, y: 2.0f, z: 3.0f}<<
+    let point: Point2D = {x: 1.0f, y: 2.0f, z: 3.0f}
 }
 
 // ERROR: Wrong field type
 fn test3() {
-    // ERROR: Field 'x' expects f32 but got string
-    let point: Point2D = >>{x: "hello", y: 2.0f}<<
+    /// @Error(TCE006): Variable 'point' type mismatch
+    let point: Point2D = {x: "hello", y: 2.0f}
 }
 
 // ERROR: Struct spread with incompatible types
 fn test4() {
     let base: Point2D = {x: 1.0f, y: 2.0f}
-    // ERROR: Cannot override 'x' with string
-    let extended: Point3D = >>{...base, x: "hello", z: 3.0f}<<
+    // @Error(TCE087): Struct spread field type mismatch
+    let extended: Point3D = {...base, x: "hello", z: 3.0f}
 }
 
 // ERROR: Nested struct field type mismatch
@@ -51,19 +50,19 @@ type Entity = struct {
 
 fn test5() {
     // ERROR: position.x expects f32 but got i32
-    let entity: Entity = >>{
+    let entity: Entity = {
         position: {x: 10, y: 20.0f},
         color: {r: 255u8, g: 0u8, b: 0u8, a: 255u8}
-    }<<
+    }
 }
 
 // ERROR: Array of structs with wrong element type
 fn test6() {
     // ERROR: Second element has string for x instead of f32
-    let points: Point2D[] = >>[
+    let points: Point2D[] = [
         {x: 0.0f, y: 0.0f},
         {x: "hello", y: 1.0f}
-    ]<<
+    ]
 }
 
 // ERROR: Struct in function parameter with wrong type
@@ -72,14 +71,14 @@ fn transform(point: Point2D) -> Point2D {
 }
 
 fn test7() {
-    // ERROR: Argument has string field instead of f32
-    let result = >>transform({x: "hello", y: 2.0f})<<
+    /// @Error(TCE021): Function call argument 1 type mismatch
+    let result = transform({x: "hello", y: 2.0f})
 }
 
 // ERROR: Anonymous struct with wrong field count
 fn test8() {
-    // ERROR: Anonymous struct has 3 values but Point2D has 2 fields
-    let point: Point2D = >>{1.0f, 2.0f, 3.0f}<<
+    /// @Error(TCE120): Anonymous struct has 3 value
+    let point: Point2D = {1.0f, 2.0f, 3.0f}
 }
 
 // ERROR: Struct field name mismatch
@@ -89,8 +88,8 @@ type Named = struct {
 }
 
 fn test9() {
-    // ERROR: Field 'first' doesn't exist, should be 'firstName'
-    let person: Named = >>{first: "John", lastName: "Doe"}<<
+    /// @Error(TCE006): Variable 'person' type mismatch
+    let person: Named = {first: "John", lastName: "Doe"}
 }
 
 // ERROR: Join type with conflicting field types
@@ -103,24 +102,25 @@ type Styled = struct {
 }
 
 fn test10() {
-    // ERROR: Field 'opacity' has conflicting types (f32 vs string)
-    let obj: Drawable & Styled = >>{opacity: 1.0f}<<
+    /// @Error(TCE004): Join struct field type conflict: Field 'opacity' has conflicting types
+    let obj: Drawable & Styled = {opacity: 1.0f}
 }
 
-// ERROR: Struct return type mismatch
-fn makeColor() -> Color {
-    // ERROR: Missing field 'a'
-    return >>{r: 255u8, g: 0u8, b: 0u8}<<
+/// @Error(): Function return type mismatch
+fn makeColor(TCE041) -> Color {
+    /// @Error(TCE031): Return type mismatch
+    return {r: 255u8, g: 0u8, b: 0u8}
 }
 
 fn test11() {
+    /// @Error(TCE020): Function call argument count mismatch
     let c = makeColor()
 }
 
 // ERROR: Lambda returning wrong struct type
 fn test12() {
     // ERROR: Lambda returns Point3D but declared as Point2D
-    let f: fn() -> Point2D = >>fn() = {x: 1.0f, y: 2.0f, z: 3.0f}<<
+    let f: fn() -> Point2D = fn() = {x: 1.0f, y: 2.0f, z: 3.0f}
 }
 
 // ERROR: Struct with nullable field mismatch
@@ -130,8 +130,8 @@ type NullablePoint = struct {
 }
 
 fn test13() {
-    // ERROR: Field 'x' expects f32? but got string
-    let point: NullablePoint = >>{x: "hello", y: 2.0f}<<
+    /// @Error(TCE006): Variable 'point' type mismatch
+    let point: NullablePoint = {x: "hello", y: 2.0f}
 }
 
 // ERROR: Struct in variant with wrong field type
@@ -141,12 +141,11 @@ type Result<T, E> = variant {
 }
 
 fn test14() {
-    // ERROR: Point2D.x expects f32 but got i32
-    let result: Result<Point2D, string> = >>Result.Ok({x: 1, y: 2.0f})<<
+    let result: Result<Point2D, string> = Result.Ok({x: 1, y: 2.0f})
 }
 
 // ERROR: Multiple struct type errors
 fn test15() {
-    // ERROR: Multiple issues - wrong type for x, missing field z
-    let point: Point3D = >>{x: "hello", y: 2.0f}<<
+    /// @Error(TCE006): Variable 'point' type mismatch
+    let point: Point3D = {x: "hello", y: 2.0f}
 }

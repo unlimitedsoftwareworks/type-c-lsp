@@ -115,7 +115,7 @@ Tests complex scenarios combining multiple features:
 
 ## Testing Approach
 
-All test files follow the inline annotation format where errors are marked with `>>...<<` delimiters to indicate expected error locations.
+All test files follow the inline annotation format where errors are marked with `...` delimiters to indicate expected error locations.
 
 ### Correct Cases
 Valid code that should pass type checking, demonstrating proper contextual typing inference.

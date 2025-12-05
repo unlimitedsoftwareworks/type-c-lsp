@@ -1,23 +1,24 @@
+// Test cases for variant contextual typing errors
 
-// Class with generic method return type
-type Pair<A, B> = class {
-    let first: A
-    let second: B
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
 
-    fn init(first: A, second: B) {
-        this.first = first
-        this.second = second
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+// ERROR: Variant in wrong function parameter type
+fn processOption<T>(opt: Option<T>) -> T {
+    return match opt {
+        Option.Some(v) => v,
+        Option.None => throw "No value"
     }
+}
 
-    fn getFirst() -> A {
-        return this.first
-    }
 
-    fn getSecond() -> B {
-        return this.second
-    }
-
-    fn swap() -> Pair<B, A> {
-        return new Pair<B, A>(this.second, this.first)
-    }
-} 
+fn test7() {
+    // ERROR: Result is not Option
+    let value = processOption(Result.Ok<u32,string>(42))
+}

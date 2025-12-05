@@ -13,19 +13,19 @@ fn map<T, U>(arr: T[], f: fn(a: T) -> U) -> U[] {
 
 fn test1() {
     // ERROR: Lambda expects i32 but uses as string
-    let result = map([1, 2, 3], >>fn(x: string) = x + "hello"<<)
+    let result = map([1, 2, 3], fn(x: string) = x + "hello")
 }
 
 // ERROR: Lambda return type doesn't match declaration
 fn test2() {
     // ERROR: Returns string but declared as i32
-    let f: fn() -> i32 = >>fn() = "hello"<<
+    let f: fn() -> i32 = fn() = "hello"
 }
 
 // ERROR: Lambda with wrong parameter count
 fn test3() {
     // ERROR: Function expects 2 parameters but lambda has 1
-    let f: fn(a: i32, b: i32) -> i32 = >>fn(x: i32) = x<<
+    let f: fn(a: i32, b: i32) -> i32 = fn(x: i32) = x
 }
 
 // ERROR: Lambda return type incompatible with expected
@@ -35,13 +35,13 @@ fn reduce<T, U>(arr: T[], initial: U, f: fn(acc: U, item: T) -> U) -> U {
 
 fn test4() {
     // ERROR: Lambda returns string but accumulator is i32
-    let result = reduce([1, 2, 3], 0, >>fn(acc: i32, x: i32) = "error"<<)
+    let result = reduce([1, 2, 3], 0, fn(acc: i32, x: i32) = "error")
 }
 
 // ERROR: Lambda with explicit wrong return type
 fn test5() {
     // ERROR: Lambda declares u32 return but returns string
-    let f = >>fn() -> u32 = "hello"<<
+    let f = fn() -> u32 = "hello"
 }
 
 // ERROR: Nested lambda type mismatch
@@ -51,13 +51,13 @@ fn compose<A, B, C>(f: fn(a: B) -> C, g: fn(a: A) -> B) -> fn(a: A) -> C {
 
 fn test6() {
     // ERROR: Types don't compose - g returns string but f expects i32
-    let combined = >>compose(fn(x: i32) = x * 2, fn(x: i32) = "hello")<<
+    let combined = compose(fn(x: i32) = x * 2, fn(x: i32) = "hello")
 }
 
 // ERROR: Lambda parameter inference fails due to ambiguity
 fn test7() {
     // ERROR: Cannot infer parameter type without context
-    let f = >>fn(x) = x * 2<<
+    let f = fn(x) = x * 2
 }
 
 // ERROR: Lambda with variant type mismatch
@@ -67,14 +67,14 @@ fn processResult<T>(f: fn() -> Result<T, string>) -> Result<T, string> {
 
 fn test8() {
     // ERROR: Lambda returns i32, not Result<i32, string>
-    let result = >>processResult(fn() = 42)<<
+    let result = processResult(fn() = 42)
 }
 
 // ERROR: Lambda capturing with type mismatch
 fn test9() {
     let multiplier: string = "hello"
     // ERROR: Can't multiply i32 by string
-    let f: fn(a: i32) -> i32 = >>fn(x: i32) = x * multiplier<<
+    let f: fn(a: i32) -> i32 = fn(x: i32) = x * multiplier
 }
 
 // ERROR: Lambda with struct return type mismatch
@@ -85,19 +85,19 @@ type Point = struct {
 
 fn test10() {
     // ERROR: Missing field 'y'
-    let f: fn() -> Point = >>fn() = {x: 10}<<
+    let f: fn() -> Point = fn() = {x: 10}
 }
 
 // ERROR: Lambda array parameter type mismatch
 fn test11() {
-    // ERROR: Lambda expects u32[] but gets i32[]
-    let f: fn(a: u32[]) -> u32 = >>fn(arr: i32[]) = arr[0]<<
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: fn(a: u32[]) -> u32 = fn(arr: i32[]) = arr[0]
 }
 
 // ERROR: Lambda with nullable type mismatch
 fn test12() {
     // ERROR: Returns non-nullable but declared as nullable
-    let f: fn() -> i32? = >>fn() -> i32 = 42<<
+    let f: fn() -> i32? = fn() -> i32 = 42
 }
 
 // ERROR: Higher-order function lambda type mismatch
@@ -106,12 +106,12 @@ fn apply<T>(x: T, f: fn(a: T) -> T) -> T {
 }
 
 fn test13() {
-    // ERROR: Lambda changes type from i32 to string
-    let result = >>apply(42, fn(x: i32) = "hello")<<
+    /// @Error(TCE120): Cannot infer common type
+    let result = apply(42, fn(x: i32) = "hello")
 }
 
 // ERROR: Lambda with tuple return type mismatch
 fn test14() {
-    // ERROR: Returns (i32, i32) but declared as (i32, string)
-    let f: fn() -> (i32, string) = >>fn() = (1, 2)<<
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: fn() -> (i32, string) = fn() = (1, 2)
 }

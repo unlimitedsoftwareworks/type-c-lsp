@@ -73,13 +73,13 @@ export class TCWorkspaceManager extends DefaultWorkspaceManager {
         const sourceFolder = URI.file(path.join(this.moduleRootPath?.fsPath ?? '', this.moduleConfig?.sourceFolder ?? ''));
         const libsFolder = URI.file(path.join(this.moduleRootPath?.fsPath ?? '', this.moduleConfig?.dependenciesFolder ?? ''));
 
-        console.log(`Source folder: ${sourceFolder.toString()}, libs folder: ${libsFolder.toString()}`);
+        //console.log(`Source folder: ${sourceFolder.toString()}, libs folder: ${libsFolder.toString()}`);
         
         // Create URIs for the library paths
         const sourceLibrary = URI.file(path.join(sourceFolder.fsPath, baseName));
         const libsLibrary = URI.file(path.join(libsFolder.fsPath, baseName));
 
-        console.log(`Source library: ${sourceLibrary.toString()}, libs library: ${libsLibrary.toString()}`);
+        //console.log(`Source library: ${sourceLibrary.toString()}, libs library: ${libsLibrary.toString()}`);
         
         // Check existence with URI objects
         if (this.fileSystemProvider.existsSync(sourceLibrary)) {

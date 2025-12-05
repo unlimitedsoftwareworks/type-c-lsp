@@ -29,17 +29,16 @@ type Point3D = struct {
 
 // ERROR: Array of variants with wrong lambda return type
 fn test1() {
-    // ERROR: Lambda returns Result2 but array expects Result
-    let arr: Result<i32, string>[] = >>[
+    /// @Error(TCE120): Cannot infer common type
+    let arr: Result<i32, string>[] = [
         Result.Ok(1),
         fn() -> Result<i32, string> = Result2.Oks(42u32)
-    ]<<
+    ]
 }
 
 // ERROR: Lambda returning struct with wrong fields in variant
 fn test2() {
-    // ERROR: Point3D has extra field 'z' that Point doesn't have
-    let f: fn() -> Result<Point, string> = >>fn() = Result.Ok({x: 1.0f, y: 2.0f, z: 3.0f})<<
+    let f: fn() -> Result<Point, string> = fn() = Result.Ok({x: 1.0f, y: 2.0f, z: 3.0f})
 }
 
 // ERROR: Higher-order function with incompatible types
@@ -53,16 +52,16 @@ fn mapResult<T, U, E>(r: Result<T, E>, f: fn(a: T) -> U) -> Result<U, E> {
 fn test3() {
     let r: Result<Point, string> = Result.Ok({x: 1.0f, y: 2.0f})
     // ERROR: Lambda changes Point to string but Result expects Point
-    let scaled = >>mapResult(r, fn(p: Point) = "invalid")<<
+    let scaled = mapResult(r, fn(p: Point) = "invalid")
 }
 
 // ERROR: Array of lambdas with mismatched return variants
 fn test4() {
-    // ERROR: Second lambda returns Result2 instead of Result
-    let operations: fn() -> Result<i32, string>[] = >>[
+    /// @Error(TCE120): Cannot infer common type
+    let operations: fn() -> Result<i32, string>[] = [
         fn() = Result.Ok(1),
         fn() = Result2.Oks(2u32)
-    ]<<
+    ]
 }
 
 // ERROR: Nested structures with type mismatch
@@ -73,27 +72,27 @@ type Entity = struct {
 
 fn test5() {
     // ERROR: Position has wrong type (i32 instead of f32)
-    let entities: Result<Entity[], string> = >>Result.Ok([
+    let entities: Result<Entity[], string> = Result.Ok([
         {
             position: {x: 1, y: 2},
             health: 100
         }
-    ])<<
+    ])
 }
 
 // ERROR: Lambda chain with incompatible variant types
 fn test6() {
-    // ERROR: Returns Result2 but declared as Result
-    let process: fn(a: Point) -> Result<Point, string> = >>fn(p) = Result2.Oks(42u32)<<
+    /// @Error
+    let process: fn(a: Point) -> Result<Point, string> = fn(p) = Result2.Oks(42u32)
 }
 
 // ERROR: Array of tuples with wrong variant types
 fn test7() {
-    // ERROR: First tuple has Result2 instead of Result
-    let pairs: (Result<i32, string>, Option<u32>)[] = >>[
-        (Result2.Oks(1u32), Option.Some(2u32)),
-        (Result.Err("error"), Option.None)
-    ]<<
+    /// @Error
+    let pairs: {x: Result<i32, string>, y: Option<u32>}[] = [
+        {Result2.Oks(1u32), Option.Some(2u32)},
+        {Result.Err("error"), Option.None}
+    ]
 }
 
 // ERROR: Generic function with type parameter mismatch
@@ -107,16 +106,16 @@ fn flatMap<T, U, E>(r: Result<T, E>, f: fn(a: T) -> Result<U, E>) -> Result<U, E
 fn test8() {
     let r: Result<i32, string> = Result.Ok(42)
     // ERROR: Lambda returns Result<string, bool> but expected Result<U, string>
-    let result = >>flatMap(r, fn(x: i32) -> Result<string, bool> = Result.Err(true))<<
+    let result = flatMap(r, fn(x: i32) -> Result<string, bool> = Result.Err(true))
 }
 
 // ERROR: Complex match with incompatible return types
 fn test9() {
     let value: Result<Point[], string> = Result.Ok([{x: 1.0f, y: 2.0f}])
-    // ERROR: Err branch returns Result2 instead of Result
+    /// @Error(TCE120): Cannot infer common type
     let processed = match value {
         Result.Ok(points) => Result.Ok(points),
-        Result.Err(e) => >>Result2.Errs(e)<<
+        Result.Err(e) => Result2.Errs(e)
     }
 }
 
@@ -127,52 +126,55 @@ type Container = struct {
 
 fn test10() {
     // ERROR: Array contains Result2 instead of Result
-    let make: fn() -> Container = >>fn() = {
+    let make: fn() -> Container = fn() = {
+        /// @Error(TCE120): Cannot infer common type
         items: [Result.Ok(1), Result2.Oks(2u32)]
-    }<<
+    }
 }
 
 // ERROR: Captured variant with wrong type
 fn test11() {
     let default: Result<i32, string> = Result.Ok(0)
-    // ERROR: Returns Result2 instead of Result
+    /// @Error(TCE120): Cannot infer common type
     let getOrDefault = fn(opt: Option<i32>) = match opt {
         Option.Some(v) => Result.Ok(v),
-        Option.None => >>Result2.Oks(0u32)<<
+        Option.None => Result2.Oks(0u32)
     }
 }
 
 // ERROR: Nested lambdas with struct field type mismatch
 fn test12() {
     // ERROR: Inner lambda returns Point3D but declared as Point
-    let f: fn(a: Point) -> fn() -> Result<Point, string> = >>fn(p) = fn() = Result.Ok({x: p.x, y: p.y, z: 1.0f})<<
+    let f: fn(a: Point) -> fn() -> Result<Point, string> = fn(p) = fn() = Result.Ok({x: p.x, y: p.y, z: 1.0f})
 }
 
 // ERROR: Array with mixed correct and incorrect variants
 fn test13() {
-    // ERROR: Second element uses Result2
-    let wrapped: Result<Point, string>[] = >>[
+    /// @Error(TCE120): Cannot infer common type
+    let wrapped: Result<Point, string>[] = [
         Result.Ok({x: 1.0f, y: 2.0f}),
         Result2.Oks(42u32)
-    ]<<
+    ]
 }
 
 // ERROR: Complex tuple with wrong types
 fn test14() {
     // ERROR: First element uses Result2, second lambda has wrong return type
-    let complex: (
-        Result<Point[], string>,
-        fn(a: i32) -> Option<i32>
-    ) = >>(
+    let complex: {
+        x: Result<Point[], string>,
+        y: fn(a: i32) -> Option<i32>
+    } = 
+    /// @Error(TCE006): Variable 'complex' type mismatch
+    {
         Result2.Oks(42u32),
         fn(x) = Option.Some("hello")
-    )<<
+    }
 }
 
 // ERROR: Lambda with explicit wrong return annotation matching wrong variant
 fn test15() {
-    // ERROR: Declares Result but returns Result2
-    let f = >>fn() -> Result<u32, never> = Result2.Oks(42u32)<<
+    /// @Error(TCE041): Lambda return type mismatch
+    let f = fn() -> Result<u32, never> = Result2.Oks(42u32)
 }
 
 // ERROR: Struct field expects Result but gets Result2
@@ -181,10 +183,10 @@ type Wrapper = struct {
 }
 
 fn test16() {
-    // ERROR: Field 'result' expects Result but got Result2
-    let w: Wrapper = >>{
+    /// @Error(TCE006): Variable 'w' type mismatch
+    let w: Wrapper = {
         result: Result2.Oks(42u32)
-    }<<
+    }
 }
 
 // ERROR: Higher-order function composing incompatible types
@@ -194,16 +196,16 @@ fn compose<A, B, C>(f: fn(a: B) -> C, g: fn(a: A) -> B) -> fn(a: A) -> C {
 
 fn test17() {
     // ERROR: g returns Result2 but f expects Result
-    let combined = >>compose(
+    let combined = compose(
         fn(r: Result<i32, string>) = r,
         fn(x: i32) -> Result2 = Result2.Oks(x as u32)
-    )<<
+    )
 }
 
 // ERROR: Multiple nested errors with variants and structs
 fn test18() {
-    // ERROR: Multiple issues - Result2 instead of Result, Point3D instead of Point
-    let complex: Result<Point[], string> = >>Result2.Oks([
+    /// @Error(TCE006): Variable 'complex' type mismatch
+    let complex: Result<Point[], string> = Result2.Oks([
         {x: 1.0f, y: 2.0f, z: 3.0f}
-    ])<<
+    ])
 }

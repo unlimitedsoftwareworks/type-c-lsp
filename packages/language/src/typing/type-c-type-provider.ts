@@ -1881,6 +1881,23 @@ export class TypeCTypeProvider {
             return types[0];
         }
 
+        // Filter out never types first - they're the bottom type and assignable to everything
+        // This allows branches like `throw "error"` (never) to unify with other branches
+        const nonNeverTypes = types.filter(t => t.kind !== TypeKind.Never);
+        
+        // If all types are never, return never
+        if (nonNeverTypes.length === 0) {
+            return factory.createNeverType();
+        }
+        
+        // If we filtered out some never types and only one type remains, return it
+        if (nonNeverTypes.length === 1) {
+            return nonNeverTypes[0];
+        }
+        
+        // Continue with non-never types
+        types = nonNeverTypes;
+
         // Separate null types from non-null types
         const nullTypes = types.filter(t => t.kind === TypeKind.Null);
         const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
@@ -2557,6 +2574,9 @@ export class TypeCTypeProvider {
         if (ast.isWildcardExpression(node)) return factory.createAnyType(node);
         if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
 
+        if(node == undefined) {
+            console.log("undefined node")
+        }
         return factory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
     }
 
@@ -4107,8 +4127,6 @@ export class TypeCTypeProvider {
 
         // Resolve reference types to get actual type
         const resolvedType = isReferenceType(contextType) ? this.resolveReference(contextType) : contextType;
-
-        console.log(`[TYPE PROVIDER] inferArrayPattern: contextType=${contextType.toString()}, isArray=${isArrayType(resolvedType)}`);
 
         if (!isArrayType(resolvedType)) {
             // Store validation error for the pattern itself

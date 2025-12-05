@@ -86,6 +86,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             CoroutineExpression: this.checkExpressionForErrors,
             InstanceCheckExpression: this.checkExpressionForErrors,
             ThisExpression: this.checkExpressionForErrors,
+            VariablePattern: this.checkExpressionForErrors,
         };
     }
 
@@ -161,7 +162,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * - Type inference failures: `[]` without context
      * - Invalid operations: array access on non-array types
      */
-    checkExpressionForErrors = (node: ast.Expression, accept: ValidationAcceptor): void => {
+    checkExpressionForErrors = (node: AstNode, accept: ValidationAcceptor): void => {
         ///console.log('[VALIDATION] Checking expression:', node.$type);
         const exprType = this.typeProvider.getType(node);
         ///console.log('[VALIDATION] Expression type:', exprType.toString(), 'Kind:', exprType.kind);

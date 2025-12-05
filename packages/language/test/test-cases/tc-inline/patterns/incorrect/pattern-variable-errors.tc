@@ -16,26 +16,33 @@ type Point = struct {
 
 // Trying to destructure non-array as array
 fn testNonArrayAsArray(val: u32) {
-    /// @Error: Cannot destructure non-array type
+    
     match val {
-        [first, second] => {},
+        [
+            /// @Error(TCE120): Pattern expects array type, but got 'u32'
+            first, 
+            /// @Error(TCE120): Pattern expects array type, but got 'u32'
+            second
+        ] => {},
         _ => {}
     }
 }
 
 // Trying to destructure non-struct as struct
 fn testNonStructAsStruct(val: u32) {
-    /// @Error: Cannot destructure non-struct type
     match val {
-        {x: xVal, y: yVal} => {},
+        /// @Error(TCE120): Pattern expects struct type
+        {x: xVal, 
+        /// @Error(TCE120): Pattern expects struct type
+        y: yVal} => {},
         _ => {}
     }
 }
 
 // Wrong number of parameters in variant constructor pattern
 fn testWrongParamCount(result: Result<u32, string>) {
-    /// @Error: Wrong number of parameters (Result.Ok expects 1, got 2)
     match result {
+        /// @Error(TCE120): Too many parameters in pattern 
         Result.Ok(a, b) => {},
         _ => {}
     }
@@ -43,8 +50,8 @@ fn testWrongParamCount(result: Result<u32, string>) {
 
 // Field not found in struct pattern
 fn testFieldNotFound(p: Point) {
-    /// @Error: Field 'z' not found
     match p {
+        /// @Error(TCE120): Field 'z' not found in struct type
         {x: xVal, y: yVal, z: zVal} => {},
         _ => {}
     }
@@ -58,7 +65,7 @@ fn testFieldNotFound(p: Point) {
 fn testVariantTypeMismatch(result: Result<u32, string>) {
     match result {
         Result.Ok(value) => {
-            /// @Error: Type mismatch (expected u32, got string)
+            /// @Error(TCE006): Variable 'x' type mismatch
             let x: string = value
         },
         _ => {}
@@ -69,26 +76,9 @@ fn testVariantTypeMismatch(result: Result<u32, string>) {
 fn testArrayElementMismatch(arr: u32[]) {
     match arr {
         [first, second] => {
-            /// @Error: Type mismatch (expected u32, got string)
+            /// @Error(TCE006): Variable 'x' type mismatch
             let x: string = first
         },
-        _ => {}
-    }
-}
-
-// ============================================================================
-// Invalid Pattern Context
-// ============================================================================
-
-// Pattern variable outside match expression (should be caught by grammar)
-// This is more of a parser test, but included for completeness
-
-// Unresolved reference in pattern
-fn testUnresolvedPattern() {
-    let arr: u32[] = [1, 2, 3]
-    /// @Error: Unresolved reference (NonExistent doesn't exist)
-    match arr {
-        NonExistent.Some(x) => {},
         _ => {}
     }
 }

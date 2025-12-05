@@ -17,5 +17,5 @@ let allNulls = [null, null, null]
 // Mix of types and nulls
 let mixed: string?[] = ["hello", null, "world", null]
 
-/// @Error(TCE006): Variable 'mixed' type mismatch
+/// @Error(TCE006): Variable 'mixed2' type mismatch
 let mixed2: string[] = ["hello", null, "world", null]

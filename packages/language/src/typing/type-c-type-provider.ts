@@ -1855,6 +1855,46 @@ export class TypeCTypeProvider {
                 
                 commonType = factory.createArrayType(commonElementType, types[0].node);
             }
+            // Handle function types by recursively finding common return type
+            // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify
+            else if (nonNullTypes.every(t => isFunctionType(t))) {
+                const functionTypes = nonNullTypes.filter(isFunctionType);
+                
+                // Check if all functions have the same signature (parameter count and types)
+                const firstFunc = functionTypes[0];
+                const allSameSignature = functionTypes.every(fn => {
+                    if (fn.parameters.length !== firstFunc.parameters.length) return false;
+                    return fn.parameters.every((param, i) =>
+                        this.typeUtils.areTypesEqual(param.type, firstFunc.parameters[i].type).success
+                    );
+                });
+                
+                if (allSameSignature) {
+                    // Unify return types
+                    const returnTypes = functionTypes.map(fn => fn.returnType);
+                    const commonReturnType = this.getCommonType(returnTypes);
+                    
+                    if (isErrorType(commonReturnType)) {
+                        return commonReturnType;
+                    }
+                    
+                    // Create function type with unified return type
+                    commonType = factory.createFunctionType(
+                        firstFunc.parameters,
+                        commonReturnType,
+                        firstFunc.fnType,
+                        firstFunc.genericParameters,
+                        types[0].node
+                    );
+                } else {
+                    // Different signatures - can't unify
+                    return factory.createErrorType(
+                        `Cannot infer common type: function signatures differ`,
+                        undefined,
+                        types[0].node
+                    );
+                }
+            }
             // CRITICAL FIX: Check if types differ only in nullability
             // This allows u32? and u32 to unify to u32?
             else {

@@ -1,19 +1,23 @@
-// Test cases for pattern variable type inference in match expressions
 
-type Person = struct {
-    name: string,
-    age: u32,
-    city: string
-}
+// Class with generic method return type
+type Pair<A, B> = class {
+    let first: A
+    let second: B
 
-// ============================================================================
-// Struct Pattern with Spread Variables
-// ============================================================================
-
-/// @Type(struct { age: u32, city: string })
-fn testStructSpreadPattern1(person: Person) {
-    return match person {
-        {name: name, ...rest} => rest,  // rest: {age: u32, city: string}
-        _ => {age: 0u32, city: ""}
+    fn init(first: A, second: B) {
+        this.first = first
+        this.second = second
     }
-}
+
+    fn getFirst() -> A {
+        return this.first
+    }
+
+    fn getSecond() -> B {
+        return this.second
+    }
+
+    fn swap() -> Pair<B, A> {
+        return new Pair<B, A>(this.second, this.first)
+    }
+} 

@@ -1926,28 +1926,32 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             // Get actual argument types
             const argumentTypes = args.map(arg => this.typeProvider.getType(arg));
             
+            console.log('[NEW EXPR VALIDATION] Checking new expression with', argCount, 'arguments');
+            console.log('[NEW EXPR VALIDATION] Instance type:', instanceType.toString());
+            console.log('[NEW EXPR VALIDATION] Resolved class type:', classType.toString());
+            console.log('[NEW EXPR VALIDATION] Found', matchingArityMethods.length, 'matching init methods');
+            console.log('[NEW EXPR VALIDATION] Argument types:', argumentTypes.map(t => `${t.toString()} (kind: ${t.kind})`).join(', '));
+            
             // Try to find a compatible init method
             let foundMatch = false;
             for (const initMethod of matchingArityMethods) {
+                console.log('[NEW EXPR VALIDATION] Checking init method:', initMethod.names.join('|'));
+                console.log('[NEW EXPR VALIDATION]   Param types from RESOLVED class:', initMethod.parameters.map(p => `${p.type.toString()} (kind: ${p.type.kind})`).join(', '));
+                
                 let allArgsMatch = true;
                 
-                // Apply generic substitutions if the class has generic arguments
-                let paramTypes = initMethod.parameters.map(p => p.type);
-                if (isReferenceType(instanceType) && instanceType.genericArgs.length > 0) {
-                    const substitutions = new Map<string, TypeDescription>();
-                    instanceType.declaration.genericParameters?.forEach((param, i) => {
-                        if (i < instanceType.genericArgs.length) {
-                            substitutions.set(param.name, instanceType.genericArgs[i]);
-                        }
-                    });
-                    if (substitutions.size > 0) {
-                        paramTypes = paramTypes.map(p => this.typeUtils.substituteGenerics(p, substitutions));
-                    }
-                }
+                // IMPORTANT: The resolved class type ALREADY has generic substitutions applied!
+                // When we called resolveReference(Pair<B, A>), it substituted:
+                //   CLASS.A → B, CLASS.B → A
+                // So the init method parameters are already substituted.
+                // We should NOT substitute again!
+                const paramTypes = initMethod.parameters.map(p => p.type);
                 
                 // Check if all arguments are compatible
                 for (let i = 0; i < argumentTypes.length; i++) {
+                    console.log('[NEW EXPR VALIDATION]   Checking arg', i, ':', argumentTypes[i].toString(), 'vs', paramTypes[i].toString());
                     const compatResult = this.isTypeCompatible(argumentTypes[i], paramTypes[i]);
+                    console.log('[NEW EXPR VALIDATION]   Result:', compatResult.success, compatResult.message);
                     if (!compatResult.success) {
                         allArgsMatch = false;
                         break;
@@ -1956,6 +1960,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 
                 if (allArgsMatch) {
                     foundMatch = true;
+                    console.log('[NEW EXPR VALIDATION] Found matching init method!');
                     break;
                 }
             }
@@ -1967,6 +1972,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     `init(${m.parameters.map(p => p.type.toString()).join(', ')})`
                 ).join(' or ');
                 const providedTypes = argumentTypes.map(t => t.toString()).join(', ');
+                console.log('[NEW EXPR VALIDATION] No match found. Reporting error.');
                 accept('error',
                     `No matching 'init' method found for argument types (${providedTypes}). Available: ${availableSignatures}`,
                     {

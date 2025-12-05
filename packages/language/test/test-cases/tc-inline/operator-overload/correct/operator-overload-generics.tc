@@ -12,6 +12,10 @@ type Container<T> = class {
 type Matrix = class {
     let data: f32[]
 
+    fn init(_data: f32[]){
+        data = _data
+    }
+
     // Multiple operator overloads - overload resolution should pick the right one
     fn * (scalar: f32) -> f32 {
         return 1.0f
@@ -37,8 +41,8 @@ fn main() -> void {
     /// @Type(c3): Container<u32>
     let c3 = c1 + c2
     
-    let m1 = new Matrix({ data: [] })
-    let m2 = new Matrix({ data: [] })
+    let m1 = new Matrix([])
+    let m2 = new Matrix([])
     
     /// @Type(m3): f32
     let m3 = m1 * 2.0f

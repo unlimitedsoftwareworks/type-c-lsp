@@ -39,3 +39,4 @@ fn main() {
     // No matching init - arguments inferred without context
     let v1 = new Point<string>("hi")  // Should error: no init with 2 params
 }
+

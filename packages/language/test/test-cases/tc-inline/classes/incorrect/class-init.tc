@@ -3,3 +3,25 @@
 type NotAClass = struct { x: i32, y: i32 }
 /// @Error(TCE100): Invalid use of 'new'
 let s1 = new NotAClass(1, 2)  // Should error: Cannot use 'new' with non-class type
+
+type Point<T> = class {
+    let x: T
+    let y: T
+    
+    // Multiple init methods - should infer without context
+    fn init(x: T, y: T) {
+        this.x = x
+        this.y = y
+    }
+    
+    fn init(value: T) {
+        this.x = value
+        this.y = value
+    }
+}
+
+fn main() {
+    /// @Error(TCE021): No matching 'init' method found for argument types
+    let v1 = new Point<string>(1)  // Should error: no init with 2 params
+}
+

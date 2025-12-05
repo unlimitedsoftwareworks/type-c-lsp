@@ -202,7 +202,7 @@ type Pair<A, B> = class {
     }
 
     fn swap() -> Pair<B, A> {
-        return new Pair<B, A >(this.second, this.first)
+        return new Pair<B, A>(this.second, this.first)
     }
 }
 

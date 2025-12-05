@@ -63,8 +63,8 @@ fn main() -> void {
 
 fn main2() {
     let arr = new Array<Array<{x: u32, y: u32}> >([
-        new Array<{x: u32, y: u32}>([{x: 1u32}, {x: 2u32}]),
-        new Array<{x: u32, y: u32}>([{x: 3u32}, {x: 4u32}])
+        new Array<{x: u32, y: u32}>([{x: 1u32, y: 1u32}, {x: 2u32, y: 1u32}]),
+        new Array<{x: u32, y: u32}>([{x: 3u32, y: 1u32}, {x: 4u32, y: 1u32}])
     ])
 
     let size = arr.size()

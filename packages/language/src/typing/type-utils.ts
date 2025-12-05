@@ -413,10 +413,22 @@ export class TypeCTypeUtils {
 
     areGenericTypesEqual(a: GenericTypeDescription, b: GenericTypeDescription): TypeCheckResult {
         // Generics are equal if they have the same name
-        // (assuming they're from the same scope context)
+        // This is correct because generic type parameters are scoped by name, not by declaration.
+        // When a class Pair<A, B> is instantiated with Pair<B, A> (using method generics),
+        // the class's A and the method's A represent the same type variable in that context.
+        console.log('[TYPE UTILS] Comparing generic types:', a.name, 'vs', b.name);
+        console.log('[TYPE UTILS]   a.node:', a.node?.$type, 'at', a.node?.$cstNode?.range);
+        console.log('[TYPE UTILS]   b.node:', b.node?.$type, 'at', b.node?.$cstNode?.range);
+        console.log('[TYPE UTILS]   Same declaration?', a.declaration === b.declaration);
+        
+        // Compare by NAME, not by declaration identity
+        // This allows generic types with the same name from different scopes
+        // (e.g., class generics vs method generics) to be considered equal
         if (a.name === b.name) {
+            console.log('[TYPE UTILS]   Result: EQUAL (by name)');
             return success();
         }
+        console.log('[TYPE UTILS]   Result: NOT EQUAL');
         return failure(`Generic type name mismatch: ${a.name} vs ${b.name}`);
     }
 

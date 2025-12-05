@@ -1,0 +1,22 @@
+type Point2D = struct {
+    x: f32,
+    y: f32
+}
+
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+fn test1() {
+    let base: Point2D = {x: 1.0f, y: 2.0f}
+    let extended = {...base, z: 3.0f}
+    // extended should be inferred as struct { x: f32, y: f32, z: f32 }
+}
+
+fn test2() {
+    let base: Point2D = {x: 1.0f, y: 2.0f}
+    let extended: Point3D = {...base, z: 3.0f}
+    // This should work now - extended has all fields from base plus z
+}

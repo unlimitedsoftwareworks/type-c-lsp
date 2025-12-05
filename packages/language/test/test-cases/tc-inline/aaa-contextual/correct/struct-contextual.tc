@@ -31,6 +31,9 @@ fn test1() {
 fn test2() {
     let base: Point2D = {x: 1.0f, y: 2.0f}
     let extended: Point3D = {...base, z: 3.0f}
+
+    /// @Type(ex): struct { x: f32, y: f32, z: f32 }
+    let ex = {...base, z: 3.0f}
 }
 
 // Test 3: Nested structs

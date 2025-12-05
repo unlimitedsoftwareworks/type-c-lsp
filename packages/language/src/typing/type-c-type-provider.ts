@@ -3324,6 +3324,24 @@ export class TypeCTypeProvider {
             if (ast.isStructFieldKeyValuePair(f)) {
                 return [factory.createStructField(f.name, this.inferExpression(f.expr), f)];
             }
+            // Handle struct spread: {...base}
+            if (ast.isStructSpreadExpression(f)) {
+                const spreadType = this.inferExpression(f.expression);
+                
+                // Resolve reference types to get the actual struct
+                let resolvedType = isReferenceType(spreadType) ? this.resolveReference(spreadType) : spreadType;
+                
+                // Get struct type (handles both direct structs and join types)
+                const structType = this.typeUtils.asStructType(resolvedType);
+                
+                if (structType) {
+                    // Return all fields from the spread struct
+                    return structType.fields;
+                }
+                
+                // If spread expression is not a struct, return empty (validation will catch this error)
+                return [];
+            }
             return [];
         }) ?? [];
 

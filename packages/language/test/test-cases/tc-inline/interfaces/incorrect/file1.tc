@@ -1,5 +1,8 @@
 type Interface1 = interface {
     fn print() -> void
+
+    /// @Error(TCE130): Interface method cannot be named 'init':
+    fn init() -> void
 }
 
 type Class1 = class {

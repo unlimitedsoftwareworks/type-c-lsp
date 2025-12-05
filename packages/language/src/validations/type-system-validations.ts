@@ -62,7 +62,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             IndexSet: this.checkIndexSet,
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
-            InterfaceType: this.checkInterfaceInheritance,
+            InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
             ClassType: this.checkClassImplementation,
             MemberAccess: [this.checkMemberAccess, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
@@ -1494,6 +1494,43 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         return undefined;
+    }
+
+    /**
+     * Check that interface methods don't use reserved names like 'init'.
+     *
+     * The name 'init' is reserved for class initializers/constructors,
+     * so interface methods cannot use this name.
+     *
+     * Examples:
+     * ```tc
+     * interface Bad {
+     *     fn init()  // ❌ Error - 'init' is reserved
+     * }
+     *
+     * interface Good {
+     *     fn initialize()  // ✅ OK
+     *     fn setup()       // ✅ OK
+     * }
+     * ```
+     */
+    checkInterfaceMethodNames = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
+        // Check each method in the interface
+        for (const method of node.methods) {
+            // Check all names for this method (methods can have multiple names for overloading)
+            for (const name of method.names) {
+                if (name === 'init') {
+                    const errorCode = ErrorCode.TC_INTERFACE_METHOD_RESERVED_NAME;
+                    accept('error',
+                        `Interface method cannot be named 'init': The name 'init' is reserved for class initializers and cannot be used in interface methods`,
+                        {
+                            node: method,
+                            code: errorCode
+                        }
+                    );
+                }
+            }
+        }
     }
 
     /**

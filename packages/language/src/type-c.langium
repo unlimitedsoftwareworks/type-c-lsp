@@ -453,7 +453,7 @@ MatchStatement:
 
 
 MatchCaseStatement:
-    pattern=MatchCasePattern ('if' guard=Expression)? body=BlockStatement ','?;
+    pattern=MatchCasePattern ('if' guard=Expression)?  '=>'? body=BlockStatement ','?;
 
 ReturnStatement:
     kind='return' expr=TupleExpression?;

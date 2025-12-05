@@ -1,9 +1,13 @@
 // Test case 1: Block body with return - should show error
-fn getValues1() -> u32 {
+
+/// @Error(): Function return type mismatch
+fn getValues1(TCE041) -> u32 {
+    /// @Error(TCE031): Function return type mismatch
     return [1, 2]
 }
 
 // Test case 2: Expression body - should also show error now
+/// @Error(TCE041): Function return type mismatch
 fn getValues2() -> u32 = [1, 2]
 
 // Test case 3: Correct usage - should be OK

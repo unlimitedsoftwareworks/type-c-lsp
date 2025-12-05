@@ -28,11 +28,15 @@ fn processResultDirect<T, E>(r: Result<T, E>) -> Result<T, E> {
 
 fn testDirectVariantConstructor() {
     // Direct variant constructor call with generic inference
+    /// @Type(x): Result<i32, never>
     let x = processResultDirect(Result.Ok(42))  // Should infer Result<i32, never>
+
+    /// @Type(y): Result<never, string>
     let y = processResultDirect(Result.Err("error"))  // Should infer Result<never, string>
 }
 
 fn testMixedConstructors() {
     // Array of mixed constructors - should unify to Result<i32, string>
+    /// @type(results): Result<i32, string>[]
     let results = [Result.Ok(42), Result.Err("error")]
 }

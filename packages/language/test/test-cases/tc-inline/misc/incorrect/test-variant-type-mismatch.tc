@@ -25,6 +25,8 @@ fn testVariantTypeMismatch() {
     // Result2.Oks(42) returns Result2, not Result<i32, never>
     // Result and Result2 are different variant types
     // This should now be caught by the lambda return type validation
+
+    /// @Error(Lambda return type mismatch): Lambda return type mismatch
     let f2 = fn() -> Result<i32, never> = Result2.Oks(42)
     
     // ERROR: Cannot pass f2 to processResult because it has wrong type
@@ -34,8 +36,12 @@ fn testVariantTypeMismatch() {
 
 fn testDirectAssignment() {
     // ERROR: Cannot assign Result2 to Result<u32, string>
+
+    /// @Error(TCE006): Variable 'r1' type mismatch:
     let r1: Result<u32, string> = Result2.Oks(42)
     
     // ERROR: Cannot assign Result to Result2
+    
+    /// @Error(TCE006): Variable 'r2' type mismatch
     let r2: Result2 = Result.Ok(42)
 }

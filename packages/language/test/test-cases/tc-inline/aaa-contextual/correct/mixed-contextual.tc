@@ -42,7 +42,7 @@ fn test3() {
 
 // Test 4: Array of lambdas returning variants
 fn test4() {
-    let operations: fn() -> Result<i32, string>[] = [
+    let operations: (fn() -> Result<i32, string>)[] = [
         fn() = Result.Ok(1),
         fn() = Result.Ok(2),
         fn() = Result.Err("error")
@@ -76,9 +76,9 @@ fn test6() {
 
 // Test 7: Array of tuples with variants
 fn test7() {
-    let pairs: (Result<i32, string>, Option<u32>)[] = [
-        (Result.Ok(1), Option.Some(2u32)),
-        (Result.Err("error"), Option.None)
+    let pairs: {x: Result<i32, string>, y: Option<u32>}[] = [
+        {Result.Ok(1), Option.Some(2u32)},
+        {Result.Err("error"), Option.None}
     ]
 }
 

@@ -1,7 +1,0 @@
-fn main() {
-    // This should show an error: unresolved reference
-    let x = unknownVar;
-    
-    // This should show an error: array without context
-    let arr = [];
-}

@@ -1,0 +1,285 @@
+// Test cases for pattern variable type inference in match expressions
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Point = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+type Person = struct {
+    name: string,
+    age: u32,
+    city: string
+}
+
+// ============================================================================
+// Array Pattern Variables
+// ============================================================================
+
+/// @Type(u32)
+fn testArrayPattern1(arr: u32[]) {
+    return match arr {
+        [
+            /// @Type(first): u32
+            first, 
+            /// @Type(second): u32
+            second
+        ] => first,  // first: u32
+        _ => 0u32
+    }
+}
+
+/// @Type(u32)
+fn testArrayPattern2(arr: u32[]) {
+    return match arr {
+        [first, second] => second,  // second: u32
+        _ => 0u32
+    }
+}
+
+/// @Type(u32[])
+fn testArrayTrailPattern1(arr: u32[]) -> u32[] {
+    return match arr {
+        /// @Type(rest): u32[]
+        [first, ...rest] => rest,  // rest: u32[]
+        _ => []
+    }
+}
+
+/// @Type(u32)
+fn testArrayTrailPattern2(arr: u32[]) {
+    return match arr {
+        [first, ...rest] => first,  // first: u32
+        _ => 0u32
+    }
+}
+
+/// @Type(string)
+fn testArrayStringPattern(arr: string[]) {
+    return match arr {
+        [first, second, third] => second,  // second: string
+        _ => ""
+    }
+}
+
+// Nested array pattern
+/// @Type(u32)
+fn testNestedArrayPattern(matrix: u32[][]) {
+    return match matrix {
+        [[a, b], [c, d]] => a,  // a: u32
+        _ => 0u32
+    }
+}
+
+// ============================================================================
+// Struct Pattern Variables
+// ============================================================================
+
+/// @Type(f32)
+fn testStructPattern1(p: Point) {
+    return match p {
+        {x: xVal, y: yVal, z: zVal} => xVal,  // xVal: f32
+        _ => 0.0f
+    }
+}
+
+/// @Type(f32)
+fn testStructPattern2(p: Point) {
+    return match p {
+        {x: xVal, y: yVal, z: zVal} => yVal,  // yVal: f32
+        _ => 0.0f
+    }
+}
+
+/// @Type(string)
+fn testStructPatternPerson(person: Person) {
+    return match person {
+        {name: n, age: a, city: c} => n,  // n: string
+        _ => ""
+    }
+}
+
+/// @Type(u32)
+fn testStructPatternAge(person: Person) {
+    return match person {
+        {name: n, age: a, city: c} => a,  // a: u32
+        _ => 0u32
+    }
+}
+
+// ============================================================================
+// Struct Pattern with Spread Variables
+// ============================================================================
+
+/// @Type(struct { age: u32, city: string })
+fn testStructSpreadPattern1(person: Person) {
+    return match person {
+        {name, ...rest} => rest,  // rest: {age: u32, city: string}
+        _ => {age: 0u32, city: ""}
+    }
+}
+
+/// @Type(string)
+fn testStructSpreadPattern2(person: Person) {
+    return match person {
+        {name, ...rest} => name,  // name: string (from field binding)
+        _ => ""
+    }
+}
+
+/// @Type(struct { z: f32 })
+fn testStructSpreadPattern3(p: Point) {
+    return match p {
+        {x, y, ...rest} => rest,  // rest: {z: f32}
+        _ => {z: 0.0f}
+    }
+}
+
+// ============================================================================
+// Variant Constructor Pattern Variables
+// ============================================================================
+
+/// @Type(u32)
+fn testVariantPattern1(result: Result<u32, string>) {
+    return match result {
+        Result.Ok(value) => value,  // value: u32
+        Result.Err(error) => 0u32
+    }
+}
+
+/// @Type(string)
+fn testVariantPattern2(result: Result<u32, string>) {
+    return match result {
+        Result.Ok(value) => "",
+        Result.Err(error) => error  // error: string
+    }
+}
+
+/// @Type(i32)
+fn testVariantPattern3(opt: Option<i32>) {
+    return match opt {
+        Option.Some(value) => value,  // value: i32
+        Option.None => 0
+    }
+}
+
+// Multiple generic parameters
+/// @Type(f32)
+fn testVariantPatternMultiGeneric1(result: Result<f32, bool>) {
+    return match result {
+        Result.Ok(val) => val,  // val: f32
+        Result.Err(err) => 0.0f
+    }
+}
+
+/// @Type(bool)
+fn testVariantPatternMultiGeneric2(result: Result<f32, bool>) {
+    return match result {
+        Result.Ok(val) => false,
+        Result.Err(err) => err  // err: bool
+    }
+}
+
+// ============================================================================
+// Nested Variant Patterns
+// ============================================================================
+
+/// @Type(u32)
+fn testNestedVariantPattern(nested: Result<Option<u32>, string>) {
+    return match nested {
+        Result.Ok(Option.Some(value)) => value,  // value: u32
+        Result.Ok(Option.None) => 0u32,
+        Result.Err(error) => 0u32
+    }
+}
+
+/// @Type(string)
+fn testNestedVariantPattern2(nested: Result<Option<u32>, string>) {
+    return match nested {
+        Result.Ok(opt) => "",
+        Result.Err(error) => error  // error: string
+    }
+}
+
+// ============================================================================
+// Mixed Patterns
+// ============================================================================
+
+// Array of structs
+/// @Type(f32)
+fn testArrayOfStructs(points: Point[]) {
+    return match points {
+        [{x: xVal, y, z}] => xVal,  // xVal: f32
+        _ => 0.0f
+    }
+}
+
+// Struct containing arrays
+type Container = struct {
+    values: u32[],
+    name: string
+}
+
+/// @Type(u32[])
+fn testStructWithArray(c: Container) {
+    return match c {
+        {values: vals, name: n} => vals,  // vals: u32[]
+        _ => []
+    }
+}
+
+/// @Type(string)
+fn testStructWithArray2(c: Container) {
+    return match c {
+        {values: vals, name: n} => n,  // n: string
+        _ => ""
+    }
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+// Empty array pattern (should handle gracefully)
+fn testEmptyPattern(arr: u32[]) {
+    match arr {
+        [] => {},
+        _ => {}
+    }
+}
+
+// Wildcard pattern (no variable binding)
+fn testWildcardPattern(arr: u32[]) {
+    match arr {
+        [_, second] => {},  // second: u32
+        _ => {}
+    }
+}
+
+// Simple variable pattern (whole value)
+/// @Type(u32[])
+fn testSimpleVariablePattern(arr: u32[]) {
+    return match arr {
+        value => value,  // value: u32[]
+        _ => []
+    }
+}
+
+// Direct variant matching (no params)
+/// @Type(u32)
+fn testVariantNoParams(opt: Option<u32>) {
+    return match opt {
+        Option.None => 0u32,
+        Option.Some(v) => v
+    }
+}

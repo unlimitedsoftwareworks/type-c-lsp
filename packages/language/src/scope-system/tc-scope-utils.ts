@@ -166,15 +166,20 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
  * - `Result.Ok(value)` → [VariablePattern{name: "value"}]
  */
 export function extractPatternVariables(pattern: ast.MatchCasePattern | undefined): ReferencableSymbol[] {
-    console.log('extracting pattern', pattern?.$type)
     if (!pattern) {
         return [];
     }
 
     const variables: ReferencableSymbol[] = [];
     
-    // Use AstUtils to stream all contents and filter for VariablePattern nodes
-    // This automatically handles all nesting levels and pattern types
+    // First, check if the pattern itself is a VariablePattern
+    // This handles simple cases like: match x { a => ... }
+    if (ast.isVariablePattern(pattern)) {
+        variables.push(pattern);
+    }
+    
+    // Then, stream all nested contents to find VariablePatterns in complex patterns
+    // This handles nested cases like: match x { [a, b] => ..., {x: y} => ... }
     AstUtils.streamAllContents(pattern)
         .filter(node => ast.isVariablePattern(node))
         .forEach(node => {

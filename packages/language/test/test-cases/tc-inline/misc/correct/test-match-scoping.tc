@@ -4,10 +4,13 @@ fn testSimpleMatch() -> u32 {
     let x = 5u32
     
     // Simple variable pattern
-    match x {
+    let z = match x {
+        /// @Type(a): u32
         a => a + 1u32,  // 'a' should be in scope here
         _ => 0u32
     }
+
+    return x
 }
 
 fn testArrayPatternMatch() -> u32 {
@@ -15,20 +18,43 @@ fn testArrayPatternMatch() -> u32 {
     
     // Array destructuring pattern
     match arr {
-        [first, second, third] => first + second + third,  // all should be in scope
+        [
+            /// @Type(first): u32
+            first, 
+            /// @Type(second): u32
+            second, 
+            /// @Type(third): u32
+            third, 
+            /// @Type(rest): u32[]
+            ...rest
+        ] => first + second + third,  // all should be in scope
         [a, b] => a + b,
         [single] => single,
         _ => 0u32
     }
+
+    return 1
 }
 
 fn testNestedArrayMatch() -> u32 {
     let nested = [[1u32, 2u32], [3u32, 4u32]]
     
     match nested {
-        [[a, b], [c, d]] => a + b + c + d,  // all nested variables should be in scope
+        [
+            /// @Type(a): u32
+            [a, 
+            /// @Type(b): u32
+            b], 
+            /// @Type(c): u32
+            [c, 
+            /// @Type(d): u32
+            d], 
+            /// @Type(e): u32[]
+        ...e] => a + b + c + d,  // all nested variables should be in scope
         _ => 0u32
     }
+
+    return 1
 }
 
 // Test with match statement (not expression)
@@ -47,7 +73,7 @@ fn testMatchStatement() -> u32 {
         }
     }
     
-    result
+    return result
 }
 
 // Test with guard expressions
@@ -59,4 +85,6 @@ fn testMatchWithGuard() -> u32 {
         b => b,
         _ => 0u32
     }
+
+    return x
 }

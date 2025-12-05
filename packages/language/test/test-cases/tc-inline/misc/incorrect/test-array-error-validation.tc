@@ -9,22 +9,20 @@ fn test1() {
     // This should show a validation error because y has different types:
     // - First element: y is f32[] (correct)
     // - Second element: y is string (incorrect)
-    let points: Point[] = [
-        {x: 0.0f, y: [0.0f]},
-        {x: 1.0f, y: ["gi"]}
-    ]
+    let points: Point[] = 
+        /// @Error(TCE120): Cannot infer common struct type
+        [{x: 0.0f, y: [0.0f]}, {x: 1.0f, y: ["gi"]}]
 }
 
 fn test2() {
     // This should also show an error in the array literal itself
     // because it cannot infer a common struct type
-    let points = [
-        {x: 0.0f, y: [0.0f]},
-        {x: 1.0f, y: "gi"}
-    ]
+    /// @Error(TCE120): Cannot infer common struct type
+    let points = [{x: 0.0f, y: [0.0f]}, {x: 1.0f, y: "gi"}]
 }
 
 fn test3() {
     // Empty array without type annotation should show error
+    /// @Error(TCE120): Cannot infer type of empty array literal
     let arr = []
 }

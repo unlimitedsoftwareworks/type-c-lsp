@@ -1,0 +1,94 @@
+// Test cases for pattern variable type inference errors
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+// ============================================================================
+// Type Mismatch Errors
+// ============================================================================
+
+// Trying to destructure non-array as array
+fn testNonArrayAsArray(val: u32) {
+    /// @Error: Cannot destructure non-array type
+    match val {
+        [first, second] => {},
+        _ => {}
+    }
+}
+
+// Trying to destructure non-struct as struct
+fn testNonStructAsStruct(val: u32) {
+    /// @Error: Cannot destructure non-struct type
+    match val {
+        {x: xVal, y: yVal} => {},
+        _ => {}
+    }
+}
+
+// Wrong number of parameters in variant constructor pattern
+fn testWrongParamCount(result: Result<u32, string>) {
+    /// @Error: Wrong number of parameters (Result.Ok expects 1, got 2)
+    match result {
+        Result.Ok(a, b) => {},
+        _ => {}
+    }
+}
+
+// Field not found in struct pattern
+fn testFieldNotFound(p: Point) {
+    /// @Error: Field 'z' not found
+    match p {
+        {x: xVal, y: yVal, z: zVal} => {},
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Generic Type Mismatch
+// ============================================================================
+
+// Using wrong type for variant pattern variable
+fn testVariantTypeMismatch(result: Result<u32, string>) {
+    match result {
+        Result.Ok(value) => {
+            /// @Error: Type mismatch (expected u32, got string)
+            let x: string = value
+        },
+        _ => {}
+    }
+}
+
+// Array element type mismatch
+fn testArrayElementMismatch(arr: u32[]) {
+    match arr {
+        [first, second] => {
+            /// @Error: Type mismatch (expected u32, got string)
+            let x: string = first
+        },
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Invalid Pattern Context
+// ============================================================================
+
+// Pattern variable outside match expression (should be caught by grammar)
+// This is more of a parser test, but included for completeness
+
+// Unresolved reference in pattern
+fn testUnresolvedPattern() {
+    let arr: u32[] = [1, 2, 3]
+    /// @Error: Unresolved reference (NonExistent doesn't exist)
+    match arr {
+        NonExistent.Some(x) => {},
+        _ => {}
+    }
+}

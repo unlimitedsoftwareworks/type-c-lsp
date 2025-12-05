@@ -1,0 +1,102 @@
+type Result<U, V> = variant {
+    Ok(value: U),
+    Error(error: V)
+}
+
+// Test 1: Struct pattern with field extraction
+fn test1() {
+    let value = {x: 1u32, name: "hi"}
+
+    let z = match value {
+        {x: 1, name: e} => do {
+            /// @type(e): string
+            /// e should be inferred as string, not the full struct
+            let z = e
+            /// @type(z): string
+        }
+    }
+}
+
+// Test 2: Struct pattern with spread/trail variable
+fn test2() {
+    let value = {x: 1u32, name: "hi"}
+
+    let z = match value {
+        {x: 1, ...z} => do {
+            /// @type(z): struct { name: string }
+            /// z should get remaining fields
+            let a = z
+            /// @type(a): struct { name: string }
+        }
+    }
+}
+
+// Test 3: Variant pattern with generic substitution
+fn test3() {
+    let value: Result<string, u32> = Result.Ok("Success")
+
+    let processed = match value {
+        Result.Ok(value) => do {
+            /// @type(value): string
+            /// value should be string (U), not generic U
+            let z = value
+            /// @type(z): string
+        }, 
+        Result.Error(code) => do {
+            /// @type(code): u32
+            /// code should be u32 (V), not generic V
+            let z = code
+            /// @type(z): u32
+        }
+    }
+}
+
+type Container<T> = variant {
+    Value(data: T),
+    Empty
+}
+
+// Test 4: Complex nested variant pattern
+fn test4() {
+    
+    let container: Container<Result<string, u32> > = Container.Value(Result.Ok("test"))
+    
+    let result = match container {
+        Container.Value(inner) => do {
+            /// @type(inner): Result<string, u32>
+            /// inner should be Result<string, u32>, not Result<U, V>
+            let x = inner
+            /// @type(x): Result<string, u32>
+        },
+        Container.Empty => do {
+            Result.Error(0u32)
+        }
+    }
+}
+
+// Test 5: Direct variable pattern (no destructuring)
+fn test5() {
+    let value: Result<string, u32> = Result.Ok("Success")
+    
+    let x = match value {
+        result => do {
+            /// @type(result): Result<string, u32>
+            /// Direct binding should get the full type
+            result
+        }
+    }
+}
+
+// Test 6: Array pattern inference
+fn test6() {
+    let arr: string[] = ["a", "b", "c"]
+    
+    let result = match arr {
+        [first, second, ...rest] => do {
+            /// @type(first): string
+            /// @type(second): string
+            /// @type(rest): string[]
+            first
+        }
+    }
+}

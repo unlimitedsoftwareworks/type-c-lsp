@@ -1,26 +1,18 @@
-// Comprehensive mixed contextual typing test cases
-// Combines variants, lambdas, structs, arrays, and more
+// Comprehensive test cases for struct contextual typing
 
-type Result<T, E> = variant {
-    Ok(value: T),
-    Err(error: E)
-}
-
-type Option<T> = variant {
-    Some(value: T),
-    None
-}
-
-type Point = struct {
+type Point2D = struct {
     x: f32,
     y: f32
 }
 
-// Test 9: Complex match with contextual typing
-fn test9() {
-    let value: Result<Point[], string> = Result.Ok([{x: 1.0f, y: 2.0f}])
-    let processed = match value {
-        Result.Ok(points) => Result.Ok(points),
-        Result.Err(e) => Result.Err(e)
-    }
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+// Test 2: Struct spread with contextual typing
+fn test2() {
+    let base: Point2D = {x: 1.0f, y: 2.0f}
+    let extended = {...base, z: 3.0f}
 }

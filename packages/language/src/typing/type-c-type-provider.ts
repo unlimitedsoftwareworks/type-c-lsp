@@ -599,7 +599,7 @@ export class TypeCTypeProvider {
         }
 
         // New expression arguments: new MyClass(arg1, arg2, ...)
-        // Arguments should match class attributes in order
+        // Arguments should match init method parameters
         if (parent && ast.isNewExpression(parent) && parent.args && ast.isExpression(node)) {
             // Check if this node is one of the arguments
             const argIndex = parent.args.findIndex(arg => arg === node);
@@ -612,16 +612,47 @@ export class TypeCTypeProvider {
                     ? this.resolveReference(classRefType)
                     : classRefType;
                 
-                // If it's a class type, get the attribute at this position
-                if (isClassType(resolvedClassType)) {
-                    // Filter out static attributes - they're not part of instance construction
-                    const instanceAttributes = resolvedClassType.attributes.filter(attr => !attr.isStatic);
-                    
-                    if (argIndex < instanceAttributes.length) {
-                        // Return the attribute's type (already has generic substitutions applied)
-                        return instanceAttributes[argIndex].type;
+                // Check if it's a class type - if not, return error for validation
+                if (!isClassType(resolvedClassType)) {
+                    // Return error type that will be caught by validations
+                    // This allows the validation system to report proper error messages
+                    return factory.createErrorType(
+                        `Cannot use 'new' with non-class type '${resolvedClassType.toString()}'`,
+                        undefined,
+                        parent
+                    );
+                }
+                
+                // Look for init methods
+                const initMethods = resolvedClassType.methods.filter(m => m.names.includes('init'));
+                
+                // Filter by argument count to find matching candidates
+                const argCount = parent.args.length;
+                const candidates = initMethods.filter(m => m.parameters.length === argCount);
+                
+                // Context-driven inference strategy:
+                // - If exactly 1 candidate: use expected type from that candidate's parameters
+                // - If 0 or 2+ candidates: don't provide expected type (infer without context)
+                if (candidates.length === 1) {
+                    const initMethod = candidates[0];
+                    if (argIndex < initMethod.parameters.length) {
+                        let paramType = initMethod.parameters[argIndex].type;
+                        
+                        // Apply generic substitutions if we have them
+                        if (isReferenceType(classRefType) && classRefType.genericArgs.length > 0) {
+                            const substitutions = this.buildGenericSubstitutions(classRefType);
+                            if (substitutions && substitutions.size > 0) {
+                                paramType = this.typeUtils.substituteGenerics(paramType, substitutions);
+                            }
+                        }
+                        
+                        return paramType;
                     }
                 }
+                
+                // If we have 0 or 2+ candidates, don't provide expected type
+                // This allows arguments to be inferred without context first,
+                // then we can resolve overloads based on inferred types
             }
         }
 

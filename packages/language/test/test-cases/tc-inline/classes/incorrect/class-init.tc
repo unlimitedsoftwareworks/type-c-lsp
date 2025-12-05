@@ -1,0 +1,5 @@
+
+// Non-class type error - should be caught by validation
+type NotAClass = struct { x: i32, y: i32 }
+/// @Error(TCE100): Invalid use of 'new'
+let s1 = new NotAClass(1, 2)  // Should error: Cannot use 'new' with non-class type

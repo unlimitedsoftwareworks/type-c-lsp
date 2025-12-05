@@ -1,0 +1,41 @@
+// Test for new expression with init method inference
+
+type Array<T> = class {
+    let data: T[]
+    let length: u64
+    
+    // Single init method - should use contextual typing
+    fn init(capacity: u64) {
+        this.length = capacity
+    }
+}
+
+type Point<T> = class {
+    let x: T
+    let y: T
+    
+    // Multiple init methods - should infer without context
+    fn init(x: T, y: T) {
+        this.x = x
+        this.y = y
+    }
+    
+    fn init(value: T) {
+        this.x = value
+        this.y = value
+    }
+}
+
+type Vector<T> = class {
+    let elements: T[]
+    
+    // No matching init for 2 args - should infer without context
+    fn init(element: T) {
+        this.elements = [element]
+    }
+}
+
+fn main() {
+    // No matching init - arguments inferred without context
+    let v1 = new Point<string>("hi")  // Should error: no init with 2 params
+}

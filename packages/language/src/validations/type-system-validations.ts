@@ -1885,6 +1885,96 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: errorCode
                 }
             );
+            return;
+        }
+
+        // Extract the actual class type (handle MetaClassType wrapper)
+        const classType = isMetaClassType(resolvedType) ? resolvedType.baseClass : resolvedType;
+        
+        if (!isClassType(classType)) {
+            return; // Shouldn't happen, but be safe
+        }
+
+        // Find all init methods in the class
+        const initMethods = classType.methods.filter(m => m.names.includes('init'));
+        
+        // Get argument types and count
+        const args = node.args || [];
+        const argCount = args.length;
+        
+        // Filter init methods by argument count
+        const matchingArityMethods = initMethods.filter(m => m.parameters.length === argCount);
+        
+        // If no init methods match the argument count, report error
+        if (initMethods.length > 0 && matchingArityMethods.length === 0) {
+            const errorCode = ErrorCode.TC_FUNCTION_CALL_ARG_COUNT_MISMATCH;
+            const availableSignatures = initMethods.map(m =>
+                `init(${m.parameters.map(p => p.type.toString()).join(', ')})`
+            ).join(' or ');
+            accept('error',
+                `No matching 'init' method found: Expected ${availableSignatures}, but got ${argCount} argument(s)`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+        
+        // If we have matching methods, validate argument types
+        if (matchingArityMethods.length > 0) {
+            // Get actual argument types
+            const argumentTypes = args.map(arg => this.typeProvider.getType(arg));
+            
+            // Try to find a compatible init method
+            let foundMatch = false;
+            for (const initMethod of matchingArityMethods) {
+                let allArgsMatch = true;
+                
+                // Apply generic substitutions if the class has generic arguments
+                let paramTypes = initMethod.parameters.map(p => p.type);
+                if (isReferenceType(instanceType) && instanceType.genericArgs.length > 0) {
+                    const substitutions = new Map<string, TypeDescription>();
+                    instanceType.declaration.genericParameters?.forEach((param, i) => {
+                        if (i < instanceType.genericArgs.length) {
+                            substitutions.set(param.name, instanceType.genericArgs[i]);
+                        }
+                    });
+                    if (substitutions.size > 0) {
+                        paramTypes = paramTypes.map(p => this.typeUtils.substituteGenerics(p, substitutions));
+                    }
+                }
+                
+                // Check if all arguments are compatible
+                for (let i = 0; i < argumentTypes.length; i++) {
+                    const compatResult = this.isTypeCompatible(argumentTypes[i], paramTypes[i]);
+                    if (!compatResult.success) {
+                        allArgsMatch = false;
+                        break;
+                    }
+                }
+                
+                if (allArgsMatch) {
+                    foundMatch = true;
+                    break;
+                }
+            }
+            
+            // If no compatible init method found, report error with details
+            if (!foundMatch) {
+                const errorCode = ErrorCode.TC_FUNCTION_CALL_ARG_TYPE_MISMATCH;
+                const availableSignatures = matchingArityMethods.map(m =>
+                    `init(${m.parameters.map(p => p.type.toString()).join(', ')})`
+                ).join(' or ');
+                const providedTypes = argumentTypes.map(t => t.toString()).join(', ');
+                accept('error',
+                    `No matching 'init' method found for argument types (${providedTypes}). Available: ${availableSignatures}`,
+                    {
+                        node,
+                        code: errorCode
+                    }
+                );
+            }
         }
     }
 

@@ -68,6 +68,9 @@ export class TypeCTypeProvider {
     /** Cache for expected types, keyed by AST node */
     private readonly expectedTypeCache: DocumentCache<AstNode, TypeDescription | undefined>;
 
+    /** Cache for pattern validation errors detected during type inference */
+    private readonly patternValidationErrorCache: DocumentCache<AstNode, { message: string } | undefined>;
+
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
     /**
@@ -113,6 +116,7 @@ export class TypeCTypeProvider {
         this.services = services;
         this.typeCache = new DocumentCache(services.shared);
         this.expectedTypeCache = new DocumentCache(services.shared);
+        this.patternValidationErrorCache = new DocumentCache(services.shared);
         this.typeUtils = services.typing.TypeUtils;
     }
 
@@ -166,6 +170,26 @@ export class TypeCTypeProvider {
         const documentUri = AstUtils.getDocument(node).uri;
         this.typeCache.clear(documentUri);
         this.expectedTypeCache.clear(documentUri);
+        this.patternValidationErrorCache.clear(documentUri);
+    }
+
+    /**
+     * Gets a pattern validation error if one was detected during type inference.
+     * Returns undefined if no error was detected.
+     */
+    getPatternValidationError(node: AstNode): { message: string } | undefined {
+        const documentUri = AstUtils.getDocument(node).uri;
+        return this.patternValidationErrorCache.get(documentUri, node, () => undefined);
+    }
+
+    /**
+     * Sets a pattern validation error detected during type inference.
+     * This allows us to report pattern type mismatches at the pattern level
+     * rather than on each individual element.
+     */
+    private setPatternValidationError(node: AstNode, message: string): void {
+        const documentUri = AstUtils.getDocument(node).uri;
+        this.patternValidationErrorCache.set(documentUri, node, { message });
     }
 
     /**
@@ -4053,8 +4077,14 @@ export class TypeCTypeProvider {
         // Resolve reference types to get actual type
         const resolvedType = isReferenceType(contextType) ? this.resolveReference(contextType) : contextType;
 
+        console.log(`[TYPE PROVIDER] inferArrayPattern: contextType=${contextType.toString()}, isArray=${isArrayType(resolvedType)}`);
+
         if (!isArrayType(resolvedType)) {
-            // Error: pattern expects array but got something else
+            // Store validation error for the pattern itself
+            this.setPatternValidationError(pattern, `Pattern expects array type, but got '${contextType.toString()}'`);
+            
+            // Still infer types for sub-patterns to avoid cascading errors
+            // Use a placeholder error type that won't create additional validation errors
             const errorType = factory.createErrorType(
                 `Pattern expects array type, but got '${contextType.toString()}'`,
                 undefined,
@@ -4095,7 +4125,10 @@ export class TypeCTypeProvider {
 
         const structType = this.typeUtils.asStructType(resolvedType);
         if (!structType) {
-            // Error: pattern expects struct but got something else
+            // Store validation error for the pattern itself
+            this.setPatternValidationError(pattern, `Pattern expects struct type, but got '${contextType.toString()}'`);
+            
+            // Still infer types for sub-patterns to avoid cascading errors
             const errorType = factory.createErrorType(
                 `Pattern expects struct type, but got '${contextType.toString()}'`,
                 undefined,
@@ -4166,9 +4199,11 @@ export class TypeCTypeProvider {
                 undefined,
                 pattern
             );
+            
             for (const param of pattern.params ?? []) {
                 this.inferPatternTypes(param, errorType);
             }
+
             return;
         }
         

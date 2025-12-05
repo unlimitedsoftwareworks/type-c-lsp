@@ -87,6 +87,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             InstanceCheckExpression: this.checkExpressionForErrors,
             ThisExpression: this.checkExpressionForErrors,
             VariablePattern: this.checkExpressionForErrors,
+            MatchCasePattern: this.checkPatternErrors,
         };
     }
 
@@ -1870,5 +1871,78 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if (type.kind === TypeKind.String) return 'primitive type';
         if (type.kind === TypeKind.Void) return 'primitive type';
         return 'type';
+    }
+
+    /**
+     * Check array pattern for type compatibility.
+     *
+     * Validates that the matched expression type is actually an array.
+     * This prevents errors like matching a u32 with an array pattern [first, second].
+     *
+     * Examples:
+     * - match val: u32 { [x, y] => ... }  // ❌ Error on array pattern
+     * - match arr: u32[] { [x, y] => ... } // ✅ OK
+     */
+    /**
+     * Check pattern nodes for validation errors cached during type inference.
+     *
+     * During pattern type inference, the type provider detects mismatches
+     * (e.g., array pattern on non-array type) and caches validation errors.
+     * This method simply retrieves and reports those cached errors.
+     *
+     * IMPORTANT: We must trigger type inference first by getting the type of
+     * a child variable pattern, which will cause the entire pattern tree to be inferred.
+     */
+    checkPatternErrors = (node: AstNode, accept: ValidationAcceptor): void => {
+        
+        // Trigger type inference by finding and inferring a child variable pattern
+        // This ensures the pattern validation errors are cached before we check them
+        if (ast.isArrayPattern(node) || ast.isStructPattern(node) || ast.isTypePattern(node)) {
+            this.triggerPatternInference(node);
+        }
+        
+        const error = this.typeProvider.getPatternValidationError(node);
+        if (error) {
+            accept('error', error.message, {
+                node,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        } else {
+        }
+    }
+
+    /**
+     * Triggers type inference for a pattern tree by finding a variable pattern
+     * child and calling getType on it. This causes the entire pattern tree to
+     * be inferred, including caching any validation errors.
+     */
+    private triggerPatternInference(pattern: AstNode): void {
+        // Find any variable pattern in the tree
+        const varPattern = this.findVariablePattern(pattern);
+        if (varPattern) {
+            // Calling getType on a variable pattern triggers inferMatchCasePattern
+            // which infers the entire pattern tree and caches validation errors
+            this.typeProvider.getType(varPattern);
+        } else {
+        }
+    }
+
+    /**
+     * Recursively finds the first variable pattern in a pattern tree.
+     */
+    private findVariablePattern(node: AstNode): ast.VariablePattern | undefined {
+        if (ast.isVariablePattern(node)) {
+            return node;
+        }
+        
+        // Recursively search children
+        for (const child of AstUtils.streamContents(node)) {
+            const found = this.findVariablePattern(child);
+            if (found) {
+                return found;
+            }
+        }
+        
+        return undefined;
     }
 }

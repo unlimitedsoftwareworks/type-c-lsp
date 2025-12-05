@@ -17,12 +17,16 @@ type Point = struct {
 // Trying to destructure non-array as array
 fn testNonArrayAsArray(val: u32) {
     
+    
     match val {
+        /// @Error(TCE120): Pattern expects array type
         [
             /// @Error(TCE120): Pattern expects array type, but got 'u32'
             first, 
             /// @Error(TCE120): Pattern expects array type, but got 'u32'
-            second
+            second,
+            1,
+            "cool"
         ] => {},
         _ => {}
     }

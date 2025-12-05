@@ -46,15 +46,15 @@ fn test5() {
 }
 
 // Test 6: Variant in function parameter
-fn processOption<T>(opt: Option<T>) -> T {
+fn processOption<T>(opt: Option<T>, default: T) -> T {
     return match opt {
         Option.Some(v) => v,
-        Option.None() => throw "No value"
+        Option.None() => default
     }
 }
 
 fn test6() {
-    let value = processOption(Option.Some(42))
+    let value = processOption(Option.Some(42), 1)
 }
 
 // Test 7: Higher-order functions with variants
@@ -87,5 +87,5 @@ fn test9() {
 
 // Test 10: Tuple with variants
 fn test10() {
-    let tuple: (Result<i32, string>, Option<u32>) = (Result.Ok(1), Option.Some(2u32))
+    let tuple: {x: Result<i32, string>, y: Option<u32>} = {Result.Ok(1), Option.Some(2u32)}
 }

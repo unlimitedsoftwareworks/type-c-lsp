@@ -756,7 +756,7 @@ StructPatternField:
     name=ID ':' pattern=MatchCasePattern;
 
 TypePattern:
-    TypeInstancePattern ('(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')')?;
+    TypeInstancePattern ('(' (params+=MatchCasePattern (',' params+=MatchCasePattern)*)? ')')?;
 
 //AnonymousVariantPattern:
     // ignores the base! ::Ok(v)

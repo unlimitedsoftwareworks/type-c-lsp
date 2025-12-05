@@ -97,9 +97,9 @@ fn test9() {
 // Test 10: Lambda with nullable types
 fn mapOption<T, U>(opt: Option<T>, f: fn(a: T) -> U) -> Option<U> {
     return match opt {
-        Some(v) => Option.Some(f(v)),
-        None() => Option.None(),
-        _ => Option.Some(f(v))
+        Option.Some(v) => Option.Some(f(v)),
+        Option.None() => Option.None(),
+        _ => Option.None()
     }
 }
 

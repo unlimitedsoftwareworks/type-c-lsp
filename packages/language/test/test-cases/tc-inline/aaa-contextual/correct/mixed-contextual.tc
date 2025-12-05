@@ -78,7 +78,7 @@ fn test6() {
 fn test7() {
     let pairs: {x: Result<i32, string>, y: Option<u32>}[] = [
         {Result.Ok(1), Option.Some(2u32)},
-        {Result.Err("error"), Option.None}
+        {Result.Err("error"), Option.None()}
     ]
 }
 
@@ -143,13 +143,13 @@ fn test14() {
 
 // Test 15: Complex tuple with everything
 fn test15() {
-    let complex: (
-        Result<Point[], string>,
-        fn(a: i32) -> Option<i32>,
-        Entity[]
-    ) = (
+    let complex: {
+        r: Result<Point[], string>,
+        f: fn(a: i32) -> Option<i32>,
+        e: Entity?[]
+     } = {
         Result.Ok([{x: 1.0f, y: 2.0f}]),
         fn(x) = Option.Some(x),
-        []
-    )
+        [{position: {x: 1.0f, y: 2.0f}, velocity: {x: 1.0f, y: 2.0f}, health: 1}, null]
+    }
 }

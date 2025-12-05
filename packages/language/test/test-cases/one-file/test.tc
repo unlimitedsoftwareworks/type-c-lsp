@@ -1,17 +1,19 @@
+// Test cases for pattern variable type inference in match expressions
 
-// Test 5: Lambda with variant return type
-type Option<T> = variant {
-    Some(value: T),
-    None()
+type Person = struct {
+    name: string,
+    age: u32,
+    city: string
 }
 
-// Test 10: Lambda with nullable types
-fn mapOption<T, U>(opt: Option<T>, f: fn(a: T) -> U) -> Option<U> {
-    return match opt {
-        Option.Some(v) => Option.Some(f(v)),
-        Option.None => Option.None(),
-        _ => Option.None()
+// ============================================================================
+// Struct Pattern with Spread Variables
+// ============================================================================
+
+/// @Type(struct { age: u32, city: string })
+fn testStructSpreadPattern1(person: Person) {
+    return match person {
+        {name: name, ...rest} => rest,  // rest: {age: u32, city: string}
+        _ => {age: 0u32, city: ""}
     }
 }
-
-let z = mapOption(Option.Some(4u32), fn(x) = x*2)

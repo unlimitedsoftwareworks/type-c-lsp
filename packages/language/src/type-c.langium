@@ -731,8 +731,8 @@ fragment ExpressionList:
 MatchCasePattern:
     VariablePattern |
     LiteralPattern | 
-    ArrayPattern |
     StructPattern |
+    ArrayPattern |
     TypePattern |
     WildCardPattern;
 
@@ -747,7 +747,7 @@ LiteralPattern:
     StringLiteral;
 
 ArrayPattern:
-    '[' pattners+=MatchCasePattern (',' pattners+=MatchCasePattern)* (',' '...' trailVariable=VariablePattern)? ']';
+    '[' (pattners+=MatchCasePattern (',' pattners+=MatchCasePattern)* (',' '...' trailVariable=VariablePattern)?)? ']';
 
 StructPattern:
     '{' fields+=StructPatternField (',' fields+=StructPatternField)* (',' '...' trailVariable=VariablePattern)? '}';

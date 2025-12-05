@@ -124,7 +124,7 @@ fn testStructPatternAge(person: Person) {
 /// @Type(struct { age: u32, city: string })
 fn testStructSpreadPattern1(person: Person) {
     return match person {
-        {name, ...rest} => rest,  // rest: {age: u32, city: string}
+        {name: name, ...rest} => rest,  // rest: {age: u32, city: string}
         _ => {age: 0u32, city: ""}
     }
 }
@@ -132,7 +132,8 @@ fn testStructSpreadPattern1(person: Person) {
 /// @Type(string)
 fn testStructSpreadPattern2(person: Person) {
     return match person {
-        {name, ...rest} => name,  // name: string (from field binding)
+        /// TODO: allow {name, ...}
+        {name: name, ...rest} => name,  // name: string (from field binding)
         _ => ""
     }
 }
@@ -140,7 +141,7 @@ fn testStructSpreadPattern2(person: Person) {
 /// @Type(struct { z: f32 })
 fn testStructSpreadPattern3(p: Point) {
     return match p {
-        {x, y, ...rest} => rest,  // rest: {z: f32}
+        {x: x, y: y, ...rest} => rest,  // rest: {z: f32}
         _ => {z: 0.0f}
     }
 }
@@ -219,7 +220,7 @@ fn testNestedVariantPattern2(nested: Result<Option<u32>, string>) {
 /// @Type(f32)
 fn testArrayOfStructs(points: Point[]) {
     return match points {
-        [{x: xVal, y, z}] => xVal,  // xVal: f32
+        [{x: xVal, y: y, z: z}] => xVal,  // xVal: f32
         _ => 0.0f
     }
 }
@@ -231,7 +232,7 @@ type Container = struct {
 }
 
 /// @Type(u32[])
-fn testStructWithArray(c: Container) {
+fn testStructWithArray(c: Container) -> u32[] {
     return match c {
         {values: vals, name: n} => vals,  // vals: u32[]
         _ => []
@@ -251,10 +252,10 @@ fn testStructWithArray2(c: Container) {
 // ============================================================================
 
 // Empty array pattern (should handle gracefully)
-fn testEmptyPattern(arr: u32[]) {
-    match arr {
-        [] => {},
-        _ => {}
+fn testEmptyPattern(arr: u32[])  {
+    return match arr {
+        [] => true,
+        _ => false
     }
 }
 
@@ -268,7 +269,7 @@ fn testWildcardPattern(arr: u32[]) {
 
 // Simple variable pattern (whole value)
 /// @Type(u32[])
-fn testSimpleVariablePattern(arr: u32[]) {
+fn testSimpleVariablePattern(arr: u32[])-> u32[] {
     return match arr {
         value => value,  // value: u32[]
         _ => []

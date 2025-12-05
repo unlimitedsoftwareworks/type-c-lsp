@@ -132,7 +132,7 @@ fn testNestedGenerics() -> Container<Option<u32> > {
     return new Container([
         Option.Some(1),  // 1 infers as u32
         Option.Some(2),  // 2 infers as u32
-        Option.None
+        Option.None()
     ])
 }
 

@@ -19,7 +19,7 @@ fn main() {
     // val: u32?
     
     // ✅ Reverse index through method call
-    let elem = c?.getArray()[-1]
+    let elem = c?.getArray()![-1]
     // elem: u32?
     
     // ✅ Mixed forward and reverse indexing

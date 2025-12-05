@@ -49,7 +49,7 @@ fn testNestedArrayMatch() -> u32 {
             [c, 
             /// @Type(d): u32
             d], 
-            /// @Type(e): u32[]
+            /// @Type(e): u32[][]
         ...e] => a + b + c + d,  // all nested variables should be in scope
         _ => 0u32
     }

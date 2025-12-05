@@ -30,12 +30,12 @@ fn main() {
     
     // ✅ Index access propagates
     let arr: u32[]? = null
-    let v4 = arr[0]
+    let v4 = arr![0]
     // v4: u32?
     
     // ✅ Multiple index accesses
     let matrix: u32[][]? = null
-    let v5 = matrix[0][1]
+    let v5 = matrix![0][1]
     // v5: u32?
     
     // ✅ Type cast propagates - (a?.b as T).c

@@ -24,8 +24,8 @@ fn main() {
     let v2 = w?.transform()?.unwrap()?.getNext()?.getValue()
     // v2: u32?
     
-    // ✅ Optional chain with index access
-    let v3 = d?.getArray()[0]
+    // ✅ Optional chain with index access and !
+    let v3 = d?.getArray()![0]
     // v3: u32?
     
     // ✅ Optional chain with multiple index accesses

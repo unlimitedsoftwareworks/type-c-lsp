@@ -3956,8 +3956,6 @@ export class TypeCTypeProvider {
          * And cache their results.
          */
 
-        console.log(`[inferVariablePattern] Climbing from VariablePattern '${node.name}' to find root pattern`);
-        
         // Climb to find the root MatchCasePattern (the one directly under MatchCaseExpression/Statement)
         let rootPattern: AstNode = node;
 
@@ -3965,11 +3963,8 @@ export class TypeCTypeProvider {
         while (rootPattern.$container &&
                !ast.isMatchCaseExpression(rootPattern.$container) &&
                !ast.isMatchCaseStatement(rootPattern.$container)) {
-            console.log(`[inferVariablePattern] Climbing: ${rootPattern.$type} → ${rootPattern.$container.$type}`);
             rootPattern = rootPattern.$container;
         }
-
-        console.log(`[inferVariablePattern] Found root pattern: ${rootPattern.$type}`);
 
         // Infer all variables in this pattern tree (starting from root)
         if (ast.isMatchCasePattern(rootPattern)) {
@@ -3989,8 +3984,6 @@ export class TypeCTypeProvider {
      * This is called once per pattern and caches all variable types in one pass.
      */
     private inferMatchCasePattern(node: ast.MatchCasePattern): void {
-        console.log(`[inferMatchCasePattern] Starting pattern inference for ${node.$type}`);
-        
         // Find the parent match case (expression or statement)
         let parentNode = node.$container;
         while (parentNode && !(ast.isMatchCaseExpression(parentNode) || ast.isMatchCaseStatement(parentNode))) {
@@ -3998,7 +3991,6 @@ export class TypeCTypeProvider {
         }
 
         if (!parentNode) {
-            console.log(`[inferMatchCasePattern] ERROR: No valid parent match case found`);
             return; // Invalid structure
         }
 
@@ -4007,14 +3999,11 @@ export class TypeCTypeProvider {
         if (ast.isMatchStatement(parentNode.$container) || ast.isMatchExpression(parentNode.$container)) {
             baseExpression = parentNode.$container.target;
         } else {
-            console.log(`[inferMatchCasePattern] ERROR: No match statement/expression container found`);
             return; // Invalid structure
         }
 
         // Get the target type - this is what we're matching against
         const targetType = this.getType(baseExpression);
-        console.log(`[inferMatchCasePattern] ROOT TYPE: ${targetType.toString()}`);
-        console.log(`[inferMatchCasePattern] Beginning downward traversal...`);
 
         // Descend into the pattern tree and infer all variable types
         this.inferPatternTypes(node, targetType, 0);
@@ -4029,34 +4018,27 @@ export class TypeCTypeProvider {
      * @param depth Recursion depth for logging
      */
     private inferPatternTypes(pattern: ast.MatchCasePattern, contextType: TypeDescription, depth: number = 0): void {
-        const indent = '  '.repeat(depth);
-        console.log(`${indent}[inferPatternTypes] Depth ${depth}: ${pattern.$type} with context type ${contextType.toString()}`);
-        
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         if (ast.isVariablePattern(pattern)) {
             // Base case: cache the type for this variable
             const type = contextType;
             this.typeCache.set(documentUri, pattern, type);
-            console.log(`${indent}[inferPatternTypes] ✓ Cached variable '${pattern.name}' → ${type.toString()}`);
         }
         else if (ast.isArrayPattern(pattern)) {
-            console.log(`${indent}[inferPatternTypes] → Descending into ArrayPattern`);
             this.inferArrayPattern(pattern, contextType, depth);
         }
         else if (ast.isStructPattern(pattern)) {
-            console.log(`${indent}[inferPatternTypes] → Descending into StructPattern`);
             this.inferStructPattern(pattern, contextType, depth);
         }
         else if (ast.isTypePattern(pattern)) {
-            console.log(`${indent}[inferPatternTypes] → Descending into TypePattern`);
             this.inferTypePattern(pattern, contextType, depth);
         }
         else if (ast.isWildCardPattern(pattern)) {
-            console.log(`${indent}[inferPatternTypes] ✓ Wildcard pattern (no variables to infer)`);
+            // Wildcard pattern - no variables to infer
         }
         else if (ast.isLiteralPattern(pattern)) {
-            console.log(`${indent}[inferPatternTypes] ✓ Literal pattern (no variables to infer)`);
+            // Literal pattern - no variables to infer
         }
     }
 
@@ -4066,9 +4048,6 @@ export class TypeCTypeProvider {
      * - Trail variable (rest) gets the full array type
      */
     private inferArrayPattern(pattern: ast.ArrayPattern, contextType: TypeDescription, depth: number = 0): void {
-        const indent = '  '.repeat(depth + 1);
-        console.log(`${indent}[inferArrayPattern] Analyzing array pattern with context ${contextType.toString()}`);
-        
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         // Resolve reference types to get actual type
@@ -4076,7 +4055,6 @@ export class TypeCTypeProvider {
 
         if (!isArrayType(resolvedType)) {
             // Error: pattern expects array but got something else
-            console.log(`${indent}[inferArrayPattern] ERROR: Expected array type, got ${contextType.toString()}`);
             const errorType = factory.createErrorType(
                 `Pattern expects array type, but got '${contextType.toString()}'`,
                 undefined,
@@ -4086,25 +4064,20 @@ export class TypeCTypeProvider {
                 this.inferPatternTypes(subPattern, errorType, depth + 1);
             }
             if (pattern.trailVariable) {
-                console.log(`${indent}[inferArrayPattern] ✗ Cached trail variable '${pattern.trailVariable.name}' → ERROR`);
                 this.typeCache.set(documentUri, pattern.trailVariable, errorType);
             }
             return;
         }
 
         const elementType = resolvedType.elementType;
-        console.log(`${indent}[inferArrayPattern] Element type: ${elementType.toString()}`);
-        console.log(`${indent}[inferArrayPattern] Processing ${pattern.pattners?.length ?? 0} element patterns...`);
 
         // Infer types for each element pattern
         for (let i = 0; i < (pattern.pattners?.length ?? 0); i++) {
-            console.log(`${indent}[inferArrayPattern] Element ${i}:`);
             this.inferPatternTypes(pattern.pattners![i], elementType, depth + 1);
         }
 
         // Trail variable (...rest) gets the array type (remaining elements)
         if (pattern.trailVariable) {
-            console.log(`${indent}[inferArrayPattern] ✓ Cached trail variable '${pattern.trailVariable.name}' → ${resolvedType.toString()}`);
             this.typeCache.set(documentUri, pattern.trailVariable, resolvedType);
         }
     }
@@ -4115,9 +4088,6 @@ export class TypeCTypeProvider {
      * - Trail variable (rest) gets a struct with remaining fields
      */
     private inferStructPattern(pattern: ast.StructPattern, contextType: TypeDescription, depth: number = 0): void {
-        const indent = '  '.repeat(depth + 1);
-        console.log(`${indent}[inferStructPattern] Analyzing struct pattern with context ${contextType.toString()}`);
-        
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         // Resolve reference types to get actual type
@@ -4126,7 +4096,6 @@ export class TypeCTypeProvider {
         const structType = this.typeUtils.asStructType(resolvedType);
         if (!structType) {
             // Error: pattern expects struct but got something else
-            console.log(`${indent}[inferStructPattern] ERROR: Expected struct type, got ${contextType.toString()}`);
             const errorType = factory.createErrorType(
                 `Pattern expects struct type, but got '${contextType.toString()}'`,
                 undefined,
@@ -4136,14 +4105,10 @@ export class TypeCTypeProvider {
                 this.inferPatternTypes(field.pattern, errorType, depth + 1);
             }
             if (pattern.trailVariable) {
-                console.log(`${indent}[inferStructPattern] ✗ Cached trail variable '${pattern.trailVariable.name}' → ERROR`);
                 this.typeCache.set(documentUri, pattern.trailVariable, errorType);
             }
             return;
         }
-
-        console.log(`${indent}[inferStructPattern] Struct has ${structType.fields.length} fields`);
-        console.log(`${indent}[inferStructPattern] Processing ${pattern.fields?.length ?? 0} field patterns...`);
 
         // Infer types for each field pattern
         for (const fieldPattern of pattern.fields ?? []) {
@@ -4151,11 +4116,9 @@ export class TypeCTypeProvider {
             const structField = structType.fields.find(f => f.name === fieldName);
             
             if (structField) {
-                console.log(`${indent}[inferStructPattern] Field '${fieldName}':`);
                 this.inferPatternTypes(fieldPattern.pattern, structField.type, depth + 1);
             } else {
                 // Field not found in struct
-                console.log(`${indent}[inferStructPattern] ERROR: Field '${fieldName}' not found in struct`);
                 this.inferPatternTypes(fieldPattern.pattern,
                     factory.createErrorType(
                         `Field '${fieldName}' not found in struct type`,
@@ -4172,7 +4135,6 @@ export class TypeCTypeProvider {
             const extractedFieldNames = (pattern.fields ?? []).map(f => f.name);
             const remainingFields = structType.fields.filter(f => !extractedFieldNames.includes(f.name));
             const remainingStructType = factory.createStructType(remainingFields, false, pattern);
-            console.log(`${indent}[inferStructPattern] ✓ Cached trail variable '${pattern.trailVariable.name}' → struct with ${remainingFields.length} remaining fields`);
             this.typeCache.set(documentUri, pattern.trailVariable, remainingStructType);
         }
     }
@@ -4189,8 +4151,6 @@ export class TypeCTypeProvider {
      *   }
      */
     private inferTypePattern(pattern: ast.TypePattern, contextType: TypeDescription, depth: number = 0): void {
-        const indent = '  '.repeat(depth + 1);
-        console.log(`${indent}[inferTypePattern] Analyzing type pattern with context ${contextType.toString()}`);
         // Get the type annotation from the pattern (e.g., Result.Ok)
         // TypePattern grammar: TypeInstancePattern ('(' params... ')')?
         // TypePattern has inline TypeInstancePattern which has a 'type' field
@@ -4213,34 +4173,27 @@ export class TypeCTypeProvider {
         }
         
         const patternType = this.getType(pattern.type);
-        console.log(`${indent}[inferTypePattern] Pattern type: ${patternType.toString()}`);
 
         // Handle different forms of variant constructor types
         let constructorType: VariantConstructorTypeDescription | undefined;
 
         if (isVariantConstructorType(patternType)) {
-            console.log(`${indent}[inferTypePattern] Direct VariantConstructorType`);
             constructorType = patternType;
         }
         else if (isReferenceType(patternType)) {
-            console.log(`${indent}[inferTypePattern] ReferenceType - resolving...`);
             const resolved = this.resolveReference(patternType);
-            console.log(`${indent}[inferTypePattern] Resolved to: ${resolved.toString()}`);
             if (isVariantConstructorType(resolved)) {
                 constructorType = resolved;
             }
         }
         else if (isMetaVariantConstructorType(patternType)) {
-            console.log(`${indent}[inferTypePattern] MetaVariantConstructorType`);
             constructorType = patternType.baseVariantConstructor;
         }
 
         if (constructorType) {
-            console.log(`${indent}[inferTypePattern] Found constructor: ${constructorType.constructorName}`);
             this.inferVariantConstructorPattern(pattern, constructorType, contextType, depth);
         } else {
             // Not a variant constructor - can't destructure parameters
-            console.log(`${indent}[inferTypePattern] ERROR: Cannot destructure non-variant type`);
             const errorType = factory.createErrorType(
                 `Cannot destructure non-variant type '${patternType.toString()}'`,
                 undefined,
@@ -4276,24 +4229,11 @@ export class TypeCTypeProvider {
         contextType: TypeDescription,
         depth: number = 0
     ): void {
-        const indent = '  '.repeat(depth + 1);
-        console.log(`${indent}[inferVariantConstructorPattern] Constructor: ${constructorType.constructorName}`);
-        console.log(`${indent}[inferVariantConstructorPattern] Context type: ${contextType.toString()}`);
-        
         // Extract generic substitutions from the context
         const genericSubstitutions = this.extractGenericSubstitutionsFromContext(
             constructorType,
             contextType
         );
-        
-        if (genericSubstitutions.size > 0) {
-            console.log(`${indent}[inferVariantConstructorPattern] Generic substitutions:`);
-            for (const [key, value] of genericSubstitutions) {
-                console.log(`${indent}  ${key} → ${value.toString()}`);
-            }
-        } else {
-            console.log(`${indent}[inferVariantConstructorPattern] No generic substitutions`);
-        }
 
         // Find the constructor definition
         const constructor = constructorType.baseVariant.constructors.find(
@@ -4302,7 +4242,6 @@ export class TypeCTypeProvider {
 
         if (!constructor) {
             // Constructor not found in variant
-            console.log(`${indent}[inferVariantConstructorPattern] ERROR: Constructor not found`);
             const errorType = factory.createErrorType(
                 `Constructor '${constructorType.constructorName}' not found in variant`,
                 undefined,
@@ -4314,27 +4253,20 @@ export class TypeCTypeProvider {
             return;
         }
 
-        console.log(`${indent}[inferVariantConstructorPattern] Constructor has ${constructor.parameters.length} parameters`);
-        console.log(`${indent}[inferVariantConstructorPattern] Pattern has ${pattern.params?.length ?? 0} parameters`);
-
         // Match pattern parameters with constructor parameters
         const params = pattern.params ?? [];
         for (let i = 0; i < params.length; i++) {
             if (i < constructor.parameters.length) {
                 let paramType = constructor.parameters[i].type;
-                console.log(`${indent}[inferVariantConstructorPattern] Param ${i} (${constructor.parameters[i].name}):`);
-                console.log(`${indent}  Original type: ${paramType.toString()}`);
                 
                 // Apply generic substitutions (T → concrete type)
                 if (genericSubstitutions.size > 0) {
                     paramType = this.typeUtils.substituteGenerics(paramType, genericSubstitutions);
-                    console.log(`${indent}  After substitution: ${paramType.toString()}`);
                 }
                 
                 this.inferPatternTypes(params[i], paramType, depth + 1);
             } else {
                 // Too many parameters in pattern
-                console.log(`${indent}[inferVariantConstructorPattern] ERROR: Too many parameters (param ${i})`);
                 this.inferPatternTypes(params[i],
                     factory.createErrorType(
                         `Too many parameters in pattern (expected ${constructor.parameters.length})`,
@@ -4360,55 +4292,41 @@ export class TypeCTypeProvider {
         constructorType: VariantConstructorTypeDescription,
         contextType: TypeDescription
     ): Map<string, TypeDescription> {
-        console.log(`[extractGenericSubstitutions] Constructor variant decl: ${constructorType.variantDeclaration?.name ?? 'none'}`);
-        console.log(`[extractGenericSubstitutions] Context type: ${contextType.toString()} (kind: ${contextType.kind})`);
-        
         const substitutions = new Map<string, TypeDescription>();
         const variantDecl = constructorType.variantDeclaration;
 
         if (!variantDecl || !variantDecl.genericParameters) {
-            console.log(`[extractGenericSubstitutions] No variant declaration or generic parameters`);
             return substitutions;
         }
 
         const genericParamNames = variantDecl.genericParameters.map(p => p.name);
-        console.log(`[extractGenericSubstitutions] Generic parameters: [${genericParamNames.join(', ')}]`);
 
         // Case 1: Context is a ReferenceType to the same variant with concrete generics
         // Example: contextType = Result<u32, string>
         if (isReferenceType(contextType) && contextType.declaration === variantDecl) {
-            console.log(`[extractGenericSubstitutions] Case 1: ReferenceType matching variant declaration`);
             genericParamNames.forEach((name, i) => {
                 if (i < contextType.genericArgs.length) {
                     substitutions.set(name, contextType.genericArgs[i]);
-                    console.log(`[extractGenericSubstitutions]   ${name} → ${contextType.genericArgs[i].toString()}`);
                 }
             });
         }
         // Case 2: Context is a VariantConstructorType with generics
         // Example: contextType = Result.Ok<u32, string>
         else if (isVariantConstructorType(contextType)) {
-            console.log(`[extractGenericSubstitutions] Case 2: VariantConstructorType`);
             if (contextType.variantDeclaration === variantDecl) {
                 genericParamNames.forEach((name, i) => {
                     if (i < contextType.genericArgs.length) {
                         substitutions.set(name, contextType.genericArgs[i]);
-                        console.log(`[extractGenericSubstitutions]   ${name} → ${contextType.genericArgs[i].toString()}`);
                     }
                 });
             }
         }
         // Case 3: Context is a resolved variant type (shouldn't happen but handle it)
         else if (isVariantType(contextType)) {
-            console.log(`[extractGenericSubstitutions] Case 3: Plain VariantType (using never as fallback)`);
             // No generic args available in plain variant type - use never as fallback
             genericParamNames.forEach(name => {
                 substitutions.set(name, factory.createNeverType());
-                console.log(`[extractGenericSubstitutions]   ${name} → never`);
             });
-        }
-        else {
-            console.log(`[extractGenericSubstitutions] No matching case for context type`);
         }
 
         return substitutions;
@@ -4747,7 +4665,6 @@ export class TypeCTypeProvider {
         }
 
         if(isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {
-            console.log(`[extractGenericArgs] Both are function types, extracting from parameters and return type`);
             for (let i = 0; i < Math.min(resolvedParameterType.parameters.length, resolvedArgumentType.parameters.length); i++) {
                 this.extractGenericArgsFromTypeDescription(resolvedParameterType.parameters[i].type, resolvedArgumentType.parameters[i].type, genericMap);
             }
@@ -4758,18 +4675,14 @@ export class TypeCTypeProvider {
         // Example: variant { Ok(value: T), Err(message: string) } vs variant { Ok(value: i32), Err(message: never) }
         // This extracts T = i32 by matching constructor parameters
         if (isVariantType(resolvedParameterType) && isVariantType(resolvedArgumentType)) {
-            console.log(`[extractGenericArgs] Both are variant types, extracting from constructor parameters`);
-            
             // Match constructors by name and extract generics from their parameters
             for (const paramConstructor of resolvedParameterType.constructors) {
                 const argConstructor = resolvedArgumentType.constructors.find(c => c.name === paramConstructor.name);
                 
                 if (argConstructor) {
-                    console.log(`[extractGenericArgs] Matching constructor '${paramConstructor.name}'`);
                     // Extract from each parameter
                     const numParams = Math.min(paramConstructor.parameters.length, argConstructor.parameters.length);
                     for (let i = 0; i < numParams; i++) {
-                        console.log(`[extractGenericArgs] Constructor param ${i}: ${paramConstructor.parameters[i].type.toString()} vs ${argConstructor.parameters[i].type.toString()}`);
                         this.extractGenericArgsFromTypeDescription(
                             paramConstructor.parameters[i].type,
                             argConstructor.parameters[i].type,

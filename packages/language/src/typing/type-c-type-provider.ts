@@ -1907,7 +1907,7 @@ export class TypeCTypeProvider {
 
                 const firstBase = unwrappedTypes[0].base;
                 const allBasesIdentical = unwrappedTypes.every(item =>
-                    item.base.toString() === firstBase.toString()
+                    this.typeUtils.areTypesEqual(item.base, firstBase).success
                 );
 
                 if (allBasesIdentical) {
@@ -1919,9 +1919,9 @@ export class TypeCTypeProvider {
                         commonType = factory.createNullableType(commonType, types[0].node);
                     }
                 } else {
-                    // Check if all non-null types are identical (as string)
+                    // Check if all non-null types are identical
                     const firstType = nonNullTypes[0];
-                    const allIdentical = nonNullTypes.every(t => t.toString() === firstType.toString());
+                    const allIdentical = nonNullTypes.every(t => this.typeUtils.areTypesEqual(t, firstType).success);
 
                     if (allIdentical) {
                         commonType = firstType;
@@ -2044,7 +2044,7 @@ export class TypeCTypeProvider {
             } else {
                 // Check if all concrete types are identical
                 const firstConcreteType = concreteTypes[0];
-                const allIdentical = concreteTypes.every(t => t.toString() === firstConcreteType.toString());
+                const allIdentical = concreteTypes.every(t => this.typeUtils.areTypesEqual(t, firstConcreteType).success);
 
                 if (allIdentical) {
                     // All concrete types match - use that type
@@ -2111,21 +2111,20 @@ export class TypeCTypeProvider {
             );
         }
 
-        // Check that all common fields have EXACT same types
+        // Find common type for each field (allows unification of variant constructors, etc.)
         const commonFields: StructFieldType[] = [];
 
         for (const fieldName of commonFieldNames) {
-            const firstFieldType = allFieldSets[0].get(fieldName)!;
-
-            // Check if all structs have this field with the EXACT same type
-            const allMatch = allFieldSets.every(fieldSet => {
-                const fieldType = fieldSet.get(fieldName);
-                return fieldType && fieldType.toString() === firstFieldType.toString();
-            });
-
-            if (!allMatch) {
+            // Collect all types for this field across all structs
+            const fieldTypes = allFieldSets.map(fieldSet => fieldSet.get(fieldName)!);
+            
+            // Find common type (this handles variant constructor unification, etc.)
+            const commonFieldType = this.getCommonType(fieldTypes);
+            
+            if (isErrorType(commonFieldType)) {
+                // Enhance error message with field context
                 return factory.createErrorType(
-                    `Cannot infer common struct type: field '${fieldName}' has different types across branches`,
+                    `Cannot infer common struct type: field '${fieldName}' has incompatible types: ${fieldTypes.map(t => t.toString()).join(', ')}`,
                     undefined,
                     types[0].node
                 );
@@ -2133,8 +2132,8 @@ export class TypeCTypeProvider {
 
             commonFields.push({
                 name: fieldName,
-                type: firstFieldType,
-                node: firstFieldType.node!
+                type: commonFieldType,
+                node: commonFieldType.node || fieldTypes[0].node!
             });
         }
 
@@ -2224,7 +2223,7 @@ export class TypeCTypeProvider {
             } else {
                 // Check if all concrete types are identical
                 const firstConcreteType = concreteTypes[0];
-                const allIdentical = concreteTypes.every(t => t.toString() === firstConcreteType.toString());
+                const allIdentical = concreteTypes.every(t => this.typeUtils.areTypesEqual(t, firstConcreteType).success);
 
                 if (allIdentical) {
                     // All concrete types match - use that type

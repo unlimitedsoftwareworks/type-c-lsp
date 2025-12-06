@@ -1,0 +1,33 @@
+/**
+ * Test valid variant constructor calls
+ */
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn main() -> void {
+    // Valid calls - inferred generics
+    let ok1 = Option.Some(200u32) // OK - T inferred as u32
+    let ok2 = Option.None // OK - no arguments needed
+    
+    let res1 = Result.Ok(42u32) // OK - T inferred as u32, E as never
+    let res2 = Result.Err("error") // OK - T as never, E inferred as string
+    
+    // Valid calls - explicit generics matching inferred types
+    let ok3 = Option.Some<u32>(200u32) // OK - explicit u32 matches argument
+    let ok4 = Option.Some<string>("hello") // OK - explicit string matches argument
+    
+    let res3 = Result.Ok<u32, string>(42u32) // OK - explicit generics
+    let res4 = Result.Err<u32, string>("error") // OK - explicit generics
+    
+    // Valid calls - explicit generics with never for uninferred params
+    let res5 = Result.Ok<u32, never>(42u32) // OK - E is never (not used)
+    let res6 = Result.Err<never, string>("error") // OK - T is never (not used)
+}

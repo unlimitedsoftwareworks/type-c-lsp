@@ -5,12 +5,14 @@ import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
     TypeDescription,
     TypeKind,
+    FunctionTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
     isErrorType,
     isFloatType,
     isFunctionType,
+    isGenericType,
     isIntegerType,
     isInterfaceType,
     isJoinType,
@@ -402,10 +404,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        // Skip validation for variant constructor calls
-        // Variant constructors have generic parameters that are inferred from arguments
-        // The type provider handles this inference correctly
+        // Validate variant constructor calls
+        // Note: Variants do not support overload - each constructor name is unique
         if (isVariantConstructorType(fnType.returnType)) {
+            this.checkVariantConstructorCall(node, fnType, accept);
             return;
         }
 
@@ -488,6 +490,176 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
         });
     }
+    /**
+     * Validates variant constructor calls for:
+     * 1. Generic parameter count (if explicitly provided)
+     * 2. Generic parameter types (if explicitly provided)
+     * 3. Argument count
+     * 4. Argument types
+     * 
+     * Note: Variants do NOT support overload - each constructor has a unique name.
+     * 
+     * Examples:
+     * - Option.Some(42u32) → OK
+     * - Option.Some<u32>(42u32) → OK (explicit generic)
+     * - Option.Some(42u32, 1) → ERROR (wrong arg count)
+     * - Option.Some<string>(42u32) → ERROR (explicit generic doesn't match arg type)
+     */
+    private checkVariantConstructorCall = (node: ast.FunctionCall, fnType: FunctionTypeDescription, accept: ValidationAcceptor): void => {
+        const constructorType = fnType.returnType;
+        if (!isVariantConstructorType(constructorType)) {
+            return; // Should not happen
+        }
+
+        // Get the base variant and constructor definition
+        const baseVariant = constructorType.baseVariant;
+        const constructorDef = baseVariant.constructors.find(
+            c => c.name === constructorType.constructorName
+        );
+
+        if (!constructorDef) {
+            return; // Should not happen - constructor not found
+        }
+
+        const args = node.args || [];
+        const constructorParams = constructorDef.parameters;
+
+        // Step 1: Validate explicit generic arguments if provided
+        if (node.genericArgs && node.genericArgs.length > 0) {
+            // Get the variant declaration to check generic parameter count
+            const variantDecl = constructorType.variantDeclaration;
+            if (!variantDecl || !variantDecl.genericParameters) {
+                // No generic parameters defined but generics provided
+                const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_GENERIC_ARG_COUNT_MISMATCH;
+                accept('error', `Variant constructor '${constructorType.constructorName}' does not take generic arguments`, {
+                    node,
+                    code: errorCode
+                });
+                return;
+            }
+
+            const expectedGenericCount = variantDecl.genericParameters.length;
+            const providedGenericCount = node.genericArgs.length;
+
+            if (providedGenericCount !== expectedGenericCount) {
+                const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_GENERIC_ARG_COUNT_MISMATCH;
+                accept('error', `Variant constructor '${constructorType.constructorName}' expects ${expectedGenericCount} generic argument(s), but got ${providedGenericCount}`, {
+                    node,
+                    code: errorCode
+                });
+                return;
+            }
+
+            // Build substitution map from explicit generic arguments
+            const substitutions = new Map<string, TypeDescription>();
+            variantDecl.genericParameters.forEach((param, i) => {
+                const concreteType = this.typeProvider.getType(node.genericArgs[i]);
+                substitutions.set(param.name, concreteType);
+            });
+
+            // Step 2: Validate explicit generic types against argument types
+            // Apply substitutions to constructor parameters
+            const substitutedParams = constructorParams.map(p => 
+                this.typeUtils.substituteGenerics(p.type, substitutions)
+            );
+
+            // Check argument count
+            if (args.length !== substitutedParams.length) {
+                const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_ARG_COUNT_MISMATCH;
+                accept('error', `Variant constructor '${constructorType.constructorName}' expects ${substitutedParams.length} argument(s), but got ${args.length}`, {
+                    node,
+                    code: errorCode
+                });
+                return;
+            }
+
+            // Check each argument type against substituted parameter type
+            args.forEach((arg, index) => {
+                const expectedType = substitutedParams[index];
+                const actualType = this.typeProvider.getType(arg);
+
+                const compatResult = this.isTypeCompatible(actualType, expectedType);
+                if (!compatResult.success) {
+                    const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_ARG_TYPE_MISMATCH;
+                    const errorMsg = compatResult.message
+                        ? `Variant constructor '${constructorType.constructorName}' argument ${index + 1} type mismatch: ${compatResult.message}`
+                        : `Variant constructor '${constructorType.constructorName}' argument ${index + 1} type mismatch: Expected '${expectedType.toString()}', but got '${actualType.toString()}'`;
+                    accept('error', errorMsg, {
+                        node: arg,
+                        code: errorCode
+                    });
+                }
+            });
+
+            // Additionally, verify that the explicit generics are consistent with inferred types
+            // This catches cases like Option.Some<string>(200u32) where the explicit generic doesn't match
+            const inferredGenerics = this.typeProvider.inferGenericsFromArguments(
+                variantDecl.genericParameters.map(p => p.name),
+                constructorParams.map(p => p.type),
+                args.map(arg => this.typeProvider.getType(arg))
+            );
+
+            // Compare explicit generics with inferred generics
+            variantDecl.genericParameters.forEach((param, i) => {
+                const explicitType = this.typeProvider.getType(node.genericArgs[i]);
+                const inferredType = inferredGenerics.get(param.name);
+
+                // Skip if inferred type is never (couldn't be inferred)
+                if (inferredType && inferredType.kind !== TypeKind.Never) {
+                    const compatResult = this.typeUtils.areTypesEqual(explicitType, inferredType);
+                    if (!compatResult.success) {
+                        const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_GENERIC_ARG_TYPE_MISMATCH;
+                        accept('error', `Variant constructor '${constructorType.constructorName}' generic argument '${param.name}' mismatch: Explicitly specified as '${explicitType.toString()}', but inferred as '${inferredType.toString()}' from arguments`, {
+                            node: node.genericArgs[i],
+                            code: errorCode
+                        });
+                    }
+                }
+            });
+
+            return;
+        }
+
+        // Step 3: No explicit generics - just validate argument count and types
+        // The type provider will infer generics from arguments
+
+        // Check argument count
+        if (args.length !== constructorParams.length) {
+            const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_ARG_COUNT_MISMATCH;
+            accept('error', `Variant constructor '${constructorType.constructorName}' expects ${constructorParams.length} argument(s), but got ${args.length}`, {
+                node,
+                code: errorCode
+            });
+            return;
+        }
+
+        // Check each argument type
+        // Note: We use the original parameter types here (with generic placeholders like T)
+        // because the type provider will perform generic inference during type inference
+        args.forEach((arg, index) => {
+            const expectedType = constructorParams[index].type;
+            const actualType = this.typeProvider.getType(arg);
+
+            // For generic parameters, we can't validate directly - skip validation
+            // The type system will handle generic inference
+            if (isGenericType(expectedType)) {
+                return;
+            }
+
+            const compatResult = this.isTypeCompatible(actualType, expectedType);
+            if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_ARG_TYPE_MISMATCH;
+                const errorMsg = compatResult.message
+                    ? `Variant constructor '${constructorType.constructorName}' argument ${index + 1} type mismatch: ${compatResult.message}`
+                    : `Variant constructor '${constructorType.constructorName}' argument ${index + 1} type mismatch: Expected '${expectedType.toString()}', but got '${actualType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: arg,
+                    code: errorCode
+                });
+            }
+        });
+    }
+
 
     /**
      * Check return statements against function return type.

@@ -1,0 +1,33 @@
+/**
+ * Test variant constructor generic argument validation
+ */
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn main() -> void {
+    // Test explicit generic argument count mismatch
+    // @expectError TCE133: Variant constructor 'Some' expects 1 generic argument(s), but got 2
+    let ok1 = Option.Some<u32, string>(200u32)
+    
+    // @expectError TCE133: Variant constructor 'Ok' expects 2 generic argument(s), but got 1
+    let res1 = Result.Ok<u32>(42u32)
+    
+    // Test explicit generic argument type mismatch
+    // The explicit generic says string, but we're passing u32
+    // @expectError TCE134: Variant constructor 'Some' generic argument 'T' mismatch: Explicitly specified as 'string', but inferred as 'u32' from arguments
+    let ok2 = Option.Some<string>(200u32)
+    
+    // @expectError TCE134: Variant constructor 'Ok' generic argument 'T' mismatch: Explicitly specified as 'string', but inferred as 'u32' from arguments
+    let res2 = Result.Ok<string, never>(42u32)
+    
+    // @expectError TCE134: Variant constructor 'Err' generic argument 'E' mismatch: Explicitly specified as 'u32', but inferred as 'string' from arguments
+    let res3 = Result.Err<never, u32>("error message")
+}

@@ -1,0 +1,73 @@
+// Test variant constructor argument count validation
+// Variant constructors should validate the number of arguments
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Triple<A, B, C> = variant {
+    First(a: A),
+    Second(b: B, c: C),
+    Third(a: A, b: B, c: C)
+}
+
+fn main() -> void {
+    // Test 1: Too many arguments - Some takes 1 argument
+    /// @Error(TCE131): Variant constructor 'Some' expects 1 argument(s)
+    let ok2 = Option.Some(200u32, 1)
+    
+    // Test 2: Too few arguments - Some takes 1 argument  
+    /// @Error(TCE131): Variant constructor 'Some' expects 1 argument(s)
+    let ok3 = Option.Some()
+    
+    /// @Error(TCE132): Variant constructor 'Some' argument 1 type mismatch: u32 is not assignable to string
+    let ok1 = Option.Some<string>(200u32)
+    
+    // Test 4: Too many arguments - None takes 0 arguments
+    /// @Error(TCE131): Variant constructor 'None' expects 0 argument
+    let none1 = Option.None(42)
+    
+    // Test 5: Correct - None takes 0 arguments
+    let none2 = Option.None()
+    
+    // Test 6: Too many arguments - Ok takes 1 argument
+    /// @Error(TCE131): Variant constructor 'Ok' expects 1 argument(s),
+    let result1 = Result.Ok(100, "extra")
+    
+    // Test 7: Too few arguments - Err takes 1 argument
+    /// @Error(TCE131): Variant constructor 'Err' expects 1 argument(s)
+    let result2 = Result.Err()
+    
+    // Test 8: Correct - Ok takes 1 argument
+    let result3 = Result.Ok(100)
+    
+    // Test 9: Correct - Err takes 1 argument
+    let result4 = Result.Err("error")
+    
+    // Test 10: Too many arguments - First takes 1 argument
+    /// @Error(TCE131): Variant constructor 'First' expects 1 argument(s), but got 2
+    let triple1 = Triple.First(1, 2)
+    
+    // Test 11: Too few arguments - Second takes 2 arguments
+    /// @Error(TCE131): Variant constructor 'Second' expects 2 argument(s),
+    let triple2 = Triple.Second(1)
+    
+    // Test 12: Too many arguments - Third takes 3 arguments
+    /// @Error(TCE131): Variant constructor 'Third' expects 3 argument(s), but got 4
+    let triple3 = Triple.Third(1, 2, 3, 4)
+    
+    // Test 13: Correct - First takes 1 argument
+    let triple4 = Triple.First(1)
+    
+    // Test 14: Correct - Second takes 2 arguments
+    let triple5 = Triple.Second(1, "two")
+    
+    // Test 15: Correct - Third takes 3 arguments
+    let triple6 = Triple.Third(1, "two", true)
+}

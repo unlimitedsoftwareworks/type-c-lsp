@@ -70,6 +70,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
+            ReferenceType: this.checkReferenceType,
             UnaryExpression: this.checkExpressionForErrors,
             IndexAccess: this.checkExpressionForErrors,
             ReverseIndexAccess: this.checkExpressionForErrors,
@@ -2140,6 +2141,66 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     }
                 );
             }
+        }
+    }
+
+    /**
+     * Check reference types for generic argument validation.
+     *
+     * Validates:
+     * 1. Generic argument count matches the type declaration's generic parameter count
+     * 2. Non-generic types don't receive generic arguments
+     *
+     * Examples:
+     * ```tc
+     * type Option<T> = variant { Some(T), None }
+     * type Point = struct { x: u32, y: u32 }
+     *
+     * let opt: Option<u32> = ...        // ✅ OK (1 arg, expects 1)
+     * let opt2: Option<u32, string> = ... // ❌ Error (2 args, expects 1)
+     * let opt3: Option = ...             // ✅ OK (0 args allowed for inference)
+     * let pt: Point = ...                // ✅ OK (non-generic, 0 args)
+     * let pt2: Point<u32> = ...          // ❌ Error (non-generic, but given args)
+     * ```
+     */
+    checkReferenceType = (node: ast.ReferenceType, accept: ValidationAcceptor): void => {
+        // Get the referenced type declaration
+        const ref = node.field?.ref;
+        if (!ref || !ast.isTypeDeclaration(ref)) {
+            return; // Not a type declaration, skip
+        }
+        
+        // Get the generic parameters from the type declaration
+        const expectedGenericCount = ref.genericParameters?.length ?? 0;
+        
+        // Get the generic arguments provided in the reference
+        const providedGenericArgs = node.genericArgs ?? [];
+        const providedGenericCount = providedGenericArgs.length;
+
+        // Rule 1: If the type is non-generic (0 expected params), it should not receive generic arguments
+        if (expectedGenericCount === 0 && providedGenericCount > 0) {
+            const errorCode = ErrorCode.TC_NON_GENERIC_TYPE_WITH_ARGS;
+            accept('error',
+                `Type '${ref.name}' does not accept generic arguments`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+
+        // Rule 2: If generic arguments are provided, the count must match exactly
+        // Note: We allow 0 generic args even for generic types (for inference)
+        if (providedGenericCount > 0 && providedGenericCount !== expectedGenericCount) {
+            const errorCode = ErrorCode.TC_GENERIC_ARG_COUNT_MISMATCH;
+            accept('error',
+                `Type '${ref.name}' expects ${expectedGenericCount} generic argument(s), but got ${providedGenericCount}`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
         }
     }
 

@@ -1,0 +1,50 @@
+/**
+ * Test generic reference type validation
+ */
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Pair<A, B> = struct {
+    first: A,
+    second: B
+}
+
+// Non-generic type
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+fn main() -> void {
+    // Test too many generic arguments
+    // @Error(TCE140): Type 'Option' expects 1 generic argument(s), but got 2
+    let opt1: Option<u32, string> = Option.Some(42u32)
+    
+    /// @Error(TCE140): Type 'Pair' expects 2 generic argument(s), but got 3
+    let pair1: Pair<u32, string, bool> = {first: 1u32, second: "hello"}
+    
+    // Test too few generic arguments
+    /// @Error(TCE140): Type 'Result' expects 2 generic argument(s), but got 1
+    let res1: Result<u32> = Result.Ok(42u32)
+    
+    /// @Error(TCE140): Type 'Pair' expects 2 generic argument(s), but got 1
+    let pair2: Pair<u32> = {first: 1u32, second: 2u32}
+    
+    // Test generic arguments on non-generic type
+    /// @Error(TCE141): Type 'Point' does not accept generic arguments
+    let pt1: Point<u32> = {x: 1u32, y: 2u32}
+    
+    // Valid cases (no errors)
+    let opt2: Option<u32> = Option.Some(42u32)
+    let res2: Result<u32, string> = Result.Ok(42u32)
+    let pair3: Pair<u32, string> = {first: 1u32, second: "hello"}
+    let pt2: Point = {x: 1u32, y: 2u32}
+}

@@ -7,10 +7,10 @@ type ServerOk = Option.Some<u32>
 type ServerErr = Option.None<string>
 
 fn main() -> void {
-    let ok: ServerOk<u32> = ServerOk(200u32)
+    let ok: ServerOk = ServerOk(200u32)
     let ok2 = Option.Some(200u32)
 
     ok = ok2
 
-    let err: ServerErr<string> = ServerErr()
+    let err: Option<u32> = Option.Some(1u32)
 }

@@ -21,6 +21,7 @@ import { InfoCode } from "../codes/warnings.js";
  * - Duplicate struct field names in struct type definitions
  * - Duplicate field names in struct construction expressions
  * - Duplicate type declarations within the same scope (Module/Namespace)
+ * - Duplicate variant constructor names within a variant type
  * - Type declarations shadowing imported module names (info-level diagnostic)
  *
  * Examples:
@@ -47,6 +48,9 @@ import { InfoCode } from "../codes/warnings.js";
  * namespace N { type T = u32; type T = f32 }  // ❌ Error - duplicate type 'T'
  * type Point = u32; namespace N { type Point = f32 }  // ✅ OK - different scopes
  *
+ * type Result = variant { Ok, Ok }  // ❌ Error - duplicate constructor 'Ok'
+ * type Result = variant { Ok, Err }  // ✅ OK - unique constructors
+ *
  * from pkg.lib import Stream
  * type Stream = u32  // ℹ️ Info - type shadows imported module 'Stream'
  * ```
@@ -67,7 +71,8 @@ export class DuplicateValidator extends TypeCBaseValidation {
             NamespaceDecl: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope],
             BlockStatement: this.checkVariablesInScope,
             StructType: this.checkStructTypeFields,
-            NamedStructConstructionExpression: this.checkStructConstructionFields
+            NamedStructConstructionExpression: this.checkStructConstructionFields,
+            VariantType: this.checkVariantConstructors
         };
     }
 
@@ -497,6 +502,33 @@ export class DuplicateValidator extends TypeCBaseValidation {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Check for duplicate constructor names in variant type definitions.
+     * Example: type Result = variant { Ok, Ok }
+     */
+    checkVariantConstructors = (node: ast.VariantType, accept: ValidationAcceptor): void => {
+        const seenConstructors = new Map<string, ast.VariantConstructor>();
+
+        for (const constructor of node.constructors) {
+            const constructorName = constructor.name;
+            
+            if (seenConstructors.has(constructorName)) {
+                // Found a duplicate constructor in the variant type definition
+                const errorCode = ErrorCode.TC_DUPLICATE_VARIANT_CONSTRUCTOR;
+                accept('error',
+                    `Duplicate constructor '${constructorName}': Constructor is already defined in this variant type.`,
+                    {
+                        node: constructor,
+                        property: 'name',
+                        code: errorCode
+                    }
+                );
+            } else {
+                seenConstructors.set(constructorName, constructor);
             }
         }
     }

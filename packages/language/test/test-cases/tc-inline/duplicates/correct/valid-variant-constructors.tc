@@ -1,0 +1,37 @@
+// Test valid variant constructor names - should not report errors
+
+// Simple variant with unique constructors
+type Result = variant {
+    Ok,
+    Err
+}
+
+// Variant with parameters
+type Maybe = variant {
+    Some(value: u32),
+    None
+}
+
+// Complex variant with multiple unique constructors
+type Response = variant {
+    Success(data: string),
+    Error(code: u32, message: string),
+    Pending,
+    Timeout,
+    NotFound
+}
+
+// Variant with different parameter types
+type Value = variant {
+    Integer(val: i32),
+    Float(val: f64),
+    String(val: string),
+    Boolean(val: bool),
+    Null
+}
+
+// Generic variant (constructors still must be unique)
+type Option<T> = variant {
+    Some(value: T),
+    None
+}

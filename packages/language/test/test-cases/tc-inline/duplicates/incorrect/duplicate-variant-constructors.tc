@@ -1,0 +1,45 @@
+// Test duplicate variant constructor names - should report errors
+
+// Simple duplicate constructors
+type Result1 = variant {
+    Ok(),
+    /// @Error(TCE089): Duplicate constructor 'Ok'
+    Ok()
+}
+
+// Multiple duplicates
+type Result2 = variant {
+    Success(),
+    Error(),
+    /// @Error(TCE089): Duplicate constructor 'Success'
+    Success(),
+    /// @Error(TCE089): Duplicate constructor 'Error'
+    Error()
+}
+
+// Duplicate with parameters
+type Maybe = variant {
+    Some(value: u32),
+    None(),
+    /// @Error(TCE089): Duplicate constructor 'Some'
+    Some(val: u32)
+}
+
+// Three of the same constructor
+type Triple = variant {
+    Value(),
+    /// @Error(TCE089): Duplicate constructor 'Value'
+    Value(),
+    /// @Error(TCE089): Duplicate constructor 'Value'
+    Value()
+}
+
+// Complex variant with mixed constructors
+type Response = variant {
+    Ok(data: string),
+    Error(code: u32),
+    Pending(),
+    /// @Error(TCE089): Duplicate constructor 'Ok'
+    Ok(result: u32),
+    Timeout()
+}

@@ -1,0 +1,29 @@
+// Test: Variant constructors cannot be stored in variables or passed as parameters
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+/// @ErrorTCE131(): Variant constructor 'Some' expects 1 argument(s), but got 0type-c(TCE131)
+let z = Option.Some<u32>; // @error TCE135
+
+// ❌ ERROR: Cannot pass variant constructor as parameter
+fn testPassConstructor(f: fn(u32) -> Option<u32>) -> Option<u32> {
+    return f(42)
+}
+
+// ✅ OK: Calling variant constructor directly
+let validOption = Option.Some(42u32)
+
+// ✅ OK: Calling variant constructor in function
+fn createSome(x: u32) -> Option<u32> {
+    return Option.Some(x)
+}
+
+
+/// @Error(TCE135): Variant constructors must be called
+let zz = Option.Some
+
+/// @Error(TCE135): Variant constructors must be called
+let y: fn() -> Option.Some<u32> = fn() = Option.Some

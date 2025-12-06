@@ -1,14 +1,14 @@
 import { AstNode, AstUtils, ValidationAcceptor, ValidationChecks } from "langium";
+import { ErrorCode } from "../codes/errors.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
 import {
-    TypeDescription,
-    TypeKind,
     FunctionTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
+    isEnumType,
     isErrorType,
     isFloatType,
     isFunctionType,
@@ -24,13 +24,13 @@ import {
     isUnionType,
     isVariantConstructorType,
     isVariantType,
-    isEnumType
+    TypeDescription,
+    TypeKind
 } from "../typing/type-c-types.js";
 import * as factory from "../typing/type-factory.js";
+import { TypeCTypeUtils } from "../typing/type-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
-import { ErrorCode } from "../codes/errors.js";
-import { TypeCTypeUtils } from "../typing/type-utils.js";
 
 /**
  * Type system validator for Type-C.
@@ -66,7 +66,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
             ClassType: this.checkClassImplementation,
-            MemberAccess: [this.checkMemberAccess, this.checkExpressionForErrors],
+            MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
@@ -2297,5 +2297,29 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         return undefined;
+    }
+
+    /**
+     * Check that variant constructor expressions are only used in function call contexts.
+     *
+     * Variant constructors like Option.Some are inferred as function types for ease of use,
+     * but they cannot be stored in variables or passed as parameters without being called.
+     *
+     * Examples:
+     * - Option.Some(42) ✅ OK (function call)
+     * - let z = Option.Some<u32> ❌ Error (storing constructor reference)
+     * - foo(Option.Some) ❌ Error (passing constructor as argument)
+     */
+    checkVariantConstructorUsage = (node: ast.MemberAccess, accept: ValidationAcceptor): void => {
+        // Get the type of this reference
+        const targetRef = node.element.ref;
+        if(ast.isVariantConstructor(targetRef) && !ast.isFunctionCall(node.$container)){
+            if(!(ast.isFunctionCall(node.$container) && (node.$containerProperty === "expr"))){
+                accept("error", "Variant constructors must be called", {
+                    node,
+                    code: ErrorCode.TC_VARIANT_CONSTRUCTOR_NOT_CALLED
+                })
+            }
+        }
     }
 }

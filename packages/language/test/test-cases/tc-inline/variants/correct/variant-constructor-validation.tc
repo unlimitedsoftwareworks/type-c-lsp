@@ -15,7 +15,7 @@ type Result<T, E> = variant {
 fn main() -> void {
     // Valid calls - inferred generics
     let ok1 = Option.Some(200u32) // OK - T inferred as u32
-    let ok2 = Option.None // OK - no arguments needed
+    let ok2 = Option.None() // OK - no arguments needed
     
     let res1 = Result.Ok(42u32) // OK - T inferred as u32, E as never
     let res2 = Result.Err("error") // OK - T as never, E inferred as string

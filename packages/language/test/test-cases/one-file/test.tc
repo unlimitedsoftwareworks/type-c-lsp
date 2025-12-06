@@ -1,24 +1,9 @@
-// Test cases for variant contextual typing errors
-
-type Result<T, E> = variant {
-    Ok(value: T),
-    Err(error: E)
-}
+// Test: Variant constructors cannot be stored in variables or passed as parameters
 
 type Option<T> = variant {
     Some(value: T),
     None
 }
-// ERROR: Variant in wrong function parameter type
-fn processOption<T>(opt: Option<T>) -> T {
-    return match opt {
-        Option.Some(v) => v,
-        Option.None => throw "No value"
-    }
-}
 
 
-fn test7() {
-    // ERROR: Result is not Option
-    let value = processOption(Result.Ok<u32,string>(42))
-}
+let zz = Option.Some

@@ -1,6 +1,9 @@
 
 type Array<T> = class {
-    let const data: T[]
+    /**
+     * Internal Data Array
+     */
+    let local const data: T[]
 
     fn init(initial: Array<T>){
         let deepCopy = [...initial.data]
@@ -22,14 +25,6 @@ type Array<T> = class {
 
 fn main(){
     let arr: Array<Array<u32> > = new Array<Array<u32> >(new Array<u32>([1u32, 2u32]))
-
-    let v1 = arr[1]
-    let v2 = arr.get(1)
-
-    let vv1 = v1.get(1)
-    let vv2 = v2.get(2)
-
-    if 1 > 2 {
-
-    }
+    let v1 = arr[1] 
+    let z = v1.data
 }

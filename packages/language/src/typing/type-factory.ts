@@ -54,6 +54,7 @@ import {
     MetaEnumTypeDescription,
     MetaClassTypeDescription,
 } from "./type-c-types.js";
+import { serializer } from "./type-serialization.js";
 
 // ============================================================================
 // Primitive Types
@@ -421,10 +422,11 @@ export function createInterfaceType(
         superTypes,
         node,
         toString: () => {
+            const methodsStr = serializer.serializeMethods(methods);
             const superStr = superTypes.length > 0 
                 ? superTypes.map(t => t.toString()).join(', ') + ' ' 
                 : '';
-            return `interface ${superStr}{ ... }`;
+            return `interface ${superStr}{\n${methodsStr}\n}`;
         }
     };
 }
@@ -444,10 +446,13 @@ export function createClassType(
         implementations,
         node,
         toString: () => {
-            const extendsStr = superTypes.length > 0 
-                ? superTypes.map(t => t.toString()).join(', ') + ' ' 
+            const methodHeaders = serializer.serializeMethods(methods)
+            const attrs = serializer.serializeClassAttributes(attributes)
+            const superStr = superTypes.length > 0 
+                ? ("("+superTypes.map(t => t.toString()).join(', ')) + ') ' 
                 : '';
-            return `class ${extendsStr}{ ... }`;
+            return `class ${superStr}{\n${attrs}\n\n${methodHeaders}\n}`;
+
         }
     };
 }

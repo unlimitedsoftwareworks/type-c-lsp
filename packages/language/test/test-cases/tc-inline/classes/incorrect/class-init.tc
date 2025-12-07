@@ -26,7 +26,6 @@ fn main() {
     /// @Error(TCE021): No matching 'init' method found for argument types
     let v1 = new Point<string>(1)  // Should error: no init with 2 params
 
-
     /// @Error(TCE101): Class has no `init` method, therefor `new` cannot accept any arguments
     let c = new C(1,2)
 }

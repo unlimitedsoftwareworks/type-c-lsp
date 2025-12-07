@@ -91,6 +91,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ThisExpression: this.checkExpressionForErrors,
             VariablePattern: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
+            ObjectUpdate: this.checkObjectUpdateFields
         };
     }
 
@@ -2246,7 +2247,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * IMPORTANT: We must trigger type inference first by getting the type of
      * a child variable pattern, which will cause the entire pattern tree to be inferred.
      */
-    checkPatternErrors = (node: AstNode, accept: ValidationAcceptor): void => {
+    checkPatternErrors(node: AstNode, accept: ValidationAcceptor): void {
         
         // Trigger type inference by finding and inferring a child variable pattern
         // This ensures the pattern validation errors are cached before we check them
@@ -2260,7 +2261,96 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 node,
                 code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
             });
-        } else {
+        }
+    }
+
+    checkObjectUpdateFields(node: ast.ObjectUpdate, accept: ValidationAcceptor) {
+        const baseType = this.typeProvider.getType(node.expr);
+        const resolvedType = isReferenceType(baseType) ? this.typeProvider.resolveReference(baseType) : baseType;
+        const structType = this.typeUtils.asStructType(resolvedType);
+
+        const isClass = isClassType(resolvedType);
+
+        if (!isClass && (structType === undefined)) {
+            accept('error', `Object Update Operator ".{}" requires either a struct or a class on the LHS, instead found ${baseType.toString()}`, {
+                node: node.expr,
+                code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+            });
+
+            return;
+        }
+
+        // Check the fields
+        if (isClass) {
+            const attrs = resolvedType.attributes;
+            for (const kvPair of node.pairs) {
+                // Make sure the field exists
+                const candidate = attrs.filter(e => e.name === kvPair.name);
+                if (candidate.length === 0) {
+                    accept('error', `Attribute '${kvPair.name}' not found in ${baseType.toString()}`, {
+                        node: kvPair,
+                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+                    });
+                    continue;
+                }
+
+                const attr = candidate[0];
+                
+                /**
+                 * TODO: Make sure we are not within this class's constructor!
+                 * Because we allow mutations there
+                 */
+                if (attr.isConst) {
+                    accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated`, {
+                        node: kvPair,
+                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+                    });
+                    continue;
+                }
+
+                // Check type compatibility
+                const exprType = this.typeProvider.getType(kvPair.expr);
+                const compatResult = this.isTypeCompatible(exprType, attr.type);
+                
+                if (!compatResult.success) {
+                    const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
+                    const errorMsg = compatResult.message
+                        ? `Object update field '${kvPair.name}' type mismatch: ${compatResult.message}`
+                        : `Object update field '${kvPair.name}' type mismatch: Expected '${attr.type.toString()}', but got '${exprType.toString()}'`;
+                    accept('error', errorMsg, {
+                        node: kvPair.expr,
+                        code: errorCode
+                    });
+                }
+            }
+        } else if (structType) {
+            // Check struct fields
+            for (const kvPair of node.pairs) {
+                // Make sure the field exists
+                const field = structType.fields.find(f => f.name === kvPair.name);
+                if (!field) {
+                    accept('error', `Field '${kvPair.name}' not found in ${baseType.toString()}`, {
+                        node: kvPair,
+                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+                    });
+                    continue;
+                }
+
+                // Check type compatibility
+                const exprType = this.typeProvider.getType(kvPair.expr);
+                const compatResult = this.isTypeCompatible(exprType, field.type);
+                
+                if (!compatResult.success) {
+                    const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
+                    const errorMsg = compatResult.message
+                        ? `Object update field '${kvPair.name}' type mismatch: ${compatResult.message}`
+                        : `Object update field '${kvPair.name}' type mismatch: Expected '${field.type.toString()}', but got '${exprType.toString()}'`;
+                    accept('error', errorMsg, {
+                        node: kvPair.expr,
+                        code: errorCode
+                    });
+                }
+            }
         }
     }
 

@@ -1,0 +1,183 @@
+// Test cases for object update operator (.{}) errors
+
+type Point2D = struct {
+    x: f32,
+    y: f32
+}
+
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+type Vector3 = class {
+    let x: f32
+    let y: f32
+    let z: f32
+    let const magnitude: f32
+    
+    fn init(x: f32, y: f32, z: f32) {
+        this.x = x
+        this.y = y
+        this.z = z
+        this.magnitude = 1.0f
+    }
+}
+
+type Counter = class {
+    let count: u32
+    let const max: u32
+    
+    fn init(max: u32) {
+        this.count = 0u32
+        this.max = max
+    }
+}
+
+// ERROR: Field type mismatch in struct
+fn test1() {
+    let vec = {x: 1.0f, y: 1.0f, z: 1.0f}
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let updated = vec.{x: "string", y: 3.0f}
+}
+
+// ERROR: Multiple field type mismatches
+fn test2() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let wrong = point.{x: "hello", y: "world"}
+}
+
+// ERROR: Field doesn't exist in struct
+fn test3() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    /// @Error(TCE015): Field 'z' not found
+    let invalid = point.{z: 10.0f}
+}
+
+// ERROR: Class attribute type mismatch
+fn test4() {
+    let counter = new Counter(100u32)
+    /// @Error(TCE011): Object update field 'count' type mismatch
+    let wrong = counter.{count: "not a number"}
+}
+
+// ERROR: Attempting to mutate const attribute
+fn test5() {
+    let counter = new Counter(100u32)
+    /// @Error(TCE015): Attribute 'max' is constant and cannot be mutated
+    let invalid = counter.{max: 200u32}
+}
+
+// ERROR: Class attribute doesn't exist
+fn test6() {
+    let vec = new Vector3(1.0f, 2.0f, 3.0f)
+    /// @Error(TCE015): Attribute 'w' not found
+    let invalid = vec.{w: 4.0f}
+}
+
+// ERROR: Using object update on non-struct/non-class
+fn test7() {
+    let num = 42u32
+    /// @Error(TCE015): Object Update Operator ".{}" requires either a struct or a class
+    let invalid = num.{value: 100u32}
+}
+
+// ERROR: Using object update on array
+fn test8() {
+    let arr = [1, 2, 3]
+    /// @Error(TCE015): Object Update Operator ".{}" requires either a struct or a class
+    let invalid = arr.{length: 5u64}
+}
+
+// ERROR: Type mismatch with numeric coercion
+fn test9() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let wrong = point.{x: "42"}
+}
+
+// ERROR: Attempting to update const class attribute with computed value
+fn test10() {
+    let vec = new Vector3(1.0f, 2.0f, 3.0f)
+    /// @Error(TCE015): Attribute 'magnitude' is constant and cannot be mutated
+    let invalid = vec.{magnitude: vec.x + vec.y}
+}
+
+// ERROR: Mixed valid and invalid fields
+fn test11() {
+    let vec = {x: 1.0f, y: 1.0f, z: 1.0f}
+    /// @Error(TCE011): Object update field 'y' type mismatch
+    let mixed = vec.{x: 2.0f, y: "invalid", z: 3.0f}
+}
+
+// ERROR: Field exists but wrong type in class
+fn test12() {
+    let vec = new Vector3(1.0f, 2.0f, 3.0f)
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let wrong = vec.{x: "1", y: 2.0f, z: 3.0f}
+}
+
+// ERROR: Update on string
+fn test13() {
+    let str = "hello"
+    /// @Error(TCE015): Object Update Operator ".{}" requires either a struct or a class
+    let invalid = str.{length: 10u64}
+}
+
+// ERROR: Multiple field updates with multiple errors
+fn test14() {
+    let point: Point3D = {x: 1.0f, y: 2.0f, z: 3.0f}
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let errors = point.{x: true, y: "hello", z: null}
+}
+
+// ERROR: Nested struct update with type mismatch
+type Entity = struct {
+    position: Point2D,
+    velocity: Point2D
+}
+
+fn test15() {
+    let entity: Entity = {
+        position: {x: 0.0f, y: 0.0f},
+        velocity: {x: 1.0f, y: 1.0f}
+    }
+    /// @Error(TCE011): Object update field 'x' type mismatch
+    let moved = entity.{position: entity.position.{x: "invalid"}}
+}
+
+// ERROR: Update field that doesn't exist in join type
+type Drawable = struct {
+    visible: bool,
+    opacity: f32
+}
+
+type Positioned = struct {
+    x: f32,
+    y: f32
+}
+
+fn test16() {
+    let obj: Drawable & Positioned = {
+        visible: true,
+        opacity: 1.0f,
+        x: 10.0f,
+        y: 20.0f
+    }
+    /// @Error(TCE015): Field 'z' not found
+    let invalid = obj.{z: 30.0f}
+}
+
+// ERROR: Type mismatch in join type field update
+fn test17() {
+    let obj: Drawable & Positioned = {
+        visible: true,
+        opacity: 1.0f,
+        x: 10.0f,
+        y: 20.0f
+    }
+    /// @Error(TCE011): Object update field 'opacity' type mismatch
+    let wrong = obj.{opacity: "invalid"}
+}

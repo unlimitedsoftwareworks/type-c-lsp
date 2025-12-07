@@ -707,6 +707,42 @@ export class TypeCTypeProvider {
             }
         }
 
+        // Object update field expression: vec.{x: expr, y: expr}
+        // If the field exists in the base type, use its type as expected type
+        if (parent && ast.isKeyValuePair(parent)) {
+            const objectUpdate = parent.$container;
+            if (objectUpdate && ast.isObjectUpdate(objectUpdate)) {
+                let baseType = this.getType(objectUpdate.expr);
+                
+                // Resolve reference types
+                if (isReferenceType(baseType)) {
+                    baseType = this.resolveReference(baseType);
+                }
+                
+                // Unwrap nullable types
+                if (isNullableType(baseType)) {
+                    baseType = baseType.baseType;
+                }
+                
+                // For classes: get attribute type
+                if (isClassType(baseType)) {
+                    const attribute = baseType.attributes.find(a => a.name === parent.name);
+                    if (attribute) {
+                        return attribute.type;
+                    }
+                }
+                
+                // For structs: get field type
+                const structType = this.typeUtils.asStructType(baseType);
+                if (structType) {
+                    const field = structType.fields.find(f => f.name === parent.name);
+                    if (field) {
+                        return field.type;
+                    }
+                }
+            }
+        }
+
         // No expected type found
         return undefined;
     }
@@ -2545,6 +2581,7 @@ export class TypeCTypeProvider {
         if (ast.isReverseIndexAccess(node)) return this.inferReverseIndexAccess(node);
         if (ast.isReverseIndexSet(node)) return this.inferReverseIndexSet(node);
         if (ast.isPostfixOp(node)) return this.inferPostfixOp(node);
+        if (ast.isObjectUpdate(node)) return this.inferObjectUpdate(node);
 
         // Construction
         if (ast.isArrayConstructionExpression(node)) return this.inferArrayConstruction(node);
@@ -3522,6 +3559,44 @@ export class TypeCTypeProvider {
 
         // Default: preserve the type
         return exprType;
+    }
+
+    /**
+     * Infer the type of an object update expression.
+     *
+     * The object update expression (e.g., `vec.{x: 1, y: 2}`) returns the same type
+     * as the base expression since it updates fields in place and returns the updated object.
+     *
+     * Handles nullable chaining: `obj?.{field: value}` returns the type wrapped in nullable.
+     *
+     * Examples:
+     * - `vec.{x: 1}` where vec is `{x: u32, y: u32}` → `{x: u32, y: u32}`
+     * - `vec?.{x: 1}` where vec is `{x: u32, y: u32}?` → `{x: u32, y: u32}?`
+     */
+    private inferObjectUpdate(node: ast.ObjectUpdate): TypeDescription {
+        let baseType = this.inferExpression(node.expr);
+        
+        // Track if the base is nullable (for optional chaining propagation)
+        let baseIsNullable = false;
+        
+        // If base type is nullable, unwrap it for member lookup
+        if (isNullableType(baseType)) {
+            baseIsNullable = true;
+            baseType = baseType.baseType;
+        }
+        
+        // The result type is the same as the base type
+        // (the expression updates fields and returns the updated object)
+        let resultType = baseType;
+        
+        // Wrap in nullable if:
+        // 1. Current node uses optional chaining (?.)
+        // 2. OR base was nullable (propagate nullability through chain)
+        if (node.isNullable || baseIsNullable) {
+            resultType = factory.createNullableType(resultType, node);
+        }
+        
+        return resultType;
     }
 
     /**

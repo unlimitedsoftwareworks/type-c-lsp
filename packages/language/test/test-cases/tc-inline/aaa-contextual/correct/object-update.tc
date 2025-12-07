@@ -1,0 +1,122 @@
+// Test cases for object update operator (.{})
+
+type Point2D = struct {
+    x: f32,
+    y: f32
+}
+
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+type Vector3 = class {
+    let x: f32
+    let y: f32
+    let z: f32
+    
+    fn init(x: f32, y: f32, z: f32) {
+        this.x = x
+        this.y = y
+        this.z = z
+    }
+}
+
+type Counter = class {
+    let count: u32
+    let const max: u32
+    
+    fn init(max: u32) {
+        this.count = 0u32
+        this.max = max
+    }
+}
+
+// Test 1: Basic struct field update
+fn test1() {
+    let vec = {x: 1.0f, y: 1.0f, z: 1.0f}
+    let updated = vec.{x: 2.0f, y: 3.0f}
+}
+
+// Test 2: Single field update
+fn test2() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let moved = point.{x: 10.0f}
+}
+
+// Test 3: Update all fields
+fn test3() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let replaced = point.{x: 5.0f, y: 6.0f}
+}
+
+// Test 4: Class attribute update (non-const)
+fn test4() {
+    let counter = new Counter(100u32)
+    let incremented = counter.{count: 1u32}
+}
+
+// Test 5: Class with multiple field updates
+fn test5() {
+    let vec = new Vector3(1.0f, 2.0f, 3.0f)
+    let scaled = vec.{x: 2.0f, y: 4.0f, z: 6.0f}
+}
+
+// Test 6: Update in expression
+fn test6() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let distance = point.{x: 3.0f, y: 4.0f}.x
+}
+
+// Test 7: Chained updates
+fn test7() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let result = point.{x: 5.0f}.{y: 10.0f}
+}
+
+// Test 8: Update with computed values
+fn test8() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let doubled = point.{x: point.x * 2.0f, y: point.y * 2.0f}
+}
+
+// Test 9: Update in function return
+fn movePoint(p: Point2D, dx: f32, dy: f32) -> Point2D {
+    return p.{x: p.x + dx, y: p.y + dy}
+}
+
+fn test9() {
+    let point: Point2D = {x: 1.0f, y: 2.0f}
+    let moved = movePoint(point, 5.0f, 10.0f)
+}
+
+// Test 10: Update in array
+fn test10() {
+    let points: Point2D[] = [
+        {x: 1.0f, y: 1.0f},
+        {x: 2.0f, y: 2.0f}
+    ]
+    let shifted = points[0].{x: 10.0f}
+}
+
+// Test 11: Update with contextual typing
+fn test11() {
+    let vec = {x: 1.0f, y: 1.0f, z: 1.0f}
+    // Values are inferred to be f32 from context
+    let updated = vec.{x: 2.0f, y: 3.0f}
+}
+
+// Test 12: Update nested in struct
+type Entity = struct {
+    position: Point2D,
+    velocity: Point2D
+}
+
+fn test12() {
+    let entity: Entity = {
+        position: {x: 0.0f, y: 0.0f},
+        velocity: {x: 1.0f, y: 1.0f}
+    }
+    let moved = entity.{position: entity.position.{x: 10.0f}}
+}

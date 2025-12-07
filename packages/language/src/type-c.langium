@@ -529,7 +529,6 @@ PrimeType infers DataType:
     ImplementationType {infer ImplementationType} |
     FunctionType {infer FunctionType} | 
     CoroutineType {infer CoroutineType} |
-    ReturnType {infer ReturnType} |
     StringEnumType {infer StringEnumType};
 
 ReferenceType:
@@ -594,8 +593,6 @@ FunctionType:
 CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader<true>  '>';
 
-ReturnType:
-    'returnof' LESS_THAN returnType=DataType<false> '>';
 
 StringEnumType:
     cases+=STRING ('|' cases+=STRING)*;
@@ -812,6 +809,14 @@ terminal STRING: /"[^"]*"/;
 
 terminal ID: /(_[a-zA-Z0-9_]+|[a-zA-Z][a-zA-Z0-9_]*)/;
 terminal WILDCARD: '_';
+
+/**
+ * Potential keyword for future
+ */
+terminal ReturnOf: "returnof";
+terminal Partial: "partial";
+terminal ReadOnly: "readonly";
+
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;

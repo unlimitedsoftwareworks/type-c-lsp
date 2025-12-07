@@ -909,7 +909,6 @@ export class TypeCTypeProvider {
         if (ast.isImplementationType(node)) return this.inferImplementationType(node);
         if (ast.isFunctionType(node)) return this.inferFunctionType(node);
         if (ast.isCoroutineType(node)) return this.inferCoroutineType(node);
-        if (ast.isReturnType(node)) return this.inferReturnType(node);
         if (ast.isReferenceType(node)) return this.inferReferenceType(node);
 
         // Declarations
@@ -1443,11 +1442,6 @@ export class TypeCTypeProvider {
             : factory.createVoidType(node);
 
         return factory.createCoroutineType(params, yieldType, node);
-    }
-
-    private inferReturnType(node: ast.ReturnType): TypeDescription {
-        const returnType = this.getType(node.returnType);
-        return factory.createReturnType(returnType, node);
     }
 
     private inferReferenceType(node: ast.ReferenceType): TypeDescription {

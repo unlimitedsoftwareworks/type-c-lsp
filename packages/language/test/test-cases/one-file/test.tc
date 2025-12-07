@@ -1,30 +1,5 @@
-
-type Array<T> = class {
-    /**
-     * Internal Data Array
-     */
-    let local const data: T[]
-
-    fn init(initial: Array<T>){
-        let deepCopy = [...initial.data]
-        this.data = deepCopy
-    }
-
-    fn init(initial: T[]){
-
-    }
-
-    fn init() {
-
-    }
-
-    fn get | [] (i: u64) {
-        return data[i]
-    }
+fn getValue(x: u32[]) {
+    return x[0]
 }
 
-fn main(){
-    let arr: Array<Array<u32> > = new Array<Array<u32> >(new Array<u32>([1u32, 2u32]))
-    let v1 = arr[1] 
-    let z = v1.data
-}
+let z: returnof<getValue> = 1

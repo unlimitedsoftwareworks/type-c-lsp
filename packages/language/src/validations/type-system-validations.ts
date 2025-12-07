@@ -2143,6 +2143,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 );
             }
         }
+
+        // If we have no init method, it is fine as long we have 0 args
+        if((initMethods.length == 0) && (argCount > 0)){
+            accept('error',
+                `Class has no \`init\` method, therefor \`new\` cannot accept any arguments`,
+                {
+                    node,
+                    code: ErrorCode.TC_NEW_EXPRESSION_BAD_ARGS
+                }
+            );
+        }
     }
 
     /**

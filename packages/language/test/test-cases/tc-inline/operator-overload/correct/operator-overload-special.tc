@@ -3,6 +3,8 @@
 type SmartArray<T> = class {
     let data: T[]
 
+    fn init(d: {data: T[]}) {}
+
     // Index access operator: []
     fn [](index: u32) -> T {
         return this.data[index]
@@ -36,6 +38,8 @@ type SmartArray<T> = class {
 
 type Counter = class {
     let value: u32
+
+    fn init(v: {value: u32}){}
 
     // Postfix increment: ++
     fn ++() -> Counter {

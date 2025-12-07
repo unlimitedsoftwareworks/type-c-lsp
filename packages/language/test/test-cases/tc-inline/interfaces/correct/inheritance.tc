@@ -10,6 +10,14 @@ type ActorModel = class Object {
     let name: string
     let age: u32
 
+    fn init(name: string, age: u32) {
+        this.{
+            name: name,
+            age: age
+        }
+
+    }
+
     fn toString() -> string {
         return "ActorModel(name: $name, age: $age)"
     }

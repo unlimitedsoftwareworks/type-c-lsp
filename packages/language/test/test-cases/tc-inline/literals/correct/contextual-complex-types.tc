@@ -16,6 +16,12 @@
 type Point = class {
     let x: f32
     let y: f32
+
+    fn init(x: f32, y: f32){
+        this.{
+            x: x, y: y
+        }
+    }
 }
 
 fn testClassConstructor() {
@@ -27,6 +33,10 @@ fn testClassConstructor() {
 // Test 2: Generic class with contextual typing
 type Box<T> = class {
     let value: T
+
+    fn init(v: T) {
+        value = v
+    }
 }
 
 fn testGenericClass() {
@@ -126,10 +136,14 @@ fn testOption() -> Option<f32> {
 // Test 10: Nested generics with classes and variants
 type Container<T> = class {
     let items: T[]
+
+    fn init(v: T[]) {
+        items = v
+    }
 }
 
 fn testNestedGenerics() -> Container<Option<u32> > {
-    return new Container([
+    return new Container<Option<u32> >([
         Option.Some(1),  // 1 infers as u32
         Option.Some(2),  // 2 infers as u32
         Option.None()

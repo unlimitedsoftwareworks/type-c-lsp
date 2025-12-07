@@ -56,6 +56,10 @@ fn getStruct2() -> {x: u32, y: u32, z: f32} = {1, 2, 3.0}
 type Point<T> = class {
     let x: T
     let y: T
+
+    fn init(x: T, y: T){
+        
+    }
 }
 
 fn getPoint() -> Point<u32> = new Point<u32>(10, 20)  // Arguments infer as u32

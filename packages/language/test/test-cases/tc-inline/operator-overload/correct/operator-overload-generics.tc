@@ -3,6 +3,9 @@
 type Container<T> = class {
     let value: T
 
+    fn init(v: {value: T}){}
+
+
     // Operator overload with generic return type
     fn + (other: Container<T>) -> Container<T> {
         return new Container<T>({ value: this.value })

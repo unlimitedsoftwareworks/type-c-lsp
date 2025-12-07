@@ -34,6 +34,8 @@ type Logger = class {
 type Vec2 = class {
     let x: f64
     let y: f64
+
+    fn init(x: f64, y: f64){}
     
     fn +|add(other: Vec2) -> Vec2 {
         return new Vec2(x + other.x, y + other.y)

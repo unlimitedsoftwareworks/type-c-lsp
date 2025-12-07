@@ -4,6 +4,10 @@ type Vector = class  {
     let x: f32
     let y: f32
 
+    fn init(z){}
+    fn init(x: u32, y: u32){}
+    fn init(p: {x: f32, y: f32}){}
+
     // Binary operators
     fn + (other: Vector) -> Vector {
         return new Vector({ x: this.x + other.x, y: this.y + other.y })

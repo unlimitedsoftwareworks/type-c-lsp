@@ -3002,9 +3002,11 @@ export class TypeCTypeProvider {
      *
      * For non-empty arrays, infers element type by computing common type across all elements.
      * For empty arrays, uses contextual typing from the expected type (if available).
+     * Handles array spread expressions (e.g., `[...arr, 1, 2]`) by extracting element types.
      *
      * Examples:
      * - `[1, 2, 3]` → `i32[]` (inferred from elements)
+     * - `[...arr, 1, 2]` where `arr: u32[]` → `u32[]` (spread contributes u32 elements)
      * - `[Result.Ok(1), Result.Err("error")]` → `Result<i32, string>[]` (unified variant)
      * - `let x: u32[] = []` → `u32[]` (from context)
      * - `let x = []` → ERROR (cannot infer type)
@@ -3027,8 +3029,30 @@ export class TypeCTypeProvider {
             );
         }
 
-        // Infer element types from all elements and find common type
-        const elementTypes = node.values.map(v => this.inferExpression(v.expr));
+        // Infer element types from all elements, handling spread expressions specially
+        const elementTypes = node.values.map(v => {
+            // Check if this is an array spread expression (...arr)
+            if (ast.isArraySpreadExpression(v)) {
+                // Infer the type of the spread expression
+                const spreadType = this.inferExpression(v.expr);
+                
+                // The spread expression should be an array - extract its element type
+                if (isArrayType(spreadType)) {
+                    return spreadType.elementType;
+                }
+                
+                // If not an array, return an error type (will be validated separately)
+                return factory.createErrorType(
+                    `Array spread requires an array type, but got '${spreadType.toString()}'`,
+                    undefined,
+                    v
+                );
+            }
+            
+            // Regular expression element
+            return this.inferExpression(v.expr);
+        });
+        
         const commonType = this.typeUtils.getCommonType(elementTypes);
         
         // If getCommonType returns an error, return it directly instead of wrapping in array

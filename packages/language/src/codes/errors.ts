@@ -117,4 +117,7 @@ export enum ErrorCode {
     // Generic Reference Type Errors (TCE140-TCE149)
     TC_GENERIC_ARG_COUNT_MISMATCH = 'TCE140',
     TC_NON_GENERIC_TYPE_WITH_ARGS = 'TCE141',
+
+    // Array/Spread Errors (TCE150-TCE159)
+    TC_ARRAY_SPREAD_REQUIRES_ARRAY = 'TCE150',
 }

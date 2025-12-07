@@ -1,22 +1,35 @@
 
-fn overloadedFn(a: u32) -> i32 = 1i32
-fn overloadedFn(a: f32) -> f64 = 1.0
+type Array<T> = class {
+    let const data: T[]
 
-fn map<U, V>(xs: U[], f: fn(a: U) -> V) -> V[] {
-    let result: V[] = []
-    result.resize(xs.length)
-    for let i = 0u32; i < xs.length; i++ {
-        result[i] = f(xs[i])
+    fn init(initial: Array<T>){
+        let deepCopy = [...initial.data]
+        this.data = deepCopy
     }
-    return result
+
+    fn init(initial: T[]){
+
+    }
+
+    fn init() {
+
+    }
+
+    fn get | [] (i: u64) {
+        return data[i]
+    }
 }
 
-fn main() {
-    let c: u32[] = [1u32,2u32,3u32]
+fn main(){
+    let arr: Array<Array<u32> > = new Array<Array<u32> >(new Array<u32>([1u32, 2u32]))
 
-    /// @Type(d1): i32[]
-    let d1 = map(c, fn(a: u32) -> i32 = overloadedFn(a))
+    let v1 = arr[1]
+    let v2 = arr.get(1)
 
-    /// @Type(overloadedFn): fn(a: u32) -> i32
-    let d2 = map(c, fn(a: u32) -> i32 = overloadedFn(a))
+    let vv1 = v1.get(1)
+    let vv2 = v2.get(2)
+
+    if 1 > 2 {
+
+    }
 }

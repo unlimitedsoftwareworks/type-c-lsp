@@ -226,9 +226,15 @@ LetInExpression infers Expression:
 AssignmentExpression infers Expression:
     ConditionalExpression (
         {infer BinaryExpression.left = current} 
-        op=('='|'+='|'-='|'*='|'/='|'%='|'&='|'|='|'^='|'<<='|'>>=')
+        op=AssignmentOp
         right=ConditionalExpression
     )*;
+
+AssignmentOp returns string:
+    ('='|'+='|'-='|'*='|'/='|'%='|'&='|'|='|'^='|'<<='|RightShiftAssignOp);
+
+RightShiftAssignOp returns string:
+    '>' '>' '=';
 
 ConditionalExpression infers Expression:
     LogicalExpression |
@@ -269,9 +275,12 @@ BitwiseExpression infers Expression:
 ShiftExpression infers Expression:
     AdditiveExpression (
         {infer BinaryExpression.left = current}
-        op=('<<' | '>>')
+        op=('<<' | RightShiftOp)
         right=AdditiveExpression
     )*;
+
+RightShiftOp returns string:
+    '>>';
 
 AdditiveExpression infers Expression:
     MultiplicativeExpression (
@@ -669,25 +678,8 @@ MethodOperatorName returns string:
     '[' ']' '=' | 
     '[' '-' ']' '=' | 
     '(' ')' | 
-    '+' | 
-    '-' | 
-    '*' | 
-    '/' | 
-    '%' | 
-    '>' | 
-    LESS_THAN | 
     '>=' | 
-    LESS_THAN '=' | 
     '<<' | 
-    '>' '>' | 
-    '&' | 
-    '|' | 
-    '^' | 
-    '&&' | 
-    '||' | 
-    '-' | 
-    '!' | 
-    '~' | 
     '++' | 
     '--';
 

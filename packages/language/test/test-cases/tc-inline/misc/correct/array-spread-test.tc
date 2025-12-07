@@ -1,0 +1,6 @@
+fn main() {
+    let arr1: u32[] = [1, 2, 3]
+    
+    /// @Type(arr2): u32[]
+    let arr2 = [...arr1]
+}

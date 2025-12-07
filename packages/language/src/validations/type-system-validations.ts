@@ -81,6 +81,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             DoExpression: this.checkExpressionForErrors,
             TypeCastExpression: this.checkExpressionForErrors,
             ArrayConstructionExpression: this.checkExpressionForErrors,
+            ArraySpreadExpression: this.checkArraySpreadExpression,
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
             TupleExpression: this.checkExpressionForErrors,
             QualifiedReference: this.checkExpressionForErrors,
@@ -1954,6 +1955,47 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Check array spread expression to ensure it's spreading an array type.
+     *
+     * Rules:
+     * 1. The expression being spread must be an array type
+     * 2. Cannot spread non-array types like primitives, structs, etc.
+     *
+     * Examples:
+     * ```tc
+     * let arr: u32[] = [1, 2, 3]
+     * let arr2 = [...arr, 4, 5]          // ✅ OK - spreading array
+     * let x = 10
+     * let bad = [...x, 1, 2]             // ❌ Error - spreading non-array
+     * ```
+     */
+    checkArraySpreadExpression = (node: ast.ArraySpreadExpression, accept: ValidationAcceptor): void => {
+        // Get the type of the expression being spread
+        const spreadType = this.typeProvider.getType(node.expr);
+        
+        // Resolve reference types
+        let resolvedType = spreadType;
+        if (isReferenceType(spreadType)) {
+            const resolved = this.typeProvider.resolveReference(spreadType);
+            if (resolved) {
+                resolvedType = resolved;
+            }
+        }
+        
+        // Check if it's an array type
+        if (!isArrayType(resolvedType)) {
+            const errorCode = ErrorCode.TC_ARRAY_SPREAD_REQUIRES_ARRAY;
+            accept('error',
+                `Array spread requires an array type, but got '${resolvedType.toString()}'. Only arrays can be spread in array literals.`,
+                {
+                    node: node.expr,
+                    code: errorCode
+                }
+            );
         }
     }
 

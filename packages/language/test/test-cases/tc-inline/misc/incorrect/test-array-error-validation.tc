@@ -25,4 +25,9 @@ fn test3() {
     // Empty array without type annotation should show error
     /// @Error(TCE120): Cannot infer type of empty array literal
     let arr = []
+
+    let v = {x: 1, y: 2}
+    
+    /// @Error(TCE150): Array spread requires an array type
+    let arr1: u32[] = [1, 2, ...v]
 }

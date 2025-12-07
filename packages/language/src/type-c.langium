@@ -595,7 +595,7 @@ CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader<true>  '>';
 
 ReturnType:
-    'ReturnType' LESS_THAN returnType=DataType<false> '>';
+    'returnof' LESS_THAN returnType=DataType<false> '>';
 
 StringEnumType:
     cases+=STRING ('|' cases+=STRING)*;
@@ -683,13 +683,6 @@ MethodOperatorName returns string:
     '++' | 
     '--';
 
-
-/*
-// for simplicity, we only support simple references for now
-ReferenceExpr:
-    value=ID;
-*/
-
 // First define what can be referenced
 type IdentifiableReference =
     FunctionDeclaration |
@@ -757,23 +750,11 @@ StructPatternField:
 TypePattern:
     TypeInstancePattern ('(' (params+=MatchCasePattern (',' params+=MatchCasePattern)*)? ')')?;
 
-//AnonymousVariantPattern:
-    // ignores the base! ::Ok(v)
-    // useful when we know the base! 
-    //match response 
-    //  { ::Ok(v) => v,  ::Error(e) => e, _ => unreachable }
-    // where response is a variant type
-    // TODO: maybe remove the `::` prefix?
- //   '::' base=[VariantConstructor:ID] '(' params+=MatchCasePattern (',' params+=MatchCasePattern)* ')';
-
 TypeInstancePattern:
     type=DataType<false>;
 
-
-
 WildCardPattern:
     {infer WildcardPattern} WILDCARD;
-
 
 /**
  * Builtins are definitions used to resolve symbols such as array.length and such.
@@ -831,7 +812,6 @@ terminal STRING: /"[^"]*"/;
 
 terminal ID: /(_[a-zA-Z0-9_]+|[a-zA-Z][a-zA-Z0-9_]*)/;
 terminal WILDCARD: '_';
-terminal UPPERCASE_ID: /[A-Z][a-zA-Z0-9_]*[?!]?/;
 
 hidden terminal ML_COMMENT: /\/\*[\s\S]*?\*\//;
 hidden terminal SL_COMMENT: /\/\/[^\n\r]*/;

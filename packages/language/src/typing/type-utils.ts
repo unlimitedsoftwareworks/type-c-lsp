@@ -9,7 +9,8 @@
  * - Type simplification and normalization
  */
 
-import { AstNode } from "langium";
+import { AstNode, AstUtils } from "langium";
+import * as ast from '../generated/ast.js';
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
@@ -24,6 +25,7 @@ import {
     MethodType,
     NullableTypeDescription,
     ReferenceTypeDescription,
+    StructFieldType,
     StructTypeDescription,
     TupleTypeDescription,
     TypeDescription,
@@ -1756,6 +1758,639 @@ export class TypeCTypeUtils {
 
         // Default: return the target type
         return narrowTo;
+    }
+
+    // ============================================================================
+    // Common Type Inference
+    // ============================================================================
+
+    /**
+     * Find the common type of multiple types.
+     *
+     * Used for:
+     * - Return type inference (all return statements)
+     * - Array literal inference (all elements)
+     * - Match expression inference (all arms)
+     *
+     * Strategy:
+     * 1. If all types are identical → use that type
+     * 2. If all are structs → find common fields (structural subtyping)
+     * 3. If types are compatible via coercion → use the wider type (TODO)
+     * 4. Otherwise → error type
+     */
+    getCommonType(types: TypeDescription[]): TypeDescription {
+        if (types.length === 0) {
+            return factory.createVoidType();
+        }
+
+        if (types.length === 1) {
+            return types[0];
+        }
+
+        // Filter out never types first - they're the bottom type and assignable to everything
+        // This allows branches like `throw "error"` (never) to unify with other branches
+        const nonNeverTypes = types.filter(t => t.kind !== TypeKind.Never);
+        
+        // If all types are never, return never
+        if (nonNeverTypes.length === 0) {
+            return factory.createNeverType();
+        }
+        
+        // If we filtered out some never types and only one type remains, return it
+        if (nonNeverTypes.length === 1) {
+            return nonNeverTypes[0];
+        }
+        
+        // Continue with non-never types
+        types = nonNeverTypes;
+
+        // Separate null types from non-null types
+        const nullTypes = types.filter(t => t.kind === TypeKind.Null);
+        const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
+
+        // If all types are null, return null
+        if (nonNullTypes.length === 0) {
+            return factory.createNullType();
+        }
+
+        // Find common type of non-null types
+        let commonType: TypeDescription;
+
+        if (nonNullTypes.length === 1) {
+            commonType = nonNullTypes[0];
+        } else {
+            // CRITICAL FIX: Handle arrays specially to recursively find common element types
+            // This allows u32?[] and u32[] to unify to u32?[]
+            const allArrays = nonNullTypes.every(t => isArrayType(t));
+            if (allArrays) {
+                const arrayTypes = nonNullTypes.filter(isArrayType);
+                const elementTypes = arrayTypes.map(a => a.elementType);
+                const commonElementType = this.getCommonType(elementTypes);
+                
+                if (isErrorType(commonElementType)) {
+                    return commonElementType;
+                }
+                
+                commonType = factory.createArrayType(commonElementType, types[0].node);
+            }
+            // CRITICAL FIX: Handle tuples specially to recursively find common element types
+            // This allows tuples with different element types at each position to unify
+            // Example: (u32, f32) and (u32, f32) unify to (u32, f32)
+            // Example: (Result.Ok<u32, never>, f32) and (Result.Err<never, string>, f32) unify to (Result<u32, string>, f32)
+            else if (nonNullTypes.every(t => isTupleType(t))) {
+                const tupleTypes = nonNullTypes.filter(isTupleType);
+                
+                // All tuples must have the same arity (number of elements)
+                const firstTuple = tupleTypes[0];
+                const allSameArity = tupleTypes.every(t => t.elementTypes.length === firstTuple.elementTypes.length);
+                
+                if (!allSameArity) {
+                    return factory.createErrorType(
+                        `Cannot infer common type: tuples have different arities: ${types.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        types[0].node
+                    );
+                }
+                
+                // Find common type for each position
+                const commonElementTypes: TypeDescription[] = [];
+                for (let i = 0; i < firstTuple.elementTypes.length; i++) {
+                    const typesAtPosition = tupleTypes.map(t => t.elementTypes[i]);
+                    const commonTypeAtPosition = this.getCommonType(typesAtPosition);
+                    
+                    if (isErrorType(commonTypeAtPosition)) {
+                        return factory.createErrorType(
+                            `Cannot infer common type: tuple element at position ${i + 1} has incompatible types: ${typesAtPosition.map(t => t.toString()).join(', ')}`,
+                            undefined,
+                            types[0].node
+                        );
+                    }
+                    
+                    commonElementTypes.push(commonTypeAtPosition);
+                }
+                
+                commonType = factory.createTupleType(commonElementTypes, types[0].node);
+            }
+            // Handle function types by recursively finding common return type
+            // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify
+            else if (nonNullTypes.every(t => isFunctionType(t))) {
+                const functionTypes = nonNullTypes.filter(isFunctionType);
+                
+                // Check if all functions have the same signature (parameter count and types)
+                const firstFunc = functionTypes[0];
+                const allSameSignature = functionTypes.every(fn => {
+                    if (fn.parameters.length !== firstFunc.parameters.length) return false;
+                    return fn.parameters.every((param, i) =>
+                        this.areTypesEqual(param.type, firstFunc.parameters[i].type).success
+                    );
+                });
+                
+                if (allSameSignature) {
+                    // Unify return types
+                    const returnTypes = functionTypes.map(fn => fn.returnType);
+                    const commonReturnType = this.getCommonType(returnTypes);
+                    
+                    if (isErrorType(commonReturnType)) {
+                        return commonReturnType;
+                    }
+                    
+                    // Create function type with unified return type
+                    commonType = factory.createFunctionType(
+                        firstFunc.parameters,
+                        commonReturnType,
+                        firstFunc.fnType,
+                        firstFunc.genericParameters,
+                        types[0].node
+                    );
+                } else {
+                    // Different signatures - can't unify
+                    return factory.createErrorType(
+                        `Cannot infer common type: function signatures differ`,
+                        undefined,
+                        types[0].node
+                    );
+                }
+            }
+            // CRITICAL FIX: Check if types differ only in nullability
+            // This allows u32? and u32 to unify to u32?
+            else {
+                // Unwrap any nullable types and check if base types are identical
+                const unwrappedTypes = nonNullTypes.map(t => ({
+                    original: t,
+                    base: isNullableType(t) ? t.baseType : t,
+                    wasNullable: isNullableType(t)
+                }));
+
+                const firstBase = unwrappedTypes[0].base;
+                const allBasesIdentical = unwrappedTypes.every(item =>
+                    this.areTypesEqual(item.base, firstBase).success
+                );
+
+                if (allBasesIdentical) {
+                    // All types have the same base type, possibly with different nullability
+                    commonType = firstBase;
+                    
+                    // If any were nullable, make the result nullable
+                    if (unwrappedTypes.some(item => item.wasNullable)) {
+                        commonType = factory.createNullableType(commonType, types[0].node);
+                    }
+                } else {
+                    // Check if all non-null types are identical
+                    const firstType = nonNullTypes[0];
+                    const allIdentical = nonNullTypes.every(t => this.areTypesEqual(t, firstType).success);
+
+                    if (allIdentical) {
+                        commonType = firstType;
+                    } else {
+                        // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
+                        const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
+                        if (structTypes.length === nonNullTypes.length) {
+                            // All types are structs or resolve to structs
+                            commonType = this.getCommonStructType(structTypes);
+                            // Check if getCommonStructType returned an error
+                            if (isErrorType(commonType)) {
+                                return commonType;
+                            }
+                        } else {
+                            // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
+                            // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
+                            const allReferences = nonNullTypes.every(t => isReferenceType(t));
+                            if (allReferences) {
+                                const referenceTypes = nonNullTypes.filter(isReferenceType);
+                                const firstDecl = referenceTypes[0].declaration;
+
+                                // Check if all references point to the same declaration
+                                const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
+                                if (allSameDecl) {
+                                    // Unify generic arguments across all references
+                                    commonType = this.getCommonReferenceType(referenceTypes);
+                                    // Check if getCommonReferenceType returned an error
+                                    if (isErrorType(commonType)) {
+                                        return commonType;
+                                    }
+                                } else {
+                                    // Different declarations - can't find common type
+                                    return factory.createErrorType(
+                                        `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                        undefined,
+                                        firstType.node
+                                    );
+                                }
+                            } else {
+                                // Check if all are variant constructors - unify generic arguments
+                                const allVariantConstructors = nonNullTypes.every(t => isVariantConstructorType(t));
+                                if (allVariantConstructors) {
+                                    commonType = this.getCommonVariantConstructorType(nonNullTypes.filter(isVariantConstructorType));
+                                    // Check if getCommonVariantConstructorType returned an error
+                                    if (isErrorType(commonType)) {
+                                        return commonType;
+                                    }
+                                } else {
+                                    // Check for MIXED case: ReferenceTypes and VariantConstructorTypes to the same variant
+                                    // Example: Result<U, E> and Result.Err<never, E> should unify to Result<U, E>
+                                    const hasReferences = nonNullTypes.some(t => isReferenceType(t));
+                                    const hasConstructors = nonNullTypes.some(t => isVariantConstructorType(t));
+                                    
+                                    if (hasReferences && hasConstructors) {
+                                        // Try to unify mixed references and constructors
+                                        const unified = this.getCommonMixedVariantTypes(nonNullTypes);
+                                        if (!isErrorType(unified)) {
+                                            commonType = unified;
+                                        } else {
+                                            return unified;
+                                        }
+                                    } else {
+                                        // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
+                                        // For now, if types differ, it's an error
+                                        return factory.createErrorType(
+                                            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                            undefined,
+                                            firstType.node
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we had any nulls, wrap the common type in Nullable (but only once)
+        if (nullTypes.length > 0) {
+            // Don't double-wrap if commonType is already nullable
+            if (isNullableType(commonType)) {
+                return commonType;
+            }
+            return factory.createNullableType(commonType, types[0].node);
+        }
+
+        return commonType;
+    }
+
+    /**
+     * Find the common type for references to the same declaration with different generic arguments.
+     *
+     * This handles arrays like:
+     * ```
+     * [Result.Ok(1), Result.Err("error")]
+     * → [Result<i32, never>, Result<never, string>]
+     * → Result<i32, string>[]
+     * ```
+     *
+     * Strategy:
+     * - For each generic parameter position, collect all types
+     * - Replace `never` with concrete types from other elements
+     * - All concrete types in a position must be identical
+     */
+    private getCommonReferenceType(types: TypeDescription[]): TypeDescription {
+        // We know all types are ReferenceType from the caller
+        const referenceTypes = types.filter(isReferenceType);
+        if (referenceTypes.length === 0) {
+            return factory.createErrorType('Expected reference types', undefined, types[0].node);
+        }
+        
+        const firstRef = referenceTypes[0];
+        const declaration = firstRef.declaration;
+        const numGenericParams = firstRef.genericArgs.length;
+
+        // If no generic parameters, all types are identical
+        if (numGenericParams === 0) {
+            return firstRef;
+        }
+
+        // Unify generic arguments across all references
+        const unifiedGenericArgs: TypeDescription[] = [];
+
+        for (let i = 0; i < numGenericParams; i++) {
+            // Collect all types at this position
+            const typesAtPosition = referenceTypes.map(ref => ref.genericArgs[i]);
+
+            // Filter out never types
+            const concreteTypes = typesAtPosition.filter(t => t.kind !== TypeKind.Never);
+
+            if (concreteTypes.length === 0) {
+                // All are never - keep never
+                unifiedGenericArgs.push(factory.createNeverType());
+            } else {
+                // Check if all concrete types are identical
+                const firstConcreteType = concreteTypes[0];
+                const allIdentical = concreteTypes.every(t => this.areTypesEqual(t, firstConcreteType).success);
+
+                if (allIdentical) {
+                    // All concrete types match - use that type
+                    unifiedGenericArgs.push(firstConcreteType);
+                } else {
+                    // Multiple different concrete types - error
+                    return factory.createErrorType(
+                        `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        firstRef.node
+                    );
+                }
+            }
+        }
+
+        // Create a reference to the same declaration with unified generic arguments
+        return factory.createReferenceType(declaration, unifiedGenericArgs, firstRef.node);
+    }
+
+    /**
+     * Find the common struct type (intersection of fields).
+     *
+     * Type-C uses structural subtyping for structs:
+     * - `{x: u32, y: u32, z: u32}` is compatible with `{x: u32, y: u32}`
+     * - Common fields must have EXACT matching types (u32 ≠ u64)
+     *
+     * Example:
+     * ```
+     * {x: 1u32, y: 2u32}         // struct { x: u32, y: u32 }
+     * {x: 3u32, y: 4u32, z: 5u32} // struct { x: u32, y: u32, z: u32 }
+     * → struct { x: u32, y: u32 }  // Common fields only
+     * ```
+     */
+    private getCommonStructType(types: TypeDescription[]): TypeDescription {
+        const structTypes = types.filter(isStructType);
+
+        // Get all field names from each struct
+        const allFieldSets = structTypes.map(st => {
+            const fields = new Map<string, TypeDescription>();
+            if (st.fields) {
+                for (const field of st.fields) {
+                    fields.set(field.name, field.type);
+                }
+            }
+            return fields;
+        });
+
+        // Find common field names (intersection)
+        const firstFieldSet = allFieldSets[0];
+        const commonFieldNames = new Set<string>();
+
+        for (const fieldName of firstFieldSet.keys()) {
+            const isPresentInAll = allFieldSets.every(fieldSet => fieldSet.has(fieldName));
+            if (isPresentInAll) {
+                commonFieldNames.add(fieldName);
+            }
+        }
+
+        if (commonFieldNames.size === 0) {
+            return factory.createErrorType(
+                `Cannot infer common struct type: no common fields found`,
+                undefined,
+                types[0].node
+            );
+        }
+
+        // Find common type for each field (allows unification of variant constructors, etc.)
+        const commonFields: StructFieldType[] = [];
+
+        for (const fieldName of commonFieldNames) {
+            // Collect all types for this field across all structs
+            const fieldTypes = allFieldSets.map(fieldSet => fieldSet.get(fieldName)!);
+            
+            // Find common type (this handles variant constructor unification, etc.)
+            const commonFieldType = this.getCommonType(fieldTypes);
+            
+            if (isErrorType(commonFieldType)) {
+                // Enhance error message with field context
+                return factory.createErrorType(
+                    `Cannot infer common struct type: field '${fieldName}' has incompatible types: ${fieldTypes.map(t => t.toString()).join(', ')}`,
+                    undefined,
+                    types[0].node
+                );
+            }
+
+            commonFields.push({
+                name: fieldName,
+                type: commonFieldType,
+                node: commonFieldType.node || fieldTypes[0].node!
+            });
+        }
+
+        // Create the common struct type (not anonymous - show 'struct' keyword)
+        return factory.createStructType(commonFields, false, types[0].node);
+    }
+
+    /**
+     * Find the common type for variant constructors by unifying their generic arguments.
+     *
+     * Type-C allows variant constructors to be subtypes of their base variant:
+     * - `Result.Ok<i32, never>` is a subtype of `Result<i32, E>` for any E
+     * - `Result.Err<never, string>` is a subtype of `Result<T, string>` for any T
+     *
+     * When constructors are in an array, we unify their generic arguments:
+     * - `never` is replaced by concrete types from other constructors
+     * - All concrete types in a position must be identical or one must be never
+     *
+     * Example:
+     * ```
+     * [Result.Ok(1), Result.Err("error")]
+     * → [Result<i32, never>.Ok, Result<never, string>.Err]
+     * → Result<i32, string>[]
+     * ```
+     */
+    private getCommonVariantConstructorType(types: VariantConstructorTypeDescription[]): TypeDescription {
+        const firstConstructor = types[0];
+
+        // Extract base variant declaration (prefer variantDeclaration field)
+        let baseVariantDecl: ast.TypeDeclaration | undefined = firstConstructor.variantDeclaration;
+
+        // Fallback to extracting from baseVariant.node if declaration not available
+        if (!baseVariantDecl) {
+            const variantAstNode = firstConstructor.baseVariant.node;
+            if (variantAstNode && ast.isVariantType(variantAstNode)) {
+                baseVariantDecl = AstUtils.getContainerOfType(variantAstNode, ast.isTypeDeclaration);
+            }
+        }
+
+        if (!baseVariantDecl) {
+            return factory.createErrorType(
+                'Cannot infer common type: variant constructor has no base variant declaration',
+                undefined,
+                firstConstructor.node
+            );
+        }
+
+        // Check that all constructors belong to the same base variant
+        const allSameBase = types.every(constructor => {
+            // Prefer variantDeclaration field for comparison
+            const constructorDecl = constructor.variantDeclaration;
+            if (constructorDecl) {
+                return constructorDecl === baseVariantDecl;
+            }
+            // Fallback to node comparison
+            const constructorVariantNode = constructor.baseVariant.node;
+            if (constructorVariantNode && ast.isVariantType(constructorVariantNode)) {
+                const decl = AstUtils.getContainerOfType(constructorVariantNode, ast.isTypeDeclaration);
+                return decl === baseVariantDecl;
+            }
+            return false;
+        });
+
+        if (!allSameBase) {
+            return factory.createErrorType(
+                `Cannot infer common type: variant constructors from different variants: ${types.map(t => t.toString()).join(', ')}`,
+                undefined,
+                firstConstructor.node
+            );
+        }
+
+        // Unify generic arguments across all constructors
+        // For each generic parameter position, collect all types and merge
+        const numGenericParams = firstConstructor.genericArgs.length;
+        const unifiedGenericArgs: TypeDescription[] = [];
+
+        for (let i = 0; i < numGenericParams; i++) {
+            // Collect all types at this position
+            const typesAtPosition = types.map(constructor => constructor.genericArgs[i]);
+
+            // Filter out never types
+            const concreteTypes = typesAtPosition.filter(t => t.kind !== TypeKind.Never);
+
+            if (concreteTypes.length === 0) {
+                // All are never - keep never
+                unifiedGenericArgs.push(factory.createNeverType());
+            } else {
+                // Check if all concrete types are identical
+                const firstConcreteType = concreteTypes[0];
+                const allIdentical = concreteTypes.every(t => this.areTypesEqual(t, firstConcreteType).success);
+
+                if (allIdentical) {
+                    // All concrete types match - use that type
+                    unifiedGenericArgs.push(firstConcreteType);
+                } else {
+                    // Multiple different concrete types - error
+                    return factory.createErrorType(
+                        `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        firstConstructor.node
+                    );
+                }
+            }
+        }
+
+        // Create a reference to the base variant with unified generic arguments
+        return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, firstConstructor.node);
+    }
+
+    /**
+     * Find the common type for a mix of ReferenceTypes and VariantConstructorTypes to the same variant.
+     *
+     * This handles cases like:
+     * ```
+     * match r: Result<T, E> {
+     *     Result.Ok(v) => f(v),        // Returns Result<U, E>
+     *     Result.Err(e) => Result.Err(e) // Returns Result.Err<never, E>
+     * }
+     * → Result<U, E>
+     * ```
+     *
+     * Strategy:
+     * - Convert all VariantConstructorTypes to their base variant references
+     * - Unify generic arguments across all types (references and constructors)
+     * - Return a ReferenceType with unified generics
+     */
+    private getCommonMixedVariantTypes(types: TypeDescription[]): TypeDescription {
+        // Extract base variant declaration - try to find it from any type
+        let baseVariantDecl: ast.TypeDeclaration | undefined;
+        
+        // First try to find from ReferenceTypes
+        for (const type of types) {
+            if (isReferenceType(type)) {
+                baseVariantDecl = type.declaration;
+                break;
+            }
+        }
+        
+        // If not found, try VariantConstructorTypes
+        if (!baseVariantDecl) {
+            for (const type of types) {
+                if (isVariantConstructorType(type)) {
+                    baseVariantDecl = type.variantDeclaration;
+                    break;
+                }
+            }
+        }
+        
+        if (!baseVariantDecl) {
+            return factory.createErrorType(
+                'Cannot infer common type: no base variant declaration found',
+                undefined,
+                types[0].node
+            );
+        }
+        
+        // Check that all types belong to the same base variant
+        const allSameBase = types.every(type => {
+            if (isReferenceType(type)) {
+                return type.declaration === baseVariantDecl;
+            }
+            if (isVariantConstructorType(type)) {
+                return type.variantDeclaration === baseVariantDecl;
+            }
+            return false;
+        });
+        
+        if (!allSameBase) {
+            return factory.createErrorType(
+                `Cannot infer common type: types belong to different variants`,
+                undefined,
+                types[0].node
+            );
+        }
+        
+        // Extract generic arguments from each type
+        // For ReferenceType: use genericArgs directly
+        // For VariantConstructorType: use genericArgs (they represent the same thing)
+        const allGenericArgs = types.map(type => {
+            if (isReferenceType(type)) {
+                return [...type.genericArgs]; // Create mutable copy
+            }
+            if (isVariantConstructorType(type)) {
+                return [...type.genericArgs]; // Create mutable copy
+            }
+            const emptyArray: TypeDescription[] = [];
+            return emptyArray;
+        });
+        
+        // Determine number of generic parameters
+        const numGenericParams = allGenericArgs[0]?.length ?? 0;
+        
+        // Unify generic arguments across all types
+        const unifiedGenericArgs: TypeDescription[] = [];
+        
+        for (let i = 0; i < numGenericParams; i++) {
+            // Collect all types at this position
+            const typesAtPosition = allGenericArgs.map(args => args[i]).filter(Boolean);
+            
+            // Filter out never types
+            const concreteTypes = typesAtPosition.filter(t => t.kind !== TypeKind.Never);
+            
+            if (concreteTypes.length === 0) {
+                // All are never - keep never
+                unifiedGenericArgs.push(factory.createNeverType());
+            } else {
+                // Check if all concrete types are identical
+                const firstConcreteType = concreteTypes[0];
+                const allIdentical = concreteTypes.every(t => this.areTypesEqual(t, firstConcreteType).success);
+                
+                if (allIdentical) {
+                    // All concrete types match - use that type
+                    unifiedGenericArgs.push(firstConcreteType);
+                } else {
+                    // Multiple different concrete types - error
+                    return factory.createErrorType(
+                        `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        types[0].node
+                    );
+                }
+            }
+        }
+        
+        // Create a reference to the base variant with unified generic arguments
+        return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, types[0].node);
     }
 }
 

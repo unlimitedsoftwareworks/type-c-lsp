@@ -28,5 +28,8 @@ fn main() {
 
     /// @Error(TCE101): Class has no `init` method, therefor `new` cannot accept any arguments
     let c = new C(1,2)
+
+    /// @Error(TCE102): Generic class 'Point' requires 1 generic argument(s)
+    let v2 = new Point(1)
 }
 

@@ -1075,7 +1075,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Find common type
-        return this.typeProvider.getCommonType(returnTypes);
+        return this.typeUtils.getCommonType(returnTypes);
     }
 
     /**
@@ -1138,7 +1138,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Find common type
-        return this.typeProvider.getCommonType(yieldTypes);
+        return this.typeUtils.getCommonType(yieldTypes);
     }
 
     /**
@@ -1963,6 +1963,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Rules:
      * 1. `new` can only be used with class types
      * 2. Cannot use `new` with interfaces, structs, primitives, or other types
+     * 3. Generic classes must have explicit generic arguments provided
      *
      * Examples:
      * ```tc
@@ -1972,6 +1973,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * let s = new {x: u32}()                // ❌ Error - cannot instantiate struct type
      * interface I { fn foo() }
      * let i = new I()                       // ❌ Error - cannot instantiate interface
+     *
+     * class Box<T> { let value: T }
+     * let b = new Box<u32>(42)              // ✅ OK - explicit generic
+     * let c = new Box(42)                   // ❌ Error - missing generic arguments
      * ```
      */
     checkNewExpression = (node: ast.NewExpression, accept: ValidationAcceptor): void => {
@@ -2005,6 +2010,30 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 }
             );
             return;
+        }
+
+        // Check if the reference type requires generic arguments
+        // Similar to variant constructors, generic classes must have explicit generics in `new` expressions
+        if (ast.isReferenceType(node.instanceType)) {
+            const ref = node.instanceType.field?.ref;
+            if (ref && ast.isTypeDeclaration(ref)) {
+                const expectedGenericCount = ref.genericParameters?.length ?? 0;
+                const providedGenericArgs = node.instanceType.genericArgs ?? [];
+                const providedGenericCount = providedGenericArgs.length;
+
+                // If the class is generic but no generic arguments provided, report error
+                if (expectedGenericCount > 0 && providedGenericCount === 0) {
+                    const errorCode = ErrorCode.TC_NEW_EXPRESSION_REQUIRES_GENERIC_ARGS;
+                    accept('error',
+                        `Generic class '${ref.name}' requires ${expectedGenericCount} generic argument(s) in 'new' expression. Example: new ${ref.name}<T>(...)`,
+                        {
+                            node: node.instanceType,
+                            code: errorCode
+                        }
+                    );
+                    return;
+                }
+            }
         }
 
         // Extract the actual class type (handle MetaClassType wrapper)

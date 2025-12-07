@@ -586,7 +586,7 @@ CoroutineType:
     'coroutine' GENERICS_OPEN ('fn' | 'cfn') header=FnHeader<true>  '>';
 
 ReturnType:
-    'ReturnType' '(' returnType=DataType<false> ')';
+    'ReturnType' LESS_THAN returnType=DataType<false> '>';
 
 StringEnumType:
     cases+=STRING ('|' cases+=STRING)*;

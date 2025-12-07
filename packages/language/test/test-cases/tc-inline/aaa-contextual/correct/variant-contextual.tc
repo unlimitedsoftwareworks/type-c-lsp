@@ -89,3 +89,17 @@ fn test9() {
 fn test10() {
     let tuple: {x: Result<i32, string>, y: Option<u32>} = {Result.Ok(1), Option.Some(2u32)}
 }
+
+// Test: Variant constructors cannot be stored in variables or passed as parameters
+
+
+fn get<T>(v: T) -> Option<T> {
+    if true {
+        return Option.Some<T>(v) 
+    }
+    return Option.None()
+}
+
+fn test(){
+    let z: Option<u32> = get(1u32)
+}

@@ -1898,7 +1898,7 @@ export class TypeCTypeProvider {
      * 3. If types are compatible via coercion → use the wider type (TODO)
      * 4. Otherwise → error type
      */
-    private getCommonType(types: TypeDescription[]): TypeDescription {
+    public getCommonType(types: TypeDescription[]): TypeDescription {
         if (types.length === 0) {
             return factory.createVoidType();
         }
@@ -1952,6 +1952,44 @@ export class TypeCTypeProvider {
                 }
                 
                 commonType = factory.createArrayType(commonElementType, types[0].node);
+            }
+            // CRITICAL FIX: Handle tuples specially to recursively find common element types
+            // This allows tuples with different element types at each position to unify
+            // Example: (u32, f32) and (u32, f32) unify to (u32, f32)
+            // Example: (Result.Ok<u32, never>, f32) and (Result.Err<never, string>, f32) unify to (Result<u32, string>, f32)
+            else if (nonNullTypes.every(t => isTupleType(t))) {
+                const tupleTypes = nonNullTypes.filter(isTupleType);
+                
+                // All tuples must have the same arity (number of elements)
+                const firstTuple = tupleTypes[0];
+                const allSameArity = tupleTypes.every(t => t.elementTypes.length === firstTuple.elementTypes.length);
+                
+                if (!allSameArity) {
+                    return factory.createErrorType(
+                        `Cannot infer common type: tuples have different arities: ${types.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        types[0].node
+                    );
+                }
+                
+                // Find common type for each position
+                const commonElementTypes: TypeDescription[] = [];
+                for (let i = 0; i < firstTuple.elementTypes.length; i++) {
+                    const typesAtPosition = tupleTypes.map(t => t.elementTypes[i]);
+                    const commonTypeAtPosition = this.getCommonType(typesAtPosition);
+                    
+                    if (isErrorType(commonTypeAtPosition)) {
+                        return factory.createErrorType(
+                            `Cannot infer common type: tuple element at position ${i + 1} has incompatible types: ${typesAtPosition.map(t => t.toString()).join(', ')}`,
+                            undefined,
+                            types[0].node
+                        );
+                    }
+                    
+                    commonElementTypes.push(commonTypeAtPosition);
+                }
+                
+                commonType = factory.createTupleType(commonElementTypes, types[0].node);
             }
             // Handle function types by recursively finding common return type
             // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify

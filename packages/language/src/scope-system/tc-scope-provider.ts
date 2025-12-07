@@ -96,6 +96,8 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         if (ast.isSubModule(container)) {
             return this.getExportedRefFromSubModule(context);
         }
+
+
         // Default: local + global scope
         return this.getCustomLocalScope(context);
     }

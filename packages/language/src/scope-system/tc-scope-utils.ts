@@ -246,11 +246,6 @@ export function getGlobalDeclarations(model: ast.Module): ReferencableSymbol[] {
             declarations.push(def);
         } else if (ast.isTypeDeclaration(def)) {
             declarations.push(def);
-            // TODO: Make this context-sensitive - only add constructors when expected type is known
-            // If it's a variant type, also expose its constructors
-            if (def.definition && ast.isVariantType(def.definition)) {
-                declarations.push(...def.definition.constructors);
-            }
         } else if (ast.isExternFFIDecl(def)) {
             declarations.push(def);
         } else if (ast.isVariableDeclarationStatement(def)) {

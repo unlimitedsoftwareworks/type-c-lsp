@@ -1075,7 +1075,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Find common type
-        return this.getCommonType(returnTypes);
+        return this.typeProvider.getCommonType(returnTypes);
     }
 
     /**
@@ -1138,7 +1138,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Find common type
-        return this.getCommonType(yieldTypes);
+        return this.typeProvider.getCommonType(yieldTypes);
     }
 
     /**
@@ -1171,61 +1171,6 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         return yields;
     }
 
-    /**
-     * Get the common type from multiple types.
-     * Simplified version for validation - delegates to type provider's logic.
-     */
-    private getCommonType(types: TypeDescription[]): TypeDescription {
-        if (types.length === 0) {
-            return factory.createVoidType();
-        }
-
-        if (types.length === 1) {
-            return types[0];
-        }
-
-        // Separate null types from non-null types
-        const nullTypes = types.filter(t => t.kind === TypeKind.Null);
-        const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
-
-        // If all types are null, return null
-        if (nonNullTypes.length === 0) {
-            return factory.createNullType();
-        }
-
-        // Find common type of non-null types
-        let commonType: TypeDescription;
-
-        if (nonNullTypes.length === 1) {
-            commonType = nonNullTypes[0];
-        } else {
-            // Check if all non-null types are identical
-            const firstType = nonNullTypes[0];
-            const allIdentical = nonNullTypes.every(t => t.toString() === firstType.toString());
-
-            if (allIdentical) {
-                commonType = firstType;
-            } else {
-                // For more complex cases, return an error type
-                return factory.createErrorType(
-                    `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
-                    undefined,
-                    firstType.node
-                );
-            }
-        }
-
-        // If we had any nulls, wrap the common type in Nullable (but only once)
-        if (nullTypes.length > 0) {
-            // Don't double-wrap if commonType is already nullable
-            if (isNullableType(commonType)) {
-                return commonType;
-            }
-            return factory.createNullableType(commonType, types[0].node);
-        }
-
-        return commonType;
-    }
 
     /**
      * Check index set operations (e.g., arr[0] = value).

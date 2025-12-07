@@ -1757,6 +1757,5 @@ export class TypeCTypeUtils {
         // Default: return the target type
         return narrowTo;
     }
-
 }
 

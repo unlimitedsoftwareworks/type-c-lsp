@@ -50,7 +50,7 @@ cfn missingYieldValue() -> u32 {
 
 // Struct with incompatible fields
 
-/// @Error(TCE042): Cannot infer common type
+/// @Error(TCE042): Cannot infer common
 cfn incompatibleStructs() {
     yield {x: 1u32, y: 2u32}
     yield {x: "oops", y: 4u32}

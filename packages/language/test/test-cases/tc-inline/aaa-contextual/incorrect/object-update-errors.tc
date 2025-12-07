@@ -181,3 +181,18 @@ fn test17() {
     /// @Error(TCE011): Object update field 'opacity' type mismatch
     let wrong = obj.{opacity: "invalid"}
 }
+
+type C<U> = class {
+    let x: U
+    let y: U[]
+}
+
+fn test18(){
+    let c = new C<string>()
+    c.{
+        /// @Error(TCE011): Object update field 'x' type mismatch
+        x: 1,
+        /// @Error(TCE011): Object update field 'y' type mismatch
+        y: [1]
+    }
+}

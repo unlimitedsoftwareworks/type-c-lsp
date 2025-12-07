@@ -2264,14 +2264,68 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
     }
 
+    /**
+     * Helper method to find a field/attribute type and validation info in a class or struct.
+     *
+     * @param baseType The class or struct type to search in
+     * @param fieldName The name of the field/attribute to find
+     * @returns Field info including type and whether it's a const attribute, or undefined if not found
+     */
+    private getFieldInfo(baseType: TypeDescription, fieldName: string):
+        { type: TypeDescription; isConst: boolean; isClass: boolean } | undefined {
+        
+        // For classes: get attribute type
+        if (isClassType(baseType)) {
+            const attribute = baseType.attributes.find(a => a.name === fieldName);
+            if (attribute) {
+                return {
+                    type: attribute.type,
+                    isConst: attribute.isConst,
+                    isClass: true
+                };
+            }
+            return undefined;
+        }
+        
+        // For structs: get field type
+        const structType = this.typeUtils.asStructType(baseType);
+        if (structType) {
+            const field = structType.fields.find(f => f.name === fieldName);
+            if (field) {
+                return {
+                    type: field.type,
+                    isConst: false,
+                    isClass: false
+                };
+            }
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Check object update fields for validation.
+     *
+     * Validates that:
+     * 1. Base expression is a struct or class
+     * 2. All updated fields exist in the base type
+     * 3. Const class attributes cannot be mutated (TODO: except in constructor)
+     * 4. Field values are type-compatible with their declarations
+     *
+     * Examples:
+     * - vec.{x: 1, y: 2} where vec is {x: u32, y: u32} → ✅ OK
+     * - vec.{x: "string"} where vec.x is u32 → ❌ Error: type mismatch
+     * - obj.{max: 200} where max is const → ❌ Error: cannot mutate const
+     */
     checkObjectUpdateFields(node: ast.ObjectUpdate, accept: ValidationAcceptor) {
         const baseType = this.typeProvider.getType(node.expr);
         const resolvedType = isReferenceType(baseType) ? this.typeProvider.resolveReference(baseType) : baseType;
+        
+        // Validate base type is struct or class
+        const isClass = isClassType(resolvedType);
         const structType = this.typeUtils.asStructType(resolvedType);
 
-        const isClass = isClassType(resolvedType);
-
-        if (!isClass && (structType === undefined)) {
+        if (!isClass && !structType) {
             accept('error', `Object Update Operator ".{}" requires either a struct or a class on the LHS, instead found ${baseType.toString()}`, {
                 node: node.expr,
                 code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
@@ -2280,76 +2334,45 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        // Check the fields
-        if (isClass) {
-            const attrs = resolvedType.attributes;
-            for (const kvPair of node.pairs) {
-                // Make sure the field exists
-                const candidate = attrs.filter(e => e.name === kvPair.name);
-                if (candidate.length === 0) {
-                    accept('error', `Attribute '${kvPair.name}' not found in ${baseType.toString()}`, {
-                        node: kvPair,
-                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
-                    });
-                    continue;
-                }
-
-                const attr = candidate[0];
-                
-                /**
-                 * TODO: Make sure we are not within this class's constructor!
-                 * Because we allow mutations there
-                 */
-                if (attr.isConst) {
-                    accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated`, {
-                        node: kvPair,
-                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
-                    });
-                    continue;
-                }
-
-                // Check type compatibility
-                const exprType = this.typeProvider.getType(kvPair.expr);
-                const compatResult = this.isTypeCompatible(exprType, attr.type);
-                
-                if (!compatResult.success) {
-                    const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
-                    const errorMsg = compatResult.message
-                        ? `Object update field '${kvPair.name}' type mismatch: ${compatResult.message}`
-                        : `Object update field '${kvPair.name}' type mismatch: Expected '${attr.type.toString()}', but got '${exprType.toString()}'`;
-                    accept('error', errorMsg, {
-                        node: kvPair.expr,
-                        code: errorCode
-                    });
-                }
+        // Check each field in the update
+        for (const kvPair of node.pairs) {
+            // Get field info using the helper
+            const fieldInfo = this.getFieldInfo(resolvedType, kvPair.name);
+            
+            if (!fieldInfo) {
+                const fieldKind = isClass ? 'Attribute' : 'Field';
+                accept('error', `${fieldKind} '${kvPair.name}' not found in ${baseType.toString()}`, {
+                    node: kvPair,
+                    code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+                });
+                continue;
             }
-        } else if (structType) {
-            // Check struct fields
-            for (const kvPair of node.pairs) {
-                // Make sure the field exists
-                const field = structType.fields.find(f => f.name === kvPair.name);
-                if (!field) {
-                    accept('error', `Field '${kvPair.name}' not found in ${baseType.toString()}`, {
-                        node: kvPair,
-                        code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
-                    });
-                    continue;
-                }
+            
+            /**
+             * TODO: Make sure we are not within this class's constructor!
+             * Because we allow mutations there
+             */
+            if (fieldInfo.isConst) {
+                accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated`, {
+                    node: kvPair,
+                    code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
+                });
+                continue;
+            }
 
-                // Check type compatibility
-                const exprType = this.typeProvider.getType(kvPair.expr);
-                const compatResult = this.isTypeCompatible(exprType, field.type);
-                
-                if (!compatResult.success) {
-                    const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
-                    const errorMsg = compatResult.message
-                        ? `Object update field '${kvPair.name}' type mismatch: ${compatResult.message}`
-                        : `Object update field '${kvPair.name}' type mismatch: Expected '${field.type.toString()}', but got '${exprType.toString()}'`;
-                    accept('error', errorMsg, {
-                        node: kvPair.expr,
-                        code: errorCode
-                    });
-                }
+            // Check type compatibility
+            const exprType = this.typeProvider.getType(kvPair.expr);
+            const compatResult = this.isTypeCompatible(exprType, fieldInfo.type);
+            
+            if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
+                const errorMsg = compatResult.message
+                    ? `Object update field '${kvPair.name}' type mismatch: ${compatResult.message}`
+                    : `Object update field '${kvPair.name}' type mismatch: Expected '${fieldInfo.type.toString()}', but got '${exprType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: kvPair.expr,
+                    code: errorCode
+                });
             }
         }
     }

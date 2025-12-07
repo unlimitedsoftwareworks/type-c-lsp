@@ -724,21 +724,10 @@ export class TypeCTypeProvider {
                     baseType = baseType.baseType;
                 }
                 
-                // For classes: get attribute type
-                if (isClassType(baseType)) {
-                    const attribute = baseType.attributes.find(a => a.name === parent.name);
-                    if (attribute) {
-                        return attribute.type;
-                    }
-                }
-                
-                // For structs: get field type
-                const structType = this.typeUtils.asStructType(baseType);
-                if (structType) {
-                    const field = structType.fields.find(f => f.name === parent.name);
-                    if (field) {
-                        return field.type;
-                    }
+                // Get field/attribute type using the helper
+                const fieldType = this.getFieldType(baseType, parent.name);
+                if (fieldType) {
+                    return fieldType;
                 }
             }
         }
@@ -1029,6 +1018,7 @@ export class TypeCTypeProvider {
         if (ast.isFFIMethodHeader(node)) return this.inferFFIMethodHeader(node);
         if (ast.isIteratorVar(node)) return this.inferIteratorVar(node);
         if (ast.isVariablePattern(node)) return this.inferVariablePattern(node);
+        if (ast.isKeyValuePair(node)) return this.inferKeyValuePair(node);
 
         return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
@@ -4004,6 +3994,74 @@ export class TypeCTypeProvider {
 
     private inferStructField(node: ast.StructField): TypeDescription {
         return this.getType(node.type);
+    }
+    
+    /**
+     * Helper method to get the type of a field/attribute from a class or struct type.
+     *
+     * @param baseType The class or struct type to search in
+     * @param fieldName The name of the field/attribute to find
+     * @returns The type of the field/attribute, or undefined if not found
+     *
+     * Examples:
+     * - getFieldType(Vector3, "x") → f32
+     * - getFieldType(Point2D, "y") → f32
+     */
+    private getFieldType(baseType: TypeDescription, fieldName: string): TypeDescription | undefined {
+        // For classes: get attribute type
+        if (isClassType(baseType)) {
+            const attribute = baseType.attributes.find(a => a.name === fieldName);
+            return attribute?.type;
+        }
+        
+        // For structs: get field type
+        const structType = this.typeUtils.asStructType(baseType);
+        if (structType) {
+            const field = structType.fields.find(f => f.name === fieldName);
+            return field?.type;
+        }
+        
+        return undefined;
+    }
+    
+    /**
+     * Infers the type of a KeyValuePair in object update expressions.
+     * Returns the type of the field/attribute being updated.
+     *
+     * Examples:
+     * - vec.{x: 1.0f} → x has type f32 (from vec's x field)
+     * - obj.{count: 10u32} → count has type u32 (from obj's count attribute)
+     */
+    private inferKeyValuePair(node: ast.KeyValuePair): TypeDescription {
+        // Get the parent ObjectUpdate
+        const objectUpdate = node.$container;
+        if (!objectUpdate || !ast.isObjectUpdate(objectUpdate)) {
+            return factory.createErrorType('KeyValuePair outside ObjectUpdate', undefined, node);
+        }
+        
+        // Get the base type being updated
+        let baseType = this.getType(objectUpdate.expr);
+        
+        // Resolve reference types
+        if (isReferenceType(baseType)) {
+            baseType = this.resolveReference(baseType);
+        }
+        
+        // Unwrap nullable types
+        if (isNullableType(baseType)) {
+            baseType = baseType.baseType;
+        }
+        
+        // Get field/attribute type using the helper
+        const fieldType = this.getFieldType(baseType, node.name);
+        if (fieldType) {
+            return fieldType;
+        }
+        
+        // Field not found - return error with appropriate message
+        const isClass = isClassType(baseType);
+        const fieldKind = isClass ? 'Attribute' : 'Field';
+        return factory.createErrorType(`${fieldKind} '${node.name}' not found in ${baseType.toString()}`, undefined, node);
     }
     
     private inferFFIMethodHeader(node: ast.FFIMethodHeader): TypeDescription {

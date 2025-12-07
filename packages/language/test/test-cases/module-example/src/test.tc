@@ -21,6 +21,14 @@ fn main() {
     let z = fib(10)
     let a = math.abs(10)
     let b: enum as u32 {Red = 1, Green = 2} = 2 as enum as u32 {Red = 1, Green = 2}
-    let c = math.Animal.Kiisu<string>(123)
+    let c = math.Animal.Kiisu(123)
     let y = C.get()
+
+    let vec = {x: 1u32, y: 1u32, z: 1u32}
+
+    vec.{
+        x: 1,
+        y: 1,
+        z: 1
+    }
 }

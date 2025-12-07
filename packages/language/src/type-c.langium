@@ -302,6 +302,12 @@ TypeCheckExpression infers Expression:
         {infer TypeCastExpression.left = current} castType=('as' | 'as!' | 'as?') destType=DataType<false>
     )*;
 
+fragment KeyValuePairs:
+    pairs+=KeyValuePair (',' pairs+=KeyValuePair)* ','?;
+
+KeyValuePair:
+    name=ID ':' expr=Expression;
+
 /**
  * Postfix expressions: calls, index, ++, --
  */
@@ -310,13 +316,14 @@ PostfixExpression infers Expression:
         //({infer MemberAccessCall.expr = current} ('.'|(isNullable?='?.')?) element=[IdentifiableReference:ID]) GenericArgs? '(' Args? ')' |
         ({infer MemberAccess.expr = current} ('.'|(isNullable?='?.')) element=[IdentifiableReference:ID]) |
         ({infer FunctionCall.expr = current} GenericArgs? '(' Args? ')') |
+        ({infer ObjectUpdate.expr = current}) ('.'|(isNullable?='?.')) '{' KeyValuePairs '}' |
         //({infer GenericFunctionCall.expr = current}  '(' Args? ')') |
         ({infer ReverseIndexSet.expr = current} '[' '-' index=Expression ']' '=' value=Expression) |
         ({infer ReverseIndexAccess.expr = current} '[' '-' index=Expression ']') |
         ({infer IndexSet.expr = current} '[' Indexes ']' '=' value=Expression) |
         ({infer IndexAccess.expr = current} '[' Indexes ']') |
         ({infer PostfixOp.expr = current} op=('++' | '--'))  |
-        ({infer DenullExpression.expr = current} '!' )
+        ({infer DenullExpression.expr = current} '!')
     )*;
 
 AtomicExpression infers Expression:

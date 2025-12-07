@@ -3,7 +3,7 @@
  * @param n - the nth number in the sequence
  * @return the nth number in the sequence
  */
-fn fib(n: i32) {
+fn fib(n: u32) {
     if n <= 1 {
         return n
     }

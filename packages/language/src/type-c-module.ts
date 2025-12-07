@@ -1,4 +1,4 @@
-import { inject, type Module } from 'langium';
+import { DefaultLangiumProfiler, inject, type Module } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
 import { TypeCDocumentationProvider } from './documentation/tc-documentation-provider.js';
 import { TypeCHoverProvider } from './documentation/tc-hover-provider.js';
@@ -83,6 +83,12 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
 export const TypeCSharedModule = {
     workspace: {
         WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)
+    },
+    profilers:  {
+        /**
+         * Empty for now
+         */
+        LangiumProfiler: () => new DefaultLangiumProfiler(new Set([]))
     }
 };
 

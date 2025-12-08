@@ -1239,6 +1239,143 @@ export class TypeCTypeUtils {
         }
     }
 
+    /**
+     * Checks if a type can be cast to another type.
+     *
+     * This is used for validating cast expressions (as, as?, as!).
+     * The rules are more permissive than assignability:
+     * - Regular cast: Must be trivially safe (guaranteed to succeed)
+     * - Safe cast: May fail, returns nullable
+     * - Force cast: User takes responsibility
+     *
+     * @param from Source type being cast from
+     * @param to Target type being cast to
+     * @returns TypeCheckResult indicating if the cast is valid
+     */
+    canCastTypes(from: TypeDescription, to: TypeDescription): TypeCheckResult {
+        // Exact equality is always allowed
+        const equalityResult = this.areTypesEqual(from, to);
+        if (equalityResult.success) {
+            return success();
+        }
+
+        // Any type accepts everything
+        if (isAnyType(to) || isAnyType(from)) {
+            return success();
+        }
+
+        // Never type is castable to everything
+        if (isNeverType(from)) {
+            return success();
+        }
+
+        // Error types propagate
+        if (isErrorType(from) || isErrorType(to)) {
+            return success();
+        }
+
+        // Unset types - treat as castable for now
+        if (isUnsetType(from) || isUnsetType(to)) {
+            return success();
+        }
+
+        // Resolve reference types before checking
+        const resolvedFrom = isReferenceType(from) ? this.typeProvider().resolveReference(from) : from;
+        const resolvedTo = isReferenceType(to) ? this.typeProvider().resolveReference(to) : to;
+
+        // Primitive types - allow all primitive-to-primitive casts (numeric conversions, etc.)
+        // This includes: u32 to i32, i32 to f32, etc.
+        if (isIntegerType(resolvedFrom) && isIntegerType(resolvedTo)) {
+            return success();
+        }
+        if (isFloatType(resolvedFrom) && isFloatType(resolvedTo)) {
+            return success();
+        }
+        if (isIntegerType(resolvedFrom) && isFloatType(resolvedTo)) {
+            return success();
+        }
+        if (isFloatType(resolvedFrom) && isIntegerType(resolvedTo)) {
+            return success();
+        }
+
+        // Integer and enum are castable
+        if (isIntegerType(resolvedFrom) && isEnumType(resolvedTo)) {
+            return success();
+        }
+        if (isEnumType(resolvedFrom) && isIntegerType(resolvedTo)) {
+            return success();
+        }
+
+        // Nullable types: can cast T to T? and T? to T
+        if (isNullableType(resolvedFrom) && !isNullableType(resolvedTo)) {
+            // T? to T - allowed (unsafe, but that's why we have as!)
+            return this.canCastTypes(resolvedFrom.baseType, resolvedTo);
+        }
+        if (!isNullableType(resolvedFrom) && isNullableType(resolvedTo)) {
+            // T to T? - always safe
+            return this.canCastTypes(resolvedFrom, resolvedTo.baseType);
+        }
+        if (isNullableType(resolvedFrom) && isNullableType(resolvedTo)) {
+            // T? to U? - check if T can be cast to U
+            return this.canCastTypes(resolvedFrom.baseType, resolvedTo.baseType);
+        }
+
+        // Class to interface - check if class implements interface (allowed for safe cast)
+        const toInterface = this.asInterfaceType(resolvedTo);
+        if (isClassType(resolvedFrom) && toInterface) {
+            return this.isClassAssignableToInterface(resolvedFrom, toInterface);
+        }
+
+        // Interface to class - not guaranteed, but allowed for safe cast
+        const fromInterface = this.asInterfaceType(resolvedFrom);
+        if (fromInterface && isClassType(resolvedTo)) {
+            // This is a downcast - we can't verify at compile time
+            // But it's valid for safe cast (as?)
+            return success();
+        }
+
+        // Variant constructor to parent variant - always safe
+        if (isVariantConstructorType(resolvedFrom)) {
+            if (isVariantType(resolvedTo)) {
+                return this.isVariantConstructorAssignableToVariant(resolvedFrom, resolvedTo);
+            }
+            if (isReferenceType(to)) {
+                return this.isVariantConstructorAssignableToVariantRef(resolvedFrom, to);
+            }
+        }
+
+        // Variant to variant constructor - not guaranteed (safe cast)
+        if (isVariantType(resolvedFrom) && isVariantConstructorType(resolvedTo)) {
+            // Check if the constructor exists in the source variant
+            const constructor = resolvedFrom.constructors.find(c => c.name === resolvedTo.constructorName);
+            if (constructor) {
+                return success();
+            }
+            return failure(`Variant does not have constructor '${resolvedTo.constructorName}'`);
+        }
+
+        // Reference type to variant constructor
+        if (isReferenceType(from) && isVariantConstructorType(resolvedTo)) {
+            const resolvedFromVariant = this.typeProvider().resolveReference(from);
+            if (isVariantType(resolvedFromVariant)) {
+                const constructor = resolvedFromVariant.constructors.find(c => c.name === resolvedTo.constructorName);
+                if (constructor) {
+                    return success();
+                }
+                return failure(`Variant does not have constructor '${resolvedTo.constructorName}'`);
+            }
+        }
+
+        // Array element type casting
+        if (isArrayType(resolvedFrom) && isArrayType(resolvedTo)) {
+            return this.canCastTypes(resolvedFrom.elementType, resolvedTo.elementType);
+        }
+
+        // Fallback to assignability check
+        // If types are assignable, they're definitely castable
+        return this.isAssignable(resolvedFrom, resolvedTo);
+    }
+
     // ============================================================================
     // Type Substitution (for Generics)
     // ============================================================================

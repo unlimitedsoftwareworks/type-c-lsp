@@ -1,5 +1,6 @@
 import { AstNode, AstUtils, ValidationAcceptor, ValidationChecks } from "langium";
 import { ErrorCode } from "../codes/errors.js";
+import { WarningCode } from "../codes/warnings.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
@@ -79,7 +80,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             MatchExpression: this.checkExpressionForErrors,
             LetInExpression: this.checkExpressionForErrors,
             DoExpression: this.checkExpressionForErrors,
-            TypeCastExpression: this.checkExpressionForErrors,
+            TypeCastExpression: [this.checkTypeCastExpression, this.checkExpressionForErrors],
             ArrayConstructionExpression: this.checkExpressionForErrors,
             ArraySpreadExpression: this.checkArraySpreadExpression,
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
@@ -2460,6 +2461,159 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: ErrorCode.TC_VARIANT_CONSTRUCTOR_NOT_CALLED
                 })
             }
+        }
+    }
+
+    /**
+     * Check type cast expressions for validity.
+     *
+     * Cast validation rules based on cast type:
+     *
+     * 1. Regular cast (as): Must be trivially safe (guaranteed to succeed)
+     *    - Class to interface it implements
+     *    - Primitive type conversions (u32 to i32, etc.)
+     *    - Variant constructor to parent variant
+     *    - Types that are directly assignable
+     *
+     * 2. Safe cast (as?): Returns nullable if cast fails
+     *    - Interface to class (downcast)
+     *    - Variant to variant constructor
+     *    - Any cast that's not guaranteed but possible
+     *
+     * 3. Force cast (as!): User takes full responsibility
+     *    - Warns if unnecessary (when regular cast would work)
+     *    - Warns if dangerous (no relationship between types)
+     *
+     * Examples:
+     * ```tc
+     * let c: Animal = cat
+     * let cat2 = c as Cat              // ❌ Error - not guaranteed
+     * let cat3 = c as? Cat             // ✅ OK - safe cast returns Cat?
+     * let x = 10u32 as i32             // ✅ OK - primitive conversion
+     * let y = 10u32 as! string         // ⚠️ Warning - dangerous force cast
+     * ```
+     */
+    checkTypeCastExpression = (node: ast.TypeCastExpression, accept: ValidationAcceptor): void => {
+        // Get source and target types
+        const sourceType = this.typeProvider.getType(node.left);
+        const targetType = this.typeProvider.getType(node.destType);
+
+        // Resolve reference types
+        const resolvedSource = isReferenceType(sourceType) ? this.typeProvider.resolveReference(sourceType) : sourceType;
+        const resolvedTarget = isReferenceType(targetType) ? this.typeProvider.resolveReference(targetType) : targetType;
+
+        // Skip validation if either is an error type
+        if (isErrorType(resolvedSource) || isErrorType(resolvedTarget)) {
+            return;
+        }
+
+        const castType = node.castType;
+
+        // Check if the cast is valid
+        const castResult = this.typeUtils.canCastTypes(resolvedSource, resolvedTarget);
+
+        // REGULAR CAST (as): Must be trivially safe
+        if (castType === 'as') {
+            if (!castResult.success) {
+                const errorCode = ErrorCode.TC_CAST_INVALID_REGULAR_CAST;
+                const errorMsg = castResult.message
+                    ? `Invalid cast from '${sourceType.toString()}' to '${targetType.toString()}': ${castResult.message}. Use 'as?' for unsafe casts or 'as!' to force.`
+                    : `Invalid cast from '${sourceType.toString()}' to '${targetType.toString()}'. Use 'as?' for unsafe casts or 'as!' to force.`;
+                accept('error', errorMsg, {
+                    node: node.destType,
+                    code: errorCode
+                });
+            }
+            return;
+        }
+
+        
+        // Warn if dangerous (types are completely unrelated)
+        // Check if there's ANY relationship between the types
+        const reverseResult = this.typeUtils.canCastTypes(resolvedTarget, resolvedSource);
+        const hasRelationship = castResult.success || reverseResult.success;
+
+        // SAFE CAST (as?): Allowed if cast is possible, warns if guaranteed to succeed or fail
+        if (castType === 'as?') {
+            // Check if cast is guaranteed to succeed (unnecessary safe cast)
+            const assignableResult = this.typeUtils.isAssignable(resolvedSource, resolvedTarget);
+            if (assignableResult.success) {
+                const warningCode = WarningCode.TC_CAST_UNNECESSARY_SAFE_CAST;
+                accept('warning', `Unnecessary safe cast from '${sourceType.toString()}' to '${targetType.toString()}': Cast is guaranteed to succeed. Use regular cast 'as' instead.`, {
+                    node: node.destType,
+                    code: warningCode
+                });
+                return;
+            }
+
+            // Check special cases for safe cast that are guaranteed to fail
+            // Interface to class where class doesn't implement interface
+            const targetIsClass = isClassType(resolvedTarget);
+            const sourceInterface = this.typeUtils.asInterfaceType(resolvedSource);
+            
+            if (sourceInterface && targetIsClass) {
+                // Check if target class implements source interface
+                const implementsResult = this.typeUtils.isClassAssignableToInterface(resolvedTarget, sourceInterface);
+                if (!implementsResult.success) {
+                    const warningCode = WarningCode.TC_CAST_SAFE_CAST_ALWAYS_NULL;
+                    accept('warning', `Safe cast guaranteed to fail: Class '${targetType.toString()}' does not implement interface '${sourceType.toString()}'. This will always return null.`, {
+                        node: node.destType,
+                        code: warningCode
+                    });
+                }
+            }
+
+            if (!hasRelationship) {
+                // Additional checks for primitive types - these are often intentional
+                const bothPrimitive = (isIntegerType(resolvedSource) || isFloatType(resolvedSource)) &&
+                                     (isIntegerType(resolvedTarget) || isFloatType(resolvedTarget));
+                
+                if (!bothPrimitive) {
+                    const warningCode = WarningCode.TC_CAST_DANGEROUS_FORCE_CAST;
+                    accept('warning', `Incompatible forced cast from '${sourceType.toString()}' to '${targetType.toString()}': Types are completely unrelated. This cast may cause undefined behavior at runtime.`, {
+                        node: node.destType,
+                        code: warningCode
+                    });
+                }
+                else {
+                    const warningCode = WarningCode.TC_CAST_SAFE_CAST_WITH_PRIMITIVE;
+                    accept('error', `Cannot perform safe cast with primitive types.`, {
+                        node: node.destType,
+                        code: warningCode
+                    });
+                }
+            }
+            
+            return;
+        }
+
+        // FORCE CAST (as!): Always succeeds, but may warn
+        if (castType === 'as!') {
+            // Warn if unnecessary (cast would succeed with regular 'as')
+            if (castResult.success) {
+                const warningCode = WarningCode.TC_CAST_UNNECESSARY_FORCE_CAST;
+                accept('warning', `Unnecessary forced cast from '${sourceType.toString()}' to '${targetType.toString()}': Cast is already safe. Use regular cast 'as' instead.`, {
+                    node: node.destType,
+                    code: warningCode
+                });
+                return;
+            }
+
+
+            if (!hasRelationship) {
+                // Additional checks for primitive types - these are often intentional
+                const bothPrimitive = (isIntegerType(resolvedSource) || isFloatType(resolvedSource)) &&
+                                     (isIntegerType(resolvedTarget) || isFloatType(resolvedTarget));
+                
+                if (!bothPrimitive) {
+                    const warningCode = WarningCode.TC_CAST_DANGEROUS_FORCE_CAST;
+                    accept('warning', `Dangerous forced cast from '${sourceType.toString()}' to '${targetType.toString()}': Types are completely unrelated. This cast may cause undefined behavior at runtime.`, {
+                        node: node.destType,
+                        code: warningCode
+                    });
+                }
+            }
+            return;
         }
     }
 }

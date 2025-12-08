@@ -3281,7 +3281,16 @@ export class TypeCTypeProvider {
     }
 
     private inferTypeCastExpression(node: ast.TypeCastExpression): TypeDescription {
-        return this.getType(node.destType);
+        const type = this.getType(node.destType);
+
+        if(node.castType === "as?") {
+            let rtype = isReferenceType(type)?this.resolveReference(type):type;
+            if(!isNullableType(rtype)){
+                return factory.createNullableType(rtype);
+            }
+        }
+
+        return type
     }
 
     private inferThisExpression(node: ast.ThisExpression): TypeDescription {

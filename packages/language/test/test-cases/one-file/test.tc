@@ -1,5 +1,24 @@
-fn getValue(x: u32[]) {
-    return x[0]
+type Serializable = interface {
+    fn serialize() -> string
 }
 
-let z: returnof<getValue> = 1
+type Deserializable<T> = interface {
+    fn deserialize() -> T
+}
+
+type Array = class Serializable, Deserializable<string> {
+    fn serialize() -> string {
+        // Implementation for serialization
+        return ""
+    }
+    
+    fn deserialize() -> string {
+        // Implementation for deserialization
+        return ""
+    }
+}
+
+fn main() {
+    let a = [new Array()]
+    let b = a as? never[]
+}

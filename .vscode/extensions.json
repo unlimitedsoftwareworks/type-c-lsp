@@ -1,7 +1,6 @@
 {
     "recommendations": [
         "langium.langium-vscode",
-        "vitest.explorer",
-        "marus25.cortex-debug"
+        "vitest.explorer"
     ]
 }

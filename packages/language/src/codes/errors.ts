@@ -120,4 +120,8 @@ export enum ErrorCode {
 
     // Array/Spread Errors (TCE150-TCE159)
     TC_ARRAY_SPREAD_REQUIRES_ARRAY = 'TCE150',
+
+    // Cast Expression Errors (TCE160-TCE169)
+    TC_CAST_INVALID_REGULAR_CAST = 'TCE160',
+    TC_CAST_INVALID_TARGET_TYPE = 'TCE161',
 }

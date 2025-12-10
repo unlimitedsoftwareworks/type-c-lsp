@@ -1,0 +1,33 @@
+/**
+ * Test: Verify that string is NOT assignable to string enum
+ * 
+ * While string enum → string is valid (widening),
+ * string → string enum should fail (narrowing requires explicit values)
+ */
+
+// String enum types
+type Color = "red" | "green" | "blue"
+
+/// @Error(TCE006): Variable 'invalidColor1' type mismatch
+let invalidColor1: Color = "purple"  // Invalid: not in enum values
+
+// Test: Generic string NOT assignable to specific string enum
+fn getString() -> string = "red"
+// @error String enum value .* is not assignable to .*
+
+/// @Error(TCE006): Variable 'invalidColor2' type mismatch
+let invalidColor2: Color = getString()  // Should fail: string → Color
+
+// Test: Struct field type mismatch
+type StrictNode = {
+    kind: "function" | "class"
+}
+
+type LooseNode = {
+    kind: string
+}
+
+let loose: LooseNode = {kind: "anything"}
+
+/// @Error(TCE006): Variable 'strict' type mismatch
+let strict: StrictNode = loose  // Should fail: string → ("function" | "class")

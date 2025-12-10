@@ -25,6 +25,7 @@ import {
     MethodType,
     NullableTypeDescription,
     ReferenceTypeDescription,
+    StringEnumTypeDescription,
     StructFieldType,
     StructTypeDescription,
     TupleTypeDescription,
@@ -47,6 +48,7 @@ import {
     isNeverType,
     isNullableType,
     isNumericType,
+    isPrimitiveType,
     isReferenceType,
     isStringEnumType,
     isStringLiteralType,
@@ -488,6 +490,11 @@ export class TypeCTypeUtils {
 
         // String literal to string: always valid (string literal is a subtype of string)
         if (isStringLiteralType(from) && to.kind === TypeKind.String) {
+            return success();
+        }
+
+        // String enum to string: always valid (string enum is a subtype of string)
+        if (isStringEnumType(from) && to.kind === TypeKind.String) {
             return success();
         }
 
@@ -2072,16 +2079,49 @@ export class TypeCTypeUtils {
                         commonType = factory.createNullableType(commonType, types[0].node);
                     }
                 } else {
-                    // Check if all non-null types are identical
-                    const firstType = nonNullTypes[0];
-                    const allIdentical = nonNullTypes.every(t => this.areTypesEqual(t, firstType).success);
-
-                    if (allIdentical) {
-                        commonType = firstType;
+                    // CRITICAL: Handle string literal + string combinations FIRST
+                    // String literals should widen to string when mixed with string type
+                    // This enables: string ∪ "VarDecl" → string
+                    const hasString = nonNullTypes.some(t => t.kind === TypeKind.String);
+                    const hasStringLiterals = nonNullTypes.some(t => isStringLiteralType(t));
+                    const hasStringEnums = nonNullTypes.some(t => isStringEnumType(t));
+                    const allStringRelated = nonNullTypes.every(t =>
+                        t.kind === TypeKind.String || isStringLiteralType(t) || isStringEnumType(t)
+                    );
+                    
+                    if (allStringRelated && (hasString || hasStringLiterals || hasStringEnums)) {
+                        // If any is string type, widen all to string
+                        if (hasString) {
+                            commonType = factory.createStringType();
+                        } else {
+                            // All are string literals/enums - combine them into a string enum
+                            const allLiterals = nonNullTypes.filter(isStringLiteralType);
+                            const allEnums = nonNullTypes.filter(isStringEnumType);
+                            
+                            // Collect all string values
+                            const values = new Set<string>();
+                            for (const lit of allLiterals) {
+                                values.add(lit.value);
+                            }
+                            for (const enumType of allEnums) {
+                                for (const val of enumType.values) {
+                                    values.add(val);
+                                }
+                            }
+                            
+                            commonType = factory.createStringEnumType(Array.from(values), types[0].node);
+                        }
                     } else {
-                        // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
-                        const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
-                        if (structTypes.length === nonNullTypes.length) {
+                        // Check if all non-null types are identical
+                        const firstType = nonNullTypes[0];
+                        const allIdentical = nonNullTypes.every(t => this.areTypesEqual(t, firstType).success);
+
+                        if (allIdentical) {
+                            commonType = firstType;
+                        } else {
+                            // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
+                            const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
+                            if (structTypes.length === nonNullTypes.length) {
                             // All types are structs or resolve to structs
                             commonType = this.getCommonStructType(structTypes);
                             // Check if getCommonStructType returned an error
@@ -2106,12 +2146,13 @@ export class TypeCTypeUtils {
                                         return commonType;
                                     }
                                 } else {
-                                    // Different declarations - can't find common type
-                                    return factory.createErrorType(
-                                        `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
-                                        undefined,
-                                        firstType.node
-                                    );
+                                    // Different declarations - try structural LUB (NEW!)
+                                    // This enables finding common supertypes for structural subtypes
+                                    // Example: [AstNode, VarDecl] → struct { _type: string }
+                                    commonType = this.computeLeastUpperBound(referenceTypes);
+                                    if (isErrorType(commonType)) {
+                                        return commonType;
+                                    }
                                 }
                             } else {
                                 // Check if all are variant constructors - unify generic arguments
@@ -2144,14 +2185,15 @@ export class TypeCTypeUtils {
                                             undefined,
                                             firstType.node
                                         );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+                                       }
+                                   }
+                               }
+                           }
+                       }
+                   }
+               }
+           }
+       }
 
         // If we had any nulls, wrap the common type in Nullable (but only once)
         if (nullTypes.length > 0) {
@@ -2528,6 +2570,504 @@ export class TypeCTypeUtils {
         
         // Create a reference to the base variant with unified generic arguments
         return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, types[0].node);
+    }
+
+    // ============================================================================
+    // Least Upper Bound (LUB) Algorithm for Structural Subtyping
+    // ============================================================================
+
+    /**
+     * Resolves a type to its underlying structural representation.
+     * This enables structural comparison across different named types.
+     *
+     * Resolution rules (TypeScript-style):
+     * - ReferenceType → resolve via TypeProvider to get actual type definition
+     * - NullableType → unwrap to base type (nullability handled separately)
+     * - JoinType → simplify to merged struct/interface if possible
+     * - Other → return as-is
+     *
+     * @param type The type to resolve
+     * @returns The underlying structural type
+     *
+     * @example
+     * ```
+     * resolveToStructuralType(AstNode ref) → struct { _type: string }
+     * resolveToStructuralType(u32?) → u32
+     * resolveToStructuralType(Point & HasZ) → struct { x: f64, y: f64, z: f64 }
+     * ```
+     */
+    private resolveToStructuralType(type: TypeDescription): TypeDescription {
+        // Unwrap references to get actual type definitions
+        if (isReferenceType(type)) {
+            const resolved = this.typeProvider().resolveReference(type);
+            // Recursively resolve in case reference points to another reference
+            if (resolved !== type) {
+                return this.resolveToStructuralType(resolved);
+            }
+            return resolved;
+        }
+        
+        // Unwrap nullable - nullability is handled at higher level
+        if (isNullableType(type)) {
+            return this.resolveToStructuralType(type.baseType);
+        }
+        
+        // Simplify join types to merged struct/interface if possible
+        if (isJoinType(type)) {
+            const simplified = this.simplifyJoin(type);
+            if (simplified !== type && !isJoinType(simplified)) {
+                return this.resolveToStructuralType(simplified);
+            }
+            return simplified;
+        }
+        
+        // Already a structural type
+        return type;
+    }
+
+    /**
+     * Groups types by their structural category for category-specific LUB computation.
+     *
+     * Categories (TypeScript-inspired):
+     * - 'struct': Structural record types with fields
+     * - 'class': Nominal class types (name-based identity)
+     * - 'interface': Structural interface types with methods
+     * - 'variant': Algebraic data types with constructors
+     * - 'string-enum': String literal unions
+     * - 'primitive': Primitives (u32, string, etc.)
+     * - 'array': Array types
+     * - 'function': Function types
+     * - 'other': Everything else
+     *
+     * @param types Array of types to group
+     * @returns Map from category name to types in that category
+     */
+    private groupTypesByCategory(types: TypeDescription[]): Map<string, TypeDescription[]> {
+        const groups = new Map<string, TypeDescription[]>();
+        
+        for (const type of types) {
+            let category: string;
+            
+            if (isStructType(type)) {
+                category = 'struct';
+            } else if (isClassType(type)) {
+                category = 'class';
+            } else if (isInterfaceType(type)) {
+                category = 'interface';
+            } else if (isVariantType(type) || isVariantConstructorType(type)) {
+                category = 'variant';
+            } else if (isStringEnumType(type)) {
+                category = 'string-enum';
+            } else if (type.kind === TypeKind.String) {
+                category = 'string';
+            } else if (isArrayType(type)) {
+                category = 'array';
+            } else if (isFunctionType(type)) {
+                category = 'function';
+            } else if (isPrimitiveType(type)) {
+                category = 'primitive';
+            } else {
+                category = 'other';
+            }
+            
+            const group = groups.get(category) ?? [];
+            group.push(type);
+            groups.set(category, group);
+        }
+        
+        return groups;
+    }
+
+    /**
+     * Combines multiple string enum types into a single enum with all values.
+     * This follows TypeScript's union behavior for string literal types.
+     *
+     * @param enums Array of string enum types to combine
+     * @returns A single string enum with the union of all values
+     *
+     * @example
+     * ```
+     * combineStringEnums([("a" | "b"), ("b" | "c")]) → ("a" | "b" | "c")
+     * ```
+     */
+    private combineStringEnums(enums: StringEnumTypeDescription[]): TypeDescription {
+        if (enums.length === 0) {
+            return factory.createErrorType('No string enums to combine', undefined);
+        }
+        
+        if (enums.length === 1) {
+            return enums[0];
+        }
+        
+        // Collect all unique values from all enums
+        const allValues = new Set<string>();
+        for (const enumType of enums) {
+            for (const value of enumType.values) {
+                allValues.add(value);
+            }
+        }
+        
+        return factory.createStringEnumType(Array.from(allValues), enums[0].node);
+    }
+
+    /**
+     * Normalizes an anonymous LUB result to a named type if it matches structurally.
+     * This preserves named types in the result, matching TypeScript's behavior.
+     * 
+     * TypeScript behavior: When the LUB of [AstNode, VarDecl] is computed, if the result
+     * structurally matches one of the original named types (like AstNode), use that named type.
+     * 
+     * Example:
+     * - LUB of [AstNode, VarDecl] → struct { _type: string } (anonymous)
+     * - Normalization: Check if matches AstNode → YES
+     * - Result: AstNode (named type, more readable)
+     * 
+     * @param lubResult The computed LUB (potentially anonymous struct)
+     * @param originalTypes The original input types (before resolution)
+     * @returns Named type if structural match found, otherwise lubResult
+     */
+    private normalizeToNamedType(lubResult: TypeDescription, originalTypes: TypeDescription[]): TypeDescription {
+        // Only normalize structs and interfaces
+        if (!isStructType(lubResult) && !isInterfaceType(lubResult)) {
+            return lubResult;
+        }
+        
+        // Try to find an original type that structurally matches the LUB
+        for (const original of originalTypes) {
+            // Only consider reference types (named types)
+            if (!isReferenceType(original)) {
+                continue;
+            }
+            
+            // Resolve the reference to get its structural type
+            const resolved = this.typeProvider().resolveReference(original);
+            
+            // Check if structurally equal to the LUB
+            if (isStructType(lubResult) && isStructType(resolved)) {
+                const structsEqual = this.areStructTypesEqual(resolved, lubResult);
+                if (structsEqual.success) {
+                    // Found a structural match! Return the original named type
+                    return original;
+                }
+            } else if (isInterfaceType(lubResult) && isInterfaceType(resolved)) {
+                // For interfaces, check if they're structurally equal
+                // (simplified check - could be enhanced)
+                if (resolved === lubResult) {
+                    return original;
+                }
+            }
+        }
+        
+        // No match found - return the anonymous struct/interface
+        return lubResult;
+    }
+
+    /**
+     * Computes the Least Upper Bound (LUB) for struct types using structural subtyping.
+     *
+     * This implements TypeScript-style structural typing where the LUB is the intersection
+     * of fields present in ALL input structs. Field types are computed recursively.
+     *
+     * Algorithm:
+     * 1. Find common field names (intersection across all structs)
+     * 2. For each common field, recursively compute LUB of field types
+     * 3. Return struct with only common fields and their LUB types
+     * 4. Error if no common fields exist (empty struct not allowed)
+     *
+     * This enables finding the minimal common supertype:
+     * - `{x: u32, y: u32, z: u32}` ∪ `{x: u32, y: u32}` → `{x: u32, y: u32}`
+     * - `{x: u32}` ∪ `{y: u32}` → Error (no common fields)
+     *
+     * @param structs Array of struct types to find LUB for
+     * @returns The LUB struct type, or ErrorType if no valid LUB exists
+     */
+    private getLUBForStructs(structs: StructTypeDescription[]): TypeDescription {
+        if (structs.length === 0) {
+            return factory.createErrorType(
+                'Cannot compute LUB: no struct types provided',
+                undefined
+            );
+        }
+        
+        if (structs.length === 1) {
+            return structs[0];
+        }
+        
+        // Step 1: Find common field names (intersection of all field name sets)
+        const fieldNameSets = structs.map(s => new Set(s.fields.map(f => f.name)));
+        const commonFieldNames = new Set<string>();
+        
+        // A field is common if it appears in ALL structs
+        for (const fieldName of fieldNameSets[0]) {
+            if (fieldNameSets.every(set => set.has(fieldName))) {
+                commonFieldNames.add(fieldName);
+            }
+        }
+        
+        // Step 2: Check for empty result (not allowed - structs must have fields)
+        if (commonFieldNames.size === 0) {
+            const structReprs = structs.map(s => s.toString()).join(', ');
+            return factory.createErrorType(
+                `Cannot infer common struct type: no common fields found among ${structReprs}`,
+                'Structs must share at least one field to have a common supertype',
+                structs[0].node
+            );
+        }
+        
+        // Step 3: For each common field, recursively compute LUB of field types
+        const commonFields: StructFieldType[] = [];
+        
+        for (const fieldName of commonFieldNames) {
+            // Collect all types for this field across all structs
+            const fieldTypes = structs.map(s => {
+                const field = s.fields.find(f => f.name === fieldName);
+                // We know it exists because fieldName is in the intersection
+                return field!.type;
+            });
+            
+            // Recursively compute LUB for this field (handles nested structs, string literals, etc.)
+            const fieldLUB = this.getCommonType(fieldTypes);
+            
+            if (isErrorType(fieldLUB)) {
+                // Enhanced error message with field context
+                return factory.createErrorType(
+                    `Cannot infer common struct type: field '${fieldName}' has incompatible types ${fieldTypes.map(t => t.toString()).join(', ')}`,
+                    fieldLUB.message,
+                    structs[0].node
+                );
+            }
+            
+            // Use the first struct's field node for the common field
+            const firstFieldNode = structs[0].fields.find(f => f.name === fieldName)!.node;
+            
+            commonFields.push({
+                name: fieldName,
+                type: fieldLUB,
+                node: firstFieldNode
+            });
+        }
+        
+        // Step 4: Create the LUB struct type (not anonymous - represents a supertype)
+        return factory.createStructType(
+            commonFields,
+            false, // Not anonymous - this is a structural supertype
+            structs[0].node
+        );
+    }
+
+    /**
+     * Computes the Least Upper Bound (LUB) for interface types.
+     *
+     * Similar to struct LUB, but for interfaces with methods:
+     * - Result contains only methods present in ALL input interfaces
+     * - Method signatures (parameters) must match exactly
+     * - Return types can vary (compute LUB recursively)
+     *
+     * @param interfaces Array of interface types to find LUB for
+     * @returns The LUB interface type, or ErrorType if no valid LUB exists
+     */
+    private getLUBForInterfaces(interfaces: InterfaceTypeDescription[]): TypeDescription {
+        if (interfaces.length === 0) {
+            return factory.createErrorType(
+                'Cannot compute LUB: no interface types provided',
+                undefined
+            );
+        }
+        
+        if (interfaces.length === 1) {
+            return interfaces[0];
+        }
+        
+        // Find common method names (intersection)
+        const methodNameSets = interfaces.map(iface => {
+            const names = new Set<string>();
+            for (const method of iface.methods) {
+                // Methods can have multiple names (operator overloading)
+                for (const name of method.names) {
+                    names.add(name);
+                }
+            }
+            return names;
+        });
+        
+        const commonMethodNames = new Set<string>();
+        for (const methodName of methodNameSets[0]) {
+            if (methodNameSets.every(set => set.has(methodName))) {
+                commonMethodNames.add(methodName);
+            }
+        }
+        
+        if (commonMethodNames.size === 0) {
+            return factory.createErrorType(
+                `Cannot infer common interface type: no common methods found`,
+                undefined,
+                interfaces[0].node
+            );
+        }
+        
+        // For each common method, verify signatures and compute LUB return type
+        const commonMethods: MethodType[] = [];
+        
+        for (const methodName of commonMethodNames) {
+            // Find all methods with this name across all interfaces
+            const methodsWithName = interfaces.map(iface =>
+                iface.methods.find(m => m.names.includes(methodName))!
+            );
+            
+            // Verify all have same parameter count and types
+            const firstMethod = methodsWithName[0];
+            const allParamsMatch = methodsWithName.every(method => {
+                if (method.parameters.length !== firstMethod.parameters.length) {
+                    return false;
+                }
+                return method.parameters.every((param, i) =>
+                    this.areTypesEqual(param.type, firstMethod.parameters[i].type).success
+                );
+            });
+            
+            if (!allParamsMatch) {
+                return factory.createErrorType(
+                    `Cannot infer common interface type: method '${methodName}' has incompatible signatures`,
+                    undefined,
+                    interfaces[0].node
+                );
+            }
+            
+            // Compute LUB of return types
+            const returnTypes = methodsWithName.map(m => m.returnType);
+            const returnLUB = this.getCommonType(returnTypes);
+            
+            if (isErrorType(returnLUB)) {
+                return factory.createErrorType(
+                    `Cannot infer common interface type: method '${methodName}' has incompatible return types`,
+                    returnLUB.message,
+                    interfaces[0].node
+                );
+            }
+            
+            // Create merged method with LUB return type
+            commonMethods.push({
+                names: firstMethod.names,
+                parameters: firstMethod.parameters,
+                returnType: returnLUB,
+                genericParameters: firstMethod.genericParameters,
+                isStatic: firstMethod.isStatic,
+                isOverride: firstMethod.isOverride,
+                isLocal: firstMethod.isLocal,
+                node: firstMethod.node
+            });
+        }
+        
+        // Merge super types from all interfaces
+        const allSuperTypes: TypeDescription[] = [];
+        for (const iface of interfaces) {
+            allSuperTypes.push(...iface.superTypes);
+        }
+        
+        return factory.createInterfaceType(commonMethods, allSuperTypes, interfaces[0].node);
+    }
+
+    /**
+     * Computes the Least Upper Bound (LUB) of multiple types using structural subtyping.
+     *
+     * This is the core LUB algorithm that dispatches to category-specific handlers:
+     * - Structs: Field intersection with recursive LUB
+     * - Interfaces: Method intersection with recursive return type LUB
+     * - String enums: Value union
+     * - Classes: Name-based (no structural LUB)
+     * - Mixed types: Special handling for string enum + string
+     *
+     * @param types Array of types to find LUB for
+     * @returns The LUB type, or ErrorType if no valid LUB exists
+     *
+     * @example
+     * ```
+     * computeLeastUpperBound([AstNode, VarDecl]) → struct { _type: string }
+     * computeLeastUpperBound([("a" | "b"), ("b" | "c")]) → ("a" | "b" | "c")
+     * ```
+     */
+    private computeLeastUpperBound(types: TypeDescription[]): TypeDescription {
+        if (types.length === 0) {
+            return factory.createVoidType();
+        }
+        
+        if (types.length === 1) {
+            return types[0];
+        }
+        
+        // Step 1: Resolve all types to their structural representations
+        const resolvedTypes = types.map(t => this.resolveToStructuralType(t));
+        
+        // Step 2: Group types by category
+        const grouped = this.groupTypesByCategory(resolvedTypes);
+        
+        // Step 3: Handle single-category cases
+        if (grouped.size === 1) {
+            const [[category, categoryTypes]] = Array.from(grouped.entries());
+            
+            switch (category) {
+                case 'struct':
+                    // Compute LUB and normalize to named type if possible
+                    const structLUB = this.getLUBForStructs(categoryTypes as StructTypeDescription[]);
+                    return this.normalizeToNamedType(structLUB, types);
+                    
+                case 'interface':
+                    // Compute LUB and normalize to named type if possible
+                    const interfaceLUB = this.getLUBForInterfaces(categoryTypes as InterfaceTypeDescription[]);
+                    return this.normalizeToNamedType(interfaceLUB, types);
+                    
+                case 'string-enum':
+                    return this.combineStringEnums(categoryTypes as StringEnumTypeDescription[]);
+                    
+                case 'class':
+                    // Classes are name-based, no structural LUB possible
+                    return factory.createErrorType(
+                        `Cannot find LUB for different classes: ${categoryTypes.map(t => t.toString()).join(', ')}`,
+                        'Classes use name-based identity, not structural typing',
+                        types[0].node
+                    );
+                    
+                case 'variant':
+                    // Already handled by existing variant logic in getCommonType
+                    // This should not be reached in normal flow
+                    return factory.createErrorType(
+                        'Variant LUB computation should use existing getCommonVariantConstructorType',
+                        undefined,
+                        types[0].node
+                    );
+                    
+                default:
+                    // Primitives, arrays, functions, etc. - no LUB if not identical
+                    const firstType = categoryTypes[0];
+                    const allIdentical = categoryTypes.every(t =>
+                        this.areTypesEqual(t, firstType).success
+                    );
+                    
+                    if (allIdentical) {
+                        return firstType;
+                    }
+                    
+                    return factory.createErrorType(
+                        `Cannot find LUB for types in category '${category}': ${categoryTypes.map(t => t.toString()).join(', ')}`,
+                        undefined,
+                        types[0].node
+                    );
+            }
+        }
+        
+        // Step 4: Handle mixed categories
+        // Special case: string enum + string → string
+        if (grouped.has('string-enum') && grouped.has('string')) {
+            return factory.createStringType();
+        }
+        
+        // No other mixed category combinations are valid
+        const categories = Array.from(grouped.keys()).join(', ');
+        return factory.createErrorType(
+            `Cannot find LUB for mixed type categories: ${categories}`,
+            `Types: ${types.map(t => t.toString()).join(', ')}`,
+            types[0].node
+        );
     }
 }
 

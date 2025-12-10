@@ -1,0 +1,56 @@
+/**
+ * Test: String enum types should be assignable to string type
+ * 
+ * String enums are subtypes of string, so they should be assignable to:
+ * - string type
+ * - fields typed as string
+ * - array elements typed as string
+ */
+
+// Single-value string enum (from struct field)
+type AstNode = {
+    _type: string
+}
+
+type VarDecl = {
+    _type: "VarDecl",
+    varName: string,
+    varType: string
+}
+
+// Test 1: Direct assignment of string enum to string variable
+let c: "VarDecl" = "VarDecl"
+let z: string = c  // Should work: "VarDecl" (string enum) → string
+
+// Test 2: Struct with string enum field assignable to struct with string field
+let v1: AstNode = {_type: "VarDecl", varName: "v1", varType: "u32"}
+let v2: VarDecl = {_type: "VarDecl", varName: "v2", varType: "u32"}
+
+// Test 3: Arrays with string enum elements assignable to arrays of string
+let nodes1: AstNode[] = [v1]
+let nodes2: AstNode[] = [v2]  // Should work: VarDecl[] → AstNode[]
+
+// Test 4: Multi-value string enum to string
+type Color = "red" | "green" | "blue"
+let color1: Color = "red"
+let colorStr: string = color1  // Should work: Color → string
+
+// Test 5: String enum in function parameters
+fn printNode(node: AstNode) = node._type
+
+let testNode: VarDecl = {_type: "VarDecl", varName: "test", varType: "i32"}
+let result = printNode(testNode)  // Should work: VarDecl → AstNode
+
+// Test 6: Nested string enum in complex types
+type NodeList = {
+    nodes: AstNode[]
+}
+
+type VarDeclList = {
+    nodes: VarDecl[]
+}
+
+/// @Type(list1): struct { nodes: AstNode[] }
+let list1 = {nodes: [v1, v2]}
+let list2: VarDeclList = {nodes: [v2]}
+let list3: NodeList = list2  // Should work: VarDeclList → NodeList

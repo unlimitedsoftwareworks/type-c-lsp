@@ -1,24 +1,18 @@
-type Serializable = interface {
-    fn serialize() -> string
+type AstNode = {
+    _type: string
 }
 
-type Deserializable<T> = interface {
-    fn deserialize() -> T
+type VarDecl = {
+    _type: "VarDecl",
+    varName: string,
+    varType: string
 }
 
-type Array = class Serializable, Deserializable<string> {
-    fn serialize() -> string {
-        // Implementation for serialization
-        return ""
-    }
-    
-    fn deserialize() -> string {
-        // Implementation for deserialization
-        return ""
-    }
-}
+let v1: AstNode = {_type: "VarDecl", varName: "v1", varType: "u32"}
+let v2: VarDecl = {_type: "VarDecl", varName: "v2", varType: "u32"}
 
-fn main() {
-    let a = [new Array()]
-    let b = a as? never[]
-}
+let nodes1: AstNode[] = [v1]
+let nodes2: AstNode[] = [v2]
+
+let c: "VarDecl" = "VarDecl"
+let z: string = c

@@ -433,6 +433,19 @@ export class TypeCTypeProvider {
         // Return statement
         // return expr
         if (ast.isReturnStatement(parent)) {
+            // Check if we're in a do expression first (before checking functions)
+            // Do expressions use contextual typing from their usage context
+            const doExpr = this.getContainingDoExpression(parent);
+            if (doExpr) {
+                // Use the expected type of the do expression as the hint
+                const expectedDoType = this.getExpectedType(doExpr);
+                if (expectedDoType) {
+                    return expectedDoType;
+                }
+                // If no expected type, return undefined (do expressions without context)
+                return undefined;
+            }
+            
             // Find the containing function
             const fn = AstUtils.getContainerOfType(parent, ast.isFunctionDeclaration);
             if (fn && fn.header.returnType) {
@@ -1843,7 +1856,7 @@ export class TypeCTypeProvider {
 
     /**
      * Collect all return statements from a block, but ONLY from this function level.
-     * Does NOT collect returns from nested functions!
+     * Does NOT collect returns from nested functions OR do expressions!
      */
     private collectReturnStatements(block: ast.BlockStatement): ast.ReturnStatement[] {
         const returns: ast.ReturnStatement[] = [];
@@ -1852,6 +1865,11 @@ export class TypeCTypeProvider {
             // Stop if we hit a nested function - don't collect its returns!
             if (ast.isFunctionDeclaration(node)) {
                 return; // Don't traverse into nested functions
+            }
+
+            // Stop if we hit a do expression - it has its own return scope
+            if (ast.isDoExpression(node)) {
+                return; // Don't traverse into do expressions
             }
 
             if (ast.isReturnStatement(node)) {
@@ -1874,7 +1892,7 @@ export class TypeCTypeProvider {
 
     /**
      * Collect all yield expressions from a block, but ONLY from this coroutine level.
-     * Does NOT collect yields from nested coroutines!
+     * Does NOT collect yields from nested coroutines OR do expressions!
      */
     private collectYieldExpressions(block: ast.BlockStatement): ast.YieldExpression[] {
         const yields: ast.YieldExpression[] = [];
@@ -1883,6 +1901,11 @@ export class TypeCTypeProvider {
             // Stop if we hit a nested function/coroutine - don't collect its yields!
             if (ast.isFunctionDeclaration(node)) {
                 return; // Don't traverse into nested functions
+            }
+
+            // Stop if we hit a do expression - it has its own scope
+            if (ast.isDoExpression(node)) {
+                return; // Don't traverse into do expressions
             }
 
             if (ast.isYieldExpression(node)) {
@@ -3335,8 +3358,27 @@ export class TypeCTypeProvider {
     }
 
     private inferDoExpression(node: ast.DoExpression): TypeDescription {
-        // Type is the type of the last statement in the block
-        // TODO: Implement full block type inference
+        // Do expressions infer their type from return statements within the block
+        // Similar to function return type inference, but only for this do block
+        if (node.body) {
+            const returnStatements = this.collectReturnStatementsFromDo(node.body);
+            
+            if (returnStatements.length === 0) {
+                return factory.createVoidType(node);
+            }
+            
+            // Get types of all return expressions
+            const allReturnTypes = returnStatements
+                .map(stmt => stmt.expr ? this.getType(stmt.expr) : factory.createVoidType());
+            
+            if (allReturnTypes.length === 0) {
+                return factory.createVoidType(node);
+            }
+            
+            // Find common type
+            return this.typeUtils.getCommonType(allReturnTypes);
+        }
+        
         return factory.createVoidType(node);
     }
 
@@ -4666,6 +4708,76 @@ export class TypeCTypeProvider {
         
         // Other types don't contain generics
         return false;
+    }
+
+    /**
+     * Get the containing do expression if the node is within one (but not within a nested function).
+     * Returns undefined if the node is within a function or not within a do expression.
+     *
+     * This is used to determine if a return statement should use contextual typing from the do expression
+     * instead of from a function's return type.
+     */
+    private getContainingDoExpression(node: AstNode): ast.DoExpression | undefined {
+        let current: AstNode | undefined = node.$container;
+
+        while (current) {
+            // If we hit a function boundary, stop - we're not in a do expression context
+            if (ast.isFunctionDeclaration(current) ||
+                ast.isLambdaExpression(current) ||
+                ast.isCoroutineExpression(current)) {
+                return undefined;
+            }
+
+            // Found a do expression
+            if (ast.isDoExpression(current)) {
+                return current;
+            }
+
+            current = current.$container;
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Collect all return statements from a do expression's block, but ONLY from this do level.
+     * Does NOT collect returns from nested functions or nested do expressions!
+     *
+     * This is different from collectReturnStatements which is for functions.
+     * Do expressions have their own return scope separate from nested constructs.
+     */
+    private collectReturnStatementsFromDo(block: ast.BlockStatement): ast.ReturnStatement[] {
+        const returns: ast.ReturnStatement[] = [];
+
+        const visit = (node: AstNode) => {
+            // Stop if we hit a nested function - don't collect its returns!
+            if (ast.isFunctionDeclaration(node) ||
+                ast.isLambdaExpression(node) ||
+                ast.isCoroutineExpression(node)) {
+                return; // Don't traverse into nested functions
+            }
+
+            // Stop if we hit a nested do expression - it has its own return scope
+            if (ast.isDoExpression(node)) {
+                return; // Don't traverse into nested do expressions
+            }
+
+            if (ast.isReturnStatement(node)) {
+                returns.push(node);
+            }
+
+            // Traverse children
+            for (const child of AstUtils.streamContents(node)) {
+                visit(child);
+            }
+        };
+
+        // Visit all statements in the block
+        for (const stmt of block.statements || []) {
+            visit(stmt);
+        }
+
+        return returns;
     }
 }
 

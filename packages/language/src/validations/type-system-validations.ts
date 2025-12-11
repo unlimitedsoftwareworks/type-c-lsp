@@ -667,8 +667,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Check return statements against function return type.
+     *
+     * IMPORTANT: Return statements inside do expressions should NOT be validated
+     * against the function's return type. They return values from the do expression itself.
      */
     checkReturnStatement = (node: ast.ReturnStatement, accept: ValidationAcceptor): void => {
+        // Check if we're in a do expression first (before checking functions)
+        // Do expressions have their own return semantics - returns exit the do block, not the function
+        const doExpr = valUtils.getContainingDoExpression(node);
+        if (doExpr) {
+            // We're inside a do expression - the return statement returns from the do block,
+            // not from the function. The do expression's type will be inferred from all its
+            // return statements, and that inferred type will be validated at the usage site.
+            // Therefore, we don't validate individual return statements here.
+            return;
+        }
+        
         // Find the containing function or lambda
         let current: AstNode | undefined = node.$container;
         while (current && !ast.isFunctionDeclaration(current) && !ast.isLambdaExpression(current)) {
@@ -1082,13 +1096,19 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Collect all return statements from a block (only from this function level).
+     * Does NOT collect returns from nested functions OR do expressions!
      */
     private collectReturnStatements(block: ast.BlockStatement): ast.ReturnStatement[] {
         const returns: ast.ReturnStatement[] = [];
 
         const visit = (node: AstNode) => {
             // Stop if we hit a nested function - don't collect its returns!
-            if (ast.isFunctionDeclaration(node)) {
+            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node)) {
+                return;
+            }
+
+            // Stop if we hit a do expression - it has its own return scope
+            if (ast.isDoExpression(node)) {
                 return;
             }
 
@@ -1145,13 +1165,19 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Collect all yield expressions from a block (only from this coroutine level).
+     * Does NOT collect yields from nested functions OR do expressions!
      */
     private collectYieldExpressions(block: ast.BlockStatement): ast.YieldExpression[] {
         const yields: ast.YieldExpression[] = [];
 
         const visit = (node: AstNode) => {
             // Stop if we hit a nested function or coroutine - don't collect its yields!
-            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node)) {
+            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node) || ast.isCoroutineExpression(node)) {
+                return;
+            }
+
+            // Stop if we hit a do expression - it has its own scope
+            if (ast.isDoExpression(node)) {
                 return;
             }
 

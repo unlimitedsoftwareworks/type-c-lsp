@@ -1,0 +1,7 @@
+
+
+// ❌ Error: tuple return in do expression
+let xx = do {
+    /// @Error(TCE093): Control flow error: 'do' expressions cannot return tuple values.
+    return (1, 2) 
+}

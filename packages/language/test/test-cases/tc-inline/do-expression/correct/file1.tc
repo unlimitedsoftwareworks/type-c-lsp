@@ -1,0 +1,21 @@
+// ✅ Valid: do expression with contextual return
+
+/// @Type(x): u32
+let x = do {
+    let y = 1u32
+    return y  // Type inferred as u32 from context
+}
+
+// ✅ Valid: function with tuple return
+fn getTuple() -> (u32, f32) {
+    return (1, 2.0f)
+}
+
+// ✅ Valid: do expression with typed hint
+fn abs(x: u32) -> u64 {
+    let result = do {
+        return if x < 0 => "hi" else "hehe"  // Type inferred as u32
+    }
+
+    return result.length()
+}

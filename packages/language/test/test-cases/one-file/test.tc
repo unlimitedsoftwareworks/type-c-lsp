@@ -1,25 +1,7 @@
+fn abs(x: u32) -> u32 {
+    let result: string = do {
+        return if x < 0 => "hi" else "hehe"  // Type inferred as u32
+    }
 
-type AstNode = {
-    _type: string
+    return result.length() as u32
 }
-
-type VarDecl = {
-    _type: "VarDecl",
-    varName: string,
-    varType: string
-}
-
-let v1: AstNode = {_type: "a"}
-let v2: VarDecl = {_type: "VarDecl", varName: "x", varType: "u32"}
-
-type NodeList = {
-    nodes: AstNode[]
-}
-
-// Try and find LUB
-let list1 = {nodes: [v1, v2]}
-
-fn isVarDecl(node: AstNode) -> node is VarDecl = node._type == "VarDecl"
-
-
-

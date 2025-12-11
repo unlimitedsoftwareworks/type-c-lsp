@@ -1,0 +1,121 @@
+// Practical type guard use cases (TypeScript-style)
+
+// ============================================================
+// REAL-WORLD TYPE GUARDS
+// ============================================================
+
+type Animal = variant {
+    Dog(name: string, breed: string),
+    Cat(name: string, color: string),
+    Bird(name: string, canFly: bool)
+}
+
+/// @Type(isDog): fn(animal: Animal) -> animal is Animal
+fn isDog(animal: Animal) -> animal is Animal {
+    // Would check if it's a Dog variant
+    return true
+}
+
+/// @Type(isCat): fn(animal: Animal) -> animal is Animal
+fn isCat(animal: Animal) -> animal is Animal {
+    return true
+}
+
+// ============================================================
+// TYPE GUARD WITH NULLABLE TYPES
+// ============================================================
+
+/// @Type(isString): fn(x: string) -> x is string
+fn isString(x: string) -> x is string {
+    return true
+}
+
+/// @Type(isNullableNumber): fn(x: u32) -> x is u32?
+fn isNullableNumber(x: u32) -> x is u32? {
+    return true
+}
+
+// Type guards compatible with boolean
+/// @NoError
+let stringValidator: fn(x: string) -> bool = isString
+
+/// @NoError  
+let nullableValidator: fn(x: never) -> bool = isNullableNumber
+
+// ============================================================
+// TYPE GUARD COMPOSITION
+// ============================================================
+
+type Validator<T> = fn(value: never) -> value is T
+
+/// @NoError
+let stringValidators: Validator<string>[] = []
+
+fn buildValidators() {
+    /// @NoError
+    let isNonEmpty: Validator<string> = fn(v: never) -> v is string {
+        return true
+    }
+    
+    /// @NoError
+    stringValidators = [isString, isNonEmpty]
+}
+
+// ============================================================
+// COMPLEX NESTED TYPE GUARDS
+// ============================================================
+
+type JsonValue = variant {
+    String(value: string),
+    Number(value: f64),
+    Bool(value: bool),
+    Null,
+    Array(items: JsonValue[]),
+    Object(fields: struct { key: string, value: JsonValue }[])
+}
+
+/// @Type(isJsonValue): fn(x: never) -> x is JsonValue
+fn isJsonValue(x: never) -> x is JsonValue {
+    return true
+}
+
+/// @Type(isJsonString): fn(x: JsonValue) -> x is JsonValue
+fn isJsonString(x: JsonValue) -> x is JsonValue {
+    return true
+}
+
+// Should work with validators
+/// @NoError
+let jsonValidators: (fn(x: never) -> bool)[] = [isJsonValue]
+
+// ============================================================
+// STRUCT TYPE GUARDS
+// ============================================================
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+type Point3D = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+/// @Type(isPoint): fn(p: never) -> p is Point
+fn isPoint(p: never) -> p is Point {
+    return true
+}
+
+/// @Type(isPoint3D): fn(p: never) -> p is Point3D
+fn isPoint3D(p: never) -> p is Point3D {
+    return true
+}
+
+// Both compatible with boolean return
+/// @NoError
+let pointCheck: fn(p: never) -> bool = isPoint
+
+/// @NoError
+let point3DCheck: fn(p: never) -> bool = isPoint3D

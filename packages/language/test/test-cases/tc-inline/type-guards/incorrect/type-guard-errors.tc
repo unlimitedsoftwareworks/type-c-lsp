@@ -1,0 +1,78 @@
+// Type guard error detection tests
+
+// ============================================================
+// INCOMPATIBLE PARAMETER POSITIONS
+// ============================================================
+
+fn firstParam(a: never, b: never) -> a is string {
+    return true
+}
+
+fn secondParam(a: never, b: never) -> b is string {
+    return true
+}
+
+// These should fail - different parameter positions
+/// @Error(TCE006): Type guards reference different parameters
+let incompatible1: fn(a: never, b: never) -> a is string = secondParam
+
+/// @Error(TCE006): Type guards reference different parameters
+let incompatible2: fn(a: never, b: never) -> b is string = firstParam
+
+// ============================================================
+// INCOMPATIBLE GUARDED TYPES
+// ============================================================
+
+fn isString(x: never) -> x is string {
+    return true
+}
+
+fn isNumber(x: never) -> x is u32 {
+    return true
+}
+
+// These should fail - different guarded types
+/// @Error(TCE006): Type guard guarded types are not compatible
+let wrongType1: fn(x: never) -> x is string = isNumber
+
+/// @Error(TCE006): Type guard guarded types are not compatible
+let wrongType2: fn(x: never) -> x is u32 = isString
+
+// ============================================================
+// PARAMETER COUNT MISMATCH
+// ============================================================
+
+fn singleParam(x: never) -> x is string {
+    return true
+}
+
+fn twoParams(a: never, b: never) -> a is string {
+    return true
+}
+
+// Different parameter counts
+/// @Error(TCE006): Parameter count mismatch
+let countMismatch1: fn(x: never) -> x is string = twoParams
+
+/// @Error(TCE006): Parameter count mismatch
+let countMismatch2: fn(a: never, b: never) -> a is string = singleParam
+
+// ============================================================
+// NARROWING TYPE GUARD
+// ============================================================
+
+fn isSpecific(x: never) -> x is "foo" {
+    return true
+}
+
+fn isBroad(x: never) -> x is string {
+    return true
+}
+
+// Narrowing should work (covariant)
+/// @NoError
+let narrowing: fn(x: never) -> x is string = isSpecific
+
+// But widening should fail
+/// @Error(TCE006): Type guard guarded types are not compatible
+let widening: fn(x: never) -> x is "foo" = isBroad

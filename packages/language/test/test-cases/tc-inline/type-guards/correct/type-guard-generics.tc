@@ -1,0 +1,76 @@
+// Type guard tests with generics
+
+// ============================================================
+// GENERIC TYPE GUARDS
+// ============================================================
+
+/// @Type(isArrayOf): fn<T>(x: string) -> x is T[]
+fn isArrayOf<T>(x: string) -> x is T[] {
+    return true
+}
+
+// Type guard with generic instantiation - must provide matching type
+/// @NoError
+let arrayChecker: fn(x: string) -> x is u32[] = isArrayOf<u32>
+
+/// @NoError
+let stringArrayChecker: fn(x: string) -> x is string[] = isArrayOf<string>
+
+// ============================================================
+// GENERIC PARAMETER IN TYPE GUARD
+// ============================================================
+
+/// @Type(isOfType): fn<T>(value: string, target: T) -> value is T
+fn isOfType<T>(value: string, target: T) -> value is T {
+    return true
+}
+
+// Should work with concrete types
+/// @NoError
+let numberTypeChecker: fn(value: string, target: u32) -> value is u32 = isOfType<u32>
+
+// ============================================================
+// TYPE GUARD WITH GENERIC CONSTRAINTS
+// ============================================================
+
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+/// @Type(isSerializable): fn<T: Serializable>(x: string) -> x is T: Serializable
+fn isSerializable<T: Serializable>(x: string) -> x is T {
+    return true
+}
+
+// ============================================================
+// VARIANT TYPE GUARDS
+// ============================================================
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+/// @Type(isResult): fn<T, E>(x: string) -> x is Result<T, E>
+fn isResult<T, E>(x: string) -> x is Result<T, E> {
+    return true
+}
+
+/// @NoError
+let resultChecker: fn(x: string) -> x is Result<u32, string> = isResult<u32, string>
+
+// ============================================================
+// NARROWING WITH GENERICS
+// ============================================================
+
+/// @Type(isType): fn<T>(x: string) -> x is T
+fn isType<T>(x: string) -> x is T {
+    return true
+}
+
+// Narrowing from broad to specific
+/// @NoError
+let specificChecker: fn(x: string) -> x is "foo" = isType<"foo">
+
+/// @Type(test): fn(x: string) -> x is { x: u32 }
+let test = isType<{x: u32}>

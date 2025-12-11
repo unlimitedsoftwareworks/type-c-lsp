@@ -495,13 +495,20 @@ TypeDecl<allowLocal> returns TypeDeclaration:
     (<allowLocal>isLocal?='local')? 'type' name=ID GenericDecl? '=' definition=DataType<false>;
 
 
-DataType<allowTuples>:
-    (<allowTuples> TupleType) |
+DataType<functionReturn>:
+    (<functionReturn> TupleType) |
+    (<functionReturn> TypeGuard) |
     UnionType;
 
 // cannot have nested tuples
 TupleType infers DataType:
     {infer TupleType} '(' types+=UnionType (',' types+=UnionType)+ ')';
+
+type GuardedParam = 
+    FunctionTypeParameter |FunctionParameter;
+
+TypeGuard:
+    param=[GuardedParam:ID] 'is' type=DataType<false>;
 
 UnionType infers DataType:
     JoinType ({infer UnionType.left = current} '|' right=JoinType)*;
@@ -702,7 +709,7 @@ type IdentifiableReference =
 
 // Qualified reference that can handle all complex cases
 QualifiedReference:
-    reference=[IdentifiableReference:ID];
+    reference=[IdentifiableReference:ID] (GenericArgs)?;
 
 fragment Args:
     (args+=Expression (',' args+=Expression)*);

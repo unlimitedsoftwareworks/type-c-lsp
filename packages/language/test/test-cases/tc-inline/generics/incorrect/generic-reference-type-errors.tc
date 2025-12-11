@@ -23,6 +23,8 @@ type Point = struct {
     y: u32
 }
 
+fn f<T>(x: T) -> T = x
+
 fn main() -> void {
     // Test too many generic arguments
     // @Error(TCE140): Type 'Option' expects 1 generic argument(s), but got 2
@@ -47,4 +49,7 @@ fn main() -> void {
     let res2: Result<u32, string> = Result.Ok(42u32)
     let pair3: Pair<u32, string> = {first: 1u32, second: "hello"}
     let pt2: Point = {x: 1u32, y: 2u32}
+
+    /// @Error(TCE140): Generic function requires 1 generic argument
+    let func: fn(x: u32) -> u32 = f
 }

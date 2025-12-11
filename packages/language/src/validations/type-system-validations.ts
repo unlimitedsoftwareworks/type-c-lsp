@@ -85,7 +85,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ArraySpreadExpression: this.checkArraySpreadExpression,
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
             TupleExpression: this.checkExpressionForErrors,
-            QualifiedReference: this.checkExpressionForErrors,
+            QualifiedReference: [this.checkQualifiedReferenceGenerics, this.checkExpressionForErrors],
             ThrowExpression: this.checkExpressionForErrors,
             MutateExpression: this.checkExpressionForErrors,
             CoroutineExpression: this.checkExpressionForErrors,
@@ -2614,6 +2614,101 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 }
             }
             return;
+        }
+    }
+
+    /**
+     * Check QualifiedReference for proper generic argument usage.
+     *
+     * Validates:
+     * 1. If the referenced entity requires generic arguments, they must be provided
+     * 2. If the referenced entity doesn't accept generics, none should be provided
+     * 3. Generic argument count must match the required count
+     *
+     * Examples:
+     * ```tc
+     * fn isArrayOf<T>(x: string) -> x is T[] { ... }
+     * let checker1 = isArrayOf<u32>           // ✅ OK - 1 generic arg provided
+     * let checker2 = isArrayOf                // ❌ Error - missing required generic arg
+     * let checker3 = isArrayOf<u32, string>   // ❌ Error - too many generic args
+     *
+     * fn nonGeneric(x: u32) -> bool { ... }
+     * let fn1 = nonGeneric                    // ✅ OK - no generics needed
+     * let fn2 = nonGeneric<u32>               // ❌ Error - function is not generic
+     * ```
+     */
+    checkQualifiedReferenceGenerics = (node: ast.QualifiedReference, accept: ValidationAcceptor): void => {
+        // Only validate if the reference is resolved
+        const ref = node.reference?.ref;
+        if (!ref) {
+            return; // Unresolved reference - will be reported elsewhere
+        }
+
+        // Get the type of the referenced entity
+        const refType = this.typeProvider.getType(ref);
+        
+        // Resolve reference types to get the actual type
+        const resolvedType = isReferenceType(refType) ? this.typeProvider.resolveReference(refType) : refType;
+
+        // Get the provided generic arguments
+        const providedGenericArgs = node.genericArgs ?? [];
+        const providedGenericCount = providedGenericArgs.length;
+
+        // Only function types can have generic instantiation in QualifiedReference
+        // (Type declarations use ReferenceType for generic instantiation)
+        if (isFunctionType(resolvedType)) {
+            const genericParams = resolvedType.genericParameters || [];
+            const expectedGenericCount = genericParams.length;
+
+            // Rule 1: Non-generic function cannot receive generic arguments
+            if (expectedGenericCount === 0 && providedGenericCount > 0) {
+                const errorCode = ErrorCode.TC_NON_GENERIC_TYPE_WITH_ARGS;
+                accept('error',
+                    `Function '${ref.$type === 'FunctionDeclaration' ? (ref as ast.FunctionDeclaration).name : 'function'}' does not accept generic arguments`,
+                    {
+                        node,
+                        code: errorCode
+                    }
+                );
+                return;
+            }
+
+            // Rule 2: Generic function requires generic arguments when used as a reference
+            // (not when called - calls can infer generics from arguments)
+            if ((expectedGenericCount > 0 && providedGenericCount === 0) && !ast.isFunctionCall(node.$container)) {
+                const errorCode = ErrorCode.TC_GENERIC_ARG_COUNT_MISMATCH;
+                accept('error',
+                    `Generic function requires ${expectedGenericCount} generic argument(s). Example: ${ref.$type === 'FunctionDeclaration' ? (ref as ast.FunctionDeclaration).name : 'function'}<${genericParams.map(p => p.name).join(', ')}>`,
+                    {
+                        node,
+                        code: errorCode
+                    }
+                );
+                return;
+            }
+
+            // Rule 3: Generic argument count must match
+            if (providedGenericCount > 0 && providedGenericCount !== expectedGenericCount) {
+                const errorCode = ErrorCode.TC_GENERIC_ARG_COUNT_MISMATCH;
+                accept('error',
+                    `Generic argument count mismatch: Expected ${expectedGenericCount} generic argument(s), but got ${providedGenericCount}`,
+                    {
+                        node,
+                        code: errorCode
+                    }
+                );
+            }
+        }
+        // For non-function types, having generic args on QualifiedReference is an error
+        else if (providedGenericCount > 0) {
+            const errorCode = ErrorCode.TC_NON_GENERIC_TYPE_WITH_ARGS;
+            accept('error',
+                `Cannot apply generic arguments to non-generic entity '${resolvedType.toString()}'`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
         }
     }
 }

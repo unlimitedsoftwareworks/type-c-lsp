@@ -1,3 +1,4 @@
+
 type AstNode = {
     _type: string
 }
@@ -8,11 +9,17 @@ type VarDecl = {
     varType: string
 }
 
-let v1: AstNode = {_type: "VarDecl", varName: "v1", varType: "u32"}
-let v2: VarDecl = {_type: "VarDecl", varName: "v2", varType: "u32"}
+let v1: AstNode = {_type: "a"}
+let v2: VarDecl = {_type: "VarDecl", varName: "x", varType: "u32"}
 
-let nodes1: AstNode[] = [v1]
-let nodes2: AstNode[] = [v2]
+type NodeList = {
+    nodes: AstNode[]
+}
 
-let c: "VarDecl" = "VarDecl"
-let z: string = c
+// Try and find LUB
+let list1 = {nodes: [v1, v2]}
+
+fn isVarDecl(node: AstNode) -> node is VarDecl = node._type == "VarDecl"
+
+
+

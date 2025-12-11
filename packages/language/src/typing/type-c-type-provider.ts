@@ -899,6 +899,7 @@ export class TypeCTypeProvider {
         if (ast.isJoinType(node)) return this.inferJoinType(node);
         // Tuple types are represented directly in grammar, not as separate AST nodes
         if (ast.isTupleType(node)) return this.inferTupleTypeFromDataType(node);
+        if (ast.isTypeGuard(node)) return this.inferTypeGuard(node);
         if (ast.isPrimitiveType(node)) return factory.createPrimitiveTypeFromAST(node);
         if (ast.isStructType(node)) return this.inferStructType(node);
         if (ast.isVariantType(node)) return this.inferVariantType(node);
@@ -1078,6 +1079,32 @@ export class TypeCTypeProvider {
         // Tuple types have a 'types' property with array of DataType
         const elementTypes = node.types.map(t => this.getType(t));
         return factory.createTupleType(elementTypes, node);
+    }
+
+    private inferTypeGuard(node: ast.TypeGuard): TypeDescription {
+        // TypeGuard: param=[FunctionParameter:ID] 'is' type=DataType<false>
+        const paramRef = node.param?.ref;
+        if (!paramRef) {
+            return factory.createErrorType('Unresolved type guard parameter reference', undefined, node);
+        }
+        
+        const parameterName = paramRef.name;
+        
+        // Get the parameter index from the AST
+        // The parameter should have a $containerIndex property that gives its position
+        const parameterIndex = paramRef.$containerIndex ?? -1;
+        
+        if (parameterIndex === -1) {
+            return factory.createErrorType('Could not determine parameter index for type guard', undefined, node);
+        }
+        
+        const guardedType = this.getType(node.type);
+
+        if(!parameterName) {
+            return factory.createErrorType("Cannot guard parameter without a name");
+        }
+        
+        return factory.createTypeGuardType(parameterName, parameterIndex, guardedType, node);
     }
 
     private inferStructType(node: ast.StructType): TypeDescription {
@@ -2104,6 +2131,39 @@ export class TypeCTypeProvider {
             type = this.resolveReference(type);
         }
 
+        // Handle generic instantiation: fn<T>(...) -> ... becomes fn<u32>(...) -> ...
+        // When we have genericArgs on the QualifiedReference (e.g., isArrayOf<u32>)
+        if (node.genericArgs && node.genericArgs.length > 0) {
+            // Only function types can be generically instantiated in this context
+            if (isFunctionType(type)) {
+                const genericParams = type.genericParameters || [];
+                
+                if (genericParams.length !== node.genericArgs.length) {
+                    return factory.createErrorType(
+                        `Generic argument count mismatch: expected ${genericParams.length}, got ${node.genericArgs.length}`,
+                        undefined,
+                        node
+                    );
+                }
+                
+                // Build substitution map: generic parameter name -> concrete type
+                const substitutions = new Map<string, TypeDescription>();
+                genericParams.forEach((param, index) => {
+                    const concreteType = this.getType(node.genericArgs[index]);
+                    substitutions.set(param.name, concreteType);
+                });
+                
+                // Apply substitutions to the function type
+                return this.typeUtils.substituteGenerics(type, substitutions);
+            }
+            
+            // If not a function type, having generic args is an error
+            return factory.createErrorType(
+                `Cannot apply generic arguments to non-generic type '${type.toString()}'`,
+                undefined,
+                node
+            );
+        }
 
         if (isVariantType(type) && ast.isTypeDeclaration(node.reference.ref)) {
             // Generics are pushed to the constuctor i.e Option.Some<T>

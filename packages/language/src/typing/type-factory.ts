@@ -53,6 +53,7 @@ import {
     MetaVariantConstructorTypeDescription,
     MetaEnumTypeDescription,
     MetaClassTypeDescription,
+    TypeGuardTypeDescription,
 } from "./type-c-types.js";
 import { serializer } from "./type-serialization.js";
 
@@ -594,6 +595,22 @@ export function createReturnType(returnType: TypeDescription, node?: AstNode): R
         returnType,
         node,
         toString: () => `ReturnType(${returnType.toString()})`
+    };
+}
+
+export function createTypeGuardType(
+    parameterName: string,
+    parameterIndex: number,
+    guardedType: TypeDescription,
+    node?: AstNode
+): TypeGuardTypeDescription {
+    return {
+        kind: TypeKind.TypeGuard,
+        parameterName,
+        parameterIndex,
+        guardedType,
+        node,
+        toString: () => `${parameterName} is ${guardedType.toString()}`
     };
 }
 

@@ -8,6 +8,7 @@ type ReferencableSymbol =
     ast.TypeDeclaration |
     ast.NamespaceDecl |
     ast.FunctionParameter |
+    ast.FunctionTypeParameter |
     ast.GenericType |
     ast.ExternFFIDecl |
     ast.SubModule |
@@ -69,9 +70,13 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         // Add generic parameters
         declarations.push(...container.genericParameters ?? []);
         // Add parameters
-        declarations.push(...container.header?.args ?? []);  
+        declarations.push(...container.header?.args ?? []);
     }
     else if (ast.isLambdaExpression(container)) {
+        declarations.push(...container.header?.args ?? []);
+    }
+    else if (ast.isFunctionType(container)) {
+        // Add function type parameters to scope (for type guards like "v is string")
         declarations.push(...container.header?.args ?? []);
     }
     else if (ast.isBuiltinSymbolFn(container)) {

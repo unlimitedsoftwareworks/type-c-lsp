@@ -1,0 +1,78 @@
+// Basic type guard functionality tests
+
+// ============================================================
+// BASIC TYPE GUARD DECLARATIONS
+// ============================================================
+
+/// @Type(isString): fn(x: string) -> x is string
+fn isString(x: string)-> x is string {
+    // implementation would check typeof
+    return true
+}
+
+/// @Type(isNumber): fn(x: string) -> x is u32
+fn isNumber(x: string)-> x is u32 {
+    return true
+}
+
+// ============================================================
+// TYPE GUARD TO BOOLEAN COMPATIBILITY
+// ============================================================
+
+/// @NoError
+let f1: fn(x: string) -> bool = isString
+
+/// @NoError
+let f2: fn(x: string) -> bool = isNumber
+
+// ============================================================
+// TYPE GUARD TO ANY/string COMPATIBILITY
+// ============================================================
+
+/// @NoError
+let f3: fn(x: string) -> bool = isString
+
+// ============================================================
+// TYPE GUARD ASSIGNMENT TO ARRAYS
+// ============================================================
+
+type StringGuard = fn(v: string) -> v is string
+
+/// @NoError
+let const isStr: StringGuard = fn(v: string) -> v is string {
+    return true
+}
+
+/// @NoError
+let const isFoo: fn(v: string) -> v is "foo" = fn(v: string) -> v is "foo" {
+    return true
+}
+
+/// @NoError
+let validators: (fn(v: string) -> bool)[] = []
+
+fn testArrayPush() {
+    /// @NoError
+    validators = [isStr, isFoo]
+}
+
+// ============================================================
+// MULTIPLE PARAMETERS
+// ============================================================
+
+/// @Type(firstParamGuard): fn(a: string, b: string) -> a is string
+fn firstParamGuard(a: string, b: string) -> a is string {
+    return true
+}
+
+/// @Type(secondParamGuard): fn(a: string, b: string) -> b is string  
+fn secondParamGuard(a: string, b: string) -> b is string {
+    return true
+}
+
+// These should be compatible with boolean return
+/// @NoError
+let g1: fn(a: string, b: string) -> bool = firstParamGuard
+
+/// @NoError
+let g2: fn(a: string, b: string) -> bool = secondParamGuard

@@ -77,6 +77,7 @@ export enum TypeKind {
     Function = 'function',
     Coroutine = 'coroutine',
     ReturnType = 'return-type',
+    TypeGuard = 'type-guard',
     
     // Special types
     Reference = 'reference',      // Named type reference
@@ -367,6 +368,13 @@ export interface ReturnTypeDescription extends TypeDescription {
     readonly returnType: TypeDescription;
 }
 
+export interface TypeGuardTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.TypeGuard;
+    readonly parameterName: string;
+    readonly parameterIndex: number;
+    readonly guardedType: TypeDescription;
+}
+
 // ============================================================================
 // Special Types
 // ============================================================================
@@ -584,4 +592,8 @@ export function isStringType(type: TypeDescription): type is StringTypeDescripti
 
 export function isStringLiteralType(type: TypeDescription): type is StringLiteralTypeDescription {
     return type.kind === TypeKind.StringLiteral;
+}
+
+export function isTypeGuardType(type: TypeDescription): type is TypeGuardTypeDescription {
+    return type.kind === TypeKind.TypeGuard;
 }

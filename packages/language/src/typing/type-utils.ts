@@ -57,7 +57,9 @@ import {
     isUnionType,
     isUnsetType,
     isVariantConstructorType,
-    isVariantType
+    isVariantType,
+    isTypeGuardType,
+    TypeGuardTypeDescription
 } from "./type-c-types.js";
 import * as factory from "./type-factory.js";
 
@@ -299,6 +301,12 @@ export class TypeCTypeUtils {
                 }
                 return this.areGenericTypesEqual(a, b);
 
+            case TypeKind.TypeGuard:
+                if (!isTypeGuardType(a) || !isTypeGuardType(b)) {
+                    return failure('Expected type guard types');
+                }
+                return this.areTypeGuardsEqual(a, b);
+
             case TypeKind.Variant:
                 if (!isVariantType(a) || !isVariantType(b)) {
                     return failure('Expected variant types');
@@ -424,6 +432,20 @@ export class TypeCTypeUtils {
             return success();
         }
         return failure(`Generic type name mismatch: ${a.name} vs ${b.name}`);
+    }
+
+    areTypeGuardsEqual(a: TypeGuardTypeDescription, b: TypeGuardTypeDescription): TypeCheckResult {
+        // Type guards are equal if they guard the same parameter and have the same guarded type
+        if (a.parameterIndex !== b.parameterIndex) {
+            return failure(`Type guards reference different parameters: parameter ${a.parameterIndex} vs parameter ${b.parameterIndex}`);
+        }
+        
+        const guardedTypeResult = this.areTypesEqual(a.guardedType, b.guardedType);
+        if (!guardedTypeResult.success) {
+            return failure(`Type guard types differ: ${guardedTypeResult.message}`);
+        }
+        
+        return success();
     }
 
     // ============================================================================
@@ -574,9 +596,49 @@ export class TypeCTypeUtils {
             return failure(`Cannot assign struct to non-struct type '${to.toString()}'`);
         }
 
-        // assignability (contravariant in parameters, covariant in return type)
-        if (isFunctionType(from) && isFunctionType(to)) {
-            return this.isFunctionAssignable(from, to);
+        // Type guard to boolean compatibility
+        // (x: unknown) => x is string is assignable to (x: unknown) => boolean
+        if (isTypeGuardType(from) && to.kind === TypeKind.Bool) {
+            return success();
+        }
+
+        // Boolean to type guard compatibility
+        // (x: unknown) => boolean is assignable to (x: unknown) => x is T
+        // This allows functions that return boolean expressions to be used as type guards
+        if (from.kind === TypeKind.Bool && isTypeGuardType(to)) {
+            return success();
+        }
+
+        // Type guard to any/unknown compatibility
+        if (isTypeGuardType(from) && isAnyType(to)) {
+            return success();
+        }
+
+        // Type guard to type guard compatibility
+        // Same parameter index and compatible guarded types
+        if (isTypeGuardType(from) && isTypeGuardType(to)) {
+            if (from.parameterIndex !== to.parameterIndex) {
+                return failure(`Type guards reference different parameters: parameter ${from.parameterIndex} vs parameter ${to.parameterIndex}`);
+            }
+            
+            // The guarded type should be assignable (covariant)
+            const guardedTypeResult = this.isAssignable(from.guardedType, to.guardedType);
+            if (!guardedTypeResult.success) {
+                return failure(`Type guard guarded types are not compatible: ${guardedTypeResult.message}`);
+            }
+            
+            return success();
+        }
+
+        // Function assignability (contravariant in parameters, covariant in return type)
+        // Handle both direct function types and references to function types
+        const fromFunc = isFunctionType(from) ? from :
+                        (isReferenceType(from) ? this.typeProvider().resolveReference(from) : null);
+        const toFunc = isFunctionType(to) ? to :
+                      (isReferenceType(to) ? this.typeProvider().resolveReference(to) : null);
+        
+        if (fromFunc && isFunctionType(fromFunc) && toFunc && isFunctionType(toFunc)) {
+            return this.isFunctionAssignable(fromFunc, toFunc);
         }
 
         // Union type handling
@@ -1618,6 +1680,19 @@ export class TypeCTypeUtils {
             return factory.createInterfaceType(substitutedMethods, type.superTypes.map(t => this.substituteGenerics(t, substitutions)), type.node);
         }
 
+        if (isTypeGuardType(type)) {
+            const substitutedGuardedType = this.substituteGenerics(type.guardedType, substitutions);
+            const typeGuardType: TypeGuardTypeDescription = {
+                kind: type.kind,
+                parameterName: type.parameterName,
+                parameterIndex: type.parameterIndex,
+                guardedType: substitutedGuardedType,
+                node: type.node,
+                toString: () => `${type.parameterName} is ${substitutedGuardedType.toString()}`
+            };
+            return typeGuardType;
+        }
+
         // For other types, return as-is
         return type;
     }
@@ -1948,6 +2023,51 @@ export class TypeCTypeUtils {
         // Continue with non-never types
         types = nonNeverTypes;
 
+        // Handle type guards specially
+        // Type guards can be unified with each other (if same parameter) or with bool
+        const typeGuards = types.filter(isTypeGuardType);
+        const boolTypes = types.filter(t => t.kind === TypeKind.Bool);
+        const otherTypes = types.filter(t => !isTypeGuardType(t) && t.kind !== TypeKind.Bool);
+        
+        if (typeGuards.length > 0) {
+            // If we have type guards mixed with bools or other types, result is bool
+            if (boolTypes.length > 0 || otherTypes.length > 0) {
+                return factory.createBoolType();
+            }
+            
+            // All are type guards - check if they reference the same parameter
+            const firstGuard = typeGuards[0];
+            const allSameParameter = typeGuards.every(g => g.parameterIndex === firstGuard.parameterIndex);
+            
+            if (!allSameParameter) {
+                return factory.createErrorType(
+                    `Cannot infer common type: type guards reference different parameters`,
+                    undefined,
+                    types[0].node
+                );
+            }
+            
+            // Find common guarded type
+            const guardedTypes = typeGuards.map(g => g.guardedType);
+            const commonGuardedType = this.getCommonType(guardedTypes);
+            
+            if (isErrorType(commonGuardedType)) {
+                return factory.createErrorType(
+                    `Cannot infer common type: type guard guarded types are incompatible`,
+                    commonGuardedType.message,
+                    types[0].node
+                );
+            }
+            
+            // Return a type guard with the common guarded type
+            return factory.createTypeGuardType(
+                firstGuard.parameterName,
+                firstGuard.parameterIndex,
+                commonGuardedType,
+                types[0].node
+            );
+        }
+
         // Separate null types from non-null types
         const nullTypes = types.filter(t => t.kind === TypeKind.Null);
         const nonNullTypes = types.filter(t => t.kind !== TypeKind.Null);
@@ -2017,43 +2137,68 @@ export class TypeCTypeUtils {
             }
             // Handle function types by recursively finding common return type
             // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify
-            else if (nonNullTypes.every(t => isFunctionType(t))) {
-                const functionTypes = nonNullTypes.filter(isFunctionType);
+            // CRITICAL FIX: Resolve reference types to handle type aliases like StringGuard
+            else if (nonNullTypes.every(t => {
+                const resolved = isReferenceType(t) ? this.typeProvider().resolveReference(t) : t;
+                return isFunctionType(resolved);
+            })) {
+                // Resolve any references to get actual function types
+                const functionTypes = nonNullTypes.map(t =>
+                    isReferenceType(t) ? this.typeProvider().resolveReference(t) : t
+                ).filter(isFunctionType);
                 
-                // Check if all functions have the same signature (parameter count and types)
+                // Check if all functions have the same parameter count
                 const firstFunc = functionTypes[0];
-                const allSameSignature = functionTypes.every(fn => {
-                    if (fn.parameters.length !== firstFunc.parameters.length) return false;
-                    return fn.parameters.every((param, i) =>
-                        this.areTypesEqual(param.type, firstFunc.parameters[i].type).success
-                    );
-                });
+                const allSameParamCount = functionTypes.every(fn =>
+                    fn.parameters.length === firstFunc.parameters.length
+                );
                 
-                if (allSameSignature) {
-                    // Unify return types
-                    const returnTypes = functionTypes.map(fn => fn.returnType);
-                    const commonReturnType = this.getCommonType(returnTypes);
-                    
-                    if (isErrorType(commonReturnType)) {
-                        return commonReturnType;
-                    }
-                    
-                    // Create function type with unified return type
-                    commonType = factory.createFunctionType(
-                        firstFunc.parameters,
-                        commonReturnType,
-                        firstFunc.fnType,
-                        firstFunc.genericParameters,
-                        types[0].node
-                    );
-                } else {
-                    // Different signatures - can't unify
+                if (!allSameParamCount) {
                     return factory.createErrorType(
-                        `Cannot infer common type: function signatures differ`,
+                        `Cannot infer common type: function parameter counts differ`,
                         undefined,
                         types[0].node
                     );
                 }
+                
+                // Unify parameter types (find common type for each position)
+                // This allows never to unify with concrete types
+                const unifiedParams: { name: string; type: TypeDescription; isMut: boolean }[] = [];
+                for (let i = 0; i < firstFunc.parameters.length; i++) {
+                    const paramTypesAtPosition = functionTypes.map(fn => fn.parameters[i].type);
+                    const commonParamType = this.getCommonType(paramTypesAtPosition);
+                    
+                    if (isErrorType(commonParamType)) {
+                        return factory.createErrorType(
+                            `Cannot infer common type: function parameter ${i + 1} has incompatible types: ${paramTypesAtPosition.map(t => t.toString()).join(', ')}`,
+                            undefined,
+                            types[0].node
+                        );
+                    }
+                    
+                    unifiedParams.push({
+                        name: firstFunc.parameters[i].name,
+                        type: commonParamType,
+                        isMut: firstFunc.parameters[i].isMut
+                    });
+                }
+                
+                // Unify return types
+                const returnTypes = functionTypes.map(fn => fn.returnType);
+                const commonReturnType = this.getCommonType(returnTypes);
+                
+                if (isErrorType(commonReturnType)) {
+                    return commonReturnType;
+                }
+                
+                // Create function type with unified parameter and return types
+                commonType = factory.createFunctionType(
+                    unifiedParams,
+                    commonReturnType,
+                    firstFunc.fnType,
+                    firstFunc.genericParameters,
+                    types[0].node
+                );
             }
             // CRITICAL FIX: Check if types differ only in nullability
             // This allows u32? and u32 to unify to u32?

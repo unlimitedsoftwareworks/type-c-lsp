@@ -85,6 +85,13 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                 // Get scope from the type of the base expression
                 return this.getScopeFromBaseExpressionType(container.expr);
             }
+            // Handle edge case: TypeGuard created in expression context
+            // This happens during autocomplete after "expr." where parser ambiguously
+            // creates a TypeGuard node. Extract the actual expression from the QualifiedReference.
+            
+            if(ast.isQualifiedReference(container.$container)) {
+                return this.getScopeFromBaseExpressionType(container.$container)
+            }
         }
         else if (scopeUtils.isRefTypeQualifiedReference(container, context)) {
             // Another check to keep typing happy

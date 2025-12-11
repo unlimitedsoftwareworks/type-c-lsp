@@ -35,6 +35,18 @@ export function isMemberResolution(container: AstNode, context: ReferenceInfo): 
         }
     }
 
+    // Handle edge case: parser creates TypeGuard in expression context
+    // This happens when typing "result." and triggering autocomplete in a return statement
+    // The parser ambiguously interprets it as a potential TypeGuard (x is Type)
+    // but it's actually member access on an expression
+    if (ast.isTypeGuard(container) && context.property === 'param' && context.reference.$refText === '') {
+        // Empty reference text suggests we're at autocomplete position after a dot
+        // Check if parent is a QualifiedReference in expression context
+        if (ast.isQualifiedReference(container.$container)) {
+            return true;
+        }
+    }
+
     return false;
 }
 

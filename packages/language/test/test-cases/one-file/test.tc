@@ -1,7 +1,7 @@
-fn abs(x: u32) -> u32 {
+fn abs(x: u32) -> u64 {
     let result: string = do {
         return if x < 0 => "hi" else "hehe"  // Type inferred as u32
     }
-
-    return result.length() as u32
+    
+    return result.length()
 }

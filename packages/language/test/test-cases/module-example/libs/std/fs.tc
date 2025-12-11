@@ -195,7 +195,8 @@ type File = class {
      * Used to create a file from existing attributes
      */
     fn init(path: string, fileHandler: u64){
-        this.{path: path, fileHandler: fileHandler}
+        this.path = path
+        this.fileHandler = fileHandler
     }
 
     static fn fromTemp() {

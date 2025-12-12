@@ -1,0 +1,8 @@
+let z: u32 = 1
+/// @Error(TCE142): Type annotations must reference type declarations, not variables
+let x: z = 1
+
+/// @Error(TCE142): Type annotations must reference type declarations, not variables
+fn test(x: x) -> u32 {
+    return 1
+}

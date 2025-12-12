@@ -2221,10 +2221,42 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * ```
      */
     checkReferenceType = (node: ast.ReferenceType, accept: ValidationAcceptor): void => {
-        // Get the referenced type declaration
+        // Get the referenced entity
         const ref = node.field?.ref;
-        if (!ref || !ast.isTypeDeclaration(ref)) {
-            return; // Not a type declaration, skip
+        if (!ref) {
+            return; // Unresolved reference, will be reported elsewhere
+        }
+        
+        // Check if the reference points to a variable instead of a type
+        // Variables include: VariableDeclaration, FunctionParameter, ClassAttributeDecl, IteratorVar, VariablePattern
+        const isVariable =
+            ast.isVariableDeclaration(ref) ||
+            ast.isFunctionParameter(ref) ||
+            ast.isClassAttributeDecl(ref) ||
+            ast.isIteratorVar(ref) ||
+            ast.isVariablePattern(ref);
+        
+        if (isVariable) {
+            const errorCode = ErrorCode.TC_VARIABLE_USED_AS_TYPE;
+            const variableKind = ast.isVariableDeclaration(ref) ? 'variable' :
+                                ast.isFunctionParameter(ref) ? 'parameter' :
+                                ast.isClassAttributeDecl(ref) ? 'attribute' :
+                                ast.isIteratorVar(ref) ? 'iterator variable' :
+                                'pattern variable';
+            accept('error',
+                `Cannot use ${variableKind} '${this.getReferenceName(ref)}' as a type. Type annotations must reference type declarations, not variables.`,
+                {
+                    node,
+                    property: 'field',
+                    code: errorCode
+                }
+            );
+            return;
+        }
+        
+        // Continue with existing generic argument validation
+        if (!ast.isTypeDeclaration(ref)) {
+            return; // Not a type declaration, skip generic validation
         }
         
         // Get the generic parameters from the type declaration
@@ -2828,5 +2860,27 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
             });
         }
+    }
+
+    /**
+     * Helper method to get the name of a referenced entity.
+     */
+    private getReferenceName(ref: AstNode): string {
+        if (ast.isVariableDeclaration(ref)) {
+            return ref.name;
+        }
+        if (ast.isFunctionParameter(ref)) {
+            return ref.name;
+        }
+        if (ast.isClassAttributeDecl(ref)) {
+            return ref.name;
+        }
+        if (ast.isIteratorVar(ref)) {
+            return ref.name || 'unknown';
+        }
+        if (ast.isVariablePattern(ref)) {
+            return ref.name || 'unknown';
+        }
+        return 'unknown';
     }
 }

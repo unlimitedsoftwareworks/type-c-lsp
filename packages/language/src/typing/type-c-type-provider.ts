@@ -2061,13 +2061,13 @@ export class TypeCTypeProvider {
 
     /**
      * Infer the type of an integer literal.
-     * 
+     *
      * Uses contextual typing when available:
      * - `let x: u32 = 10` → infers 10 as u32
      * - `n < 2` where n is u32 → infers 2 as u32
      * - `10u32` → explicit suffix overrides context
      * - `let x = 10` → defaults to i32
-     * 
+     *
      * This makes compiled language semantics work naturally without explicit suffixes everywhere.
      */
     private inferIntegerLiteral(node: ast.IntegerLiteral): TypeDescription {
@@ -2083,7 +2083,11 @@ export class TypeCTypeProvider {
         }
 
         // Try to use contextual typing
-        const expectedType = this.getExpectedType(node);
+        let expectedType = this.getExpectedType(node);
+        // Resolve reference types (e.g., type aliases like `type int = u32`)
+        if (expectedType && isReferenceType(expectedType)) {
+            expectedType = this.resolveReference(expectedType);
+        }
         if (expectedType && this.isIntegerType(expectedType)) {
             // Use the expected integer type
             return expectedType;
@@ -2095,6 +2099,7 @@ export class TypeCTypeProvider {
 
     /**
      * Check if a type is an integer type (not float).
+     * Note: This expects a resolved type (not a ReferenceType).
      */
     private isIntegerType(type: TypeDescription): boolean {
         const integerKinds = [
@@ -2106,6 +2111,7 @@ export class TypeCTypeProvider {
 
     /**
      * Check if a type is a float type (f32 or f64).
+     * Note: This expects a resolved type (not a ReferenceType).
      */
     private isFloatType(type: TypeDescription): boolean {
         return type.kind === TypeKind.F32 || type.kind === TypeKind.F64;
@@ -2127,7 +2133,11 @@ export class TypeCTypeProvider {
         }
 
         // Try to use contextual typing
-        const expectedType = this.getExpectedType(node);
+        let expectedType = this.getExpectedType(node);
+        // Resolve reference types (e.g., type aliases like `type float = f32`)
+        if (expectedType && isReferenceType(expectedType)) {
+            expectedType = this.resolveReference(expectedType);
+        }
         if (expectedType && this.isFloatType(expectedType)) {
             // Use the expected float type (f32 or f64)
             return expectedType;
@@ -3634,6 +3644,24 @@ export class TypeCTypeProvider {
         }
 
         // Infer the collection type
+        if(ast.isForRangeIterator(foreachStmt)) {
+            // It is a for .. in A, B
+            if(foreachStmt.iterType) {
+                return this.getType(foreachStmt.iterType)
+            }
+
+            if(!foreachStmt.start || !foreachStmt.end){
+                return factory.createErrorType('Unable to infer iterator variable type when no bounds are defined')
+            }
+
+            const startType = this.inferExpression(foreachStmt.start);
+
+            return startType;
+        }
+
+        if(!ast.isForEachIterator(foreachStmt)) {
+            return factory.createErrorType('Unknown foreach statement');
+        }
         const collectionType = this.inferExpression(foreachStmt.collection);
         
         // Determine if this is the index or value variable

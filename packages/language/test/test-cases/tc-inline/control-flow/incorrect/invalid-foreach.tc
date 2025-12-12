@@ -1,0 +1,25 @@
+fn test() {
+    /// @Type(x): i32
+    foreach x in 1, 2, 3 {
+
+    }
+}
+
+type int = u64
+
+fn test2() {
+    /// @Error(TCE120): Range start must be a non-floating point integer
+    foreach x : int in [1], 2, 3 {
+
+    }
+
+    /// @Error(TCE120): Range end must be a non-floating point integer
+    foreach x : int in 1, "hi", 3 {
+
+    }
+    
+    /// @Error(TCE120): Range step must be a non-floating point integer
+    foreach x : int in 1, 1, "1" {
+
+    }
+}

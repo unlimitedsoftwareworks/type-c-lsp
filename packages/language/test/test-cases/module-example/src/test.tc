@@ -1,6 +1,9 @@
 from fib import fib
 from mathlib.math import math
 
+/**
+ * Public Namespace
+ */
 namespace Zelda {
     type Triangle = u32
 }
@@ -26,9 +29,23 @@ fn main() {
 
     let vec = {x: 1u32, y: 1u32, z: 1u32}
 
-    let z = vec.{
+    let z1 = vec.{
         x: 1,
         y: 1,
         z: 1
     }
+
+    foreach x in [1, 2, 3] {
+        x = x
+    }
+
+    foreach x: Zelda.Triangle in 1, 10, 1 {
+
+    }
 }
+
+type int = u32
+
+let xint: int = 1
+
+let z: xint = "hi"

@@ -453,7 +453,8 @@ ForStatement:
     kind='for' (init=Statement)? ';' (condition=Expression)? ';' (update=Expression)? body=BlockStatement;
 
 ForeachStatement:
-    kind='foreach'(indexVar=IteratorVar ',')? valueVar=IteratorVar  'in' (collection=Expression) body=BlockStatement;
+    {infer ForRangeIterator} kind='foreach' valueVar=IteratorVar (':' iterType=DataType<false>)? 'in' start=Expression ',' end=Expression (',' step=Expression)  body=BlockStatement |
+    {infer ForEachIterator} kind='foreach'(indexVar=IteratorVar ',')? valueVar=IteratorVar  'in' (collection=Expression) body=BlockStatement;
 
 IteratorVar:
     {infer IteratorVar} name=ID;

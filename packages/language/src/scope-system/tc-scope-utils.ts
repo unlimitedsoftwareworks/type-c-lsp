@@ -141,11 +141,14 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
             declarations.push(...getDeclarationsFromContainer(container.init));
         }
     }
-    else if (ast.isForeachStatement(container)){
+    else if (ast.isForEachIterator(container)){
         if(container.indexVar){
             declarations.push(container.indexVar)
         }
 
+        declarations.push(container?.valueVar)
+    }
+    else if (ast.isForRangeIterator(container)) {
         declarations.push(container?.valueVar)
     }
     else if (ast.isClassType(container)) {

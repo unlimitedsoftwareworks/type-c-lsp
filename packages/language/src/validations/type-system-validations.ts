@@ -93,7 +93,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ThisExpression: this.checkExpressionForErrors,
             VariablePattern: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
-            ObjectUpdate: this.checkObjectUpdateFields
+            ObjectUpdate: this.checkObjectUpdateFields,
+            ForEachIterator: this.checkForEachIterator,
+            ForRangeIterator: this.checkForRangeIterator,
         };
     }
 
@@ -2663,7 +2665,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * let fn2 = nonGeneric<u32>               // ❌ Error - function is not generic
      * ```
      */
-    checkQualifiedReferenceGenerics = (node: ast.QualifiedReference, accept: ValidationAcceptor): void => {
+    checkQualifiedReferenceGenerics(node: ast.QualifiedReference, accept: ValidationAcceptor) {
         // Only validate if the reference is resolved
         const ref = node.reference?.ref;
         if (!ref) {
@@ -2735,6 +2737,96 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: errorCode
                 }
             );
+        }
+    }
+
+    checkForEachIterator(node: ast.ForEachIterator, accept: ValidationAcceptor) {
+        const iteratorType = this.typeProvider.getType(node.valueVar);
+
+        if(isErrorType(iteratorType)) {
+            accept('error', iteratorType.message || 'Cannot infer iterator variable type', {
+                node: node.valueVar,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        }
+    }
+    
+    checkForRangeIterator(node: ast.ForRangeIterator, accept: ValidationAcceptor) {
+        // Validate that start, end, and step are all non-floating point integers
+        let startType = this.typeProvider.getType(node.start);
+        let endType = this.typeProvider.getType(node.end);
+        let stepType = this.typeProvider.getType(node.step);
+
+        // Resolve reference types (e.g., type aliases)
+        if (isReferenceType(startType)) {
+            const resolved = this.typeProvider.resolveReference(startType);
+            if (resolved) startType = resolved;
+        }
+        if (isReferenceType(endType)) {
+            const resolved = this.typeProvider.resolveReference(endType);
+            if (resolved) endType = resolved;
+        }
+        if (isReferenceType(stepType)) {
+            const resolved = this.typeProvider.resolveReference(stepType);
+            if (resolved) stepType = resolved;
+        }
+
+        // Skip validation if any type is already an error (will be reported elsewhere)
+        const hasError = isErrorType(startType) || isErrorType(endType) || isErrorType(stepType);
+        
+        if (!hasError) {
+            // Check start is integer
+            if (!isIntegerType(startType) && startType.kind !== TypeKind.Never) {
+                accept('error', `Range start must be a non-floating point integer, but got '${startType.toString()}'`, {
+                    node: node.start,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+
+            // Check end is integer
+            if (!isIntegerType(endType) && endType.kind !== TypeKind.Never) {
+                accept('error', `Range end must be a non-floating point integer, but got '${endType.toString()}'`, {
+                    node: node.end,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+
+            // Check step is integer
+            if (!isIntegerType(stepType) && stepType.kind !== TypeKind.Never) {
+                accept('error', `Range step must be a non-floating point integer, but got '${stepType.toString()}'`, {
+                    node: node.step,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+
+        // Validate iterator type annotation if specified
+        if (node.iterType) {
+            let iterType = this.typeProvider.getType(node.iterType);
+            
+            // Resolve reference types (e.g., type aliases)
+            if (isReferenceType(iterType)) {
+                const resolved = this.typeProvider.resolveReference(iterType);
+                if (resolved) iterType = resolved;
+            }
+            
+            if (!isIntegerType(iterType) && !isErrorType(iterType) && iterType.kind !== TypeKind.Never) {
+                accept('error', `Range iterator type must be a non-floating point integer, but got '${iterType.toString()}'`, {
+                    node: node.iterType,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+
+        // Validate that the iterator variable type is properly inferred
+        // If no explicit type is provided, it inherits from the start value
+        const valueVarType = this.typeProvider.getType(node.valueVar);
+        
+        if (isErrorType(valueVarType)) {
+            accept('error', valueVarType.message || 'Cannot infer iterator variable type', {
+                node: node.valueVar,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
         }
     }
 }

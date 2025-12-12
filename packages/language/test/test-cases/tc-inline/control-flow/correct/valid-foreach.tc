@@ -1,0 +1,20 @@
+fn test() {
+    /// @Type(x): i32
+    foreach x in 1, 2, 3 {
+
+    }
+}
+
+type int = u64
+
+fn test2() {
+    /// @Type(x): int
+    foreach x : int in 1, 2, 3 {
+
+    }
+
+
+    foreach x : int in 1, "hi".length(), 3 {
+
+    }
+}

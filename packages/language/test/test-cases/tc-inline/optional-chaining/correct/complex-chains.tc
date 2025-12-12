@@ -2,9 +2,9 @@
 // Tests edge cases and complex chaining patterns
 
 type Data = interface {
-    fn getValue() -> u32
+    fn getValue() -> string
     fn getNext() -> Data?
-    fn getArray() -> u32[]
+    fn getArray() -> string[]
 }
 
 type Wrapper = interface {
@@ -38,7 +38,7 @@ fn main() {
     // v5: u32 (unwrapped by ??)
     
     // ✅ Optional chain in function argument
-    fn process(x: u32?) -> void {}
+    fn process(x: string?) -> void {}
     process(d?.getValue())
     // Passes u32? to function expecting u32?
     

@@ -1,0 +1,5 @@
+// Test for nullable primitive type aliases
+type int = u32
+
+// This should produce an error - cannot make primitive type nullable
+let z: int? = 1

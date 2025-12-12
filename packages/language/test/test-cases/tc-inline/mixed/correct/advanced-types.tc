@@ -33,11 +33,11 @@ type LinkedNode<T> = class {
 }
 
 fn testNullableChains() -> void {
-    /// @Type(node1): LinkedNode<i32>
-    let node1: LinkedNode<i32> = new LinkedNode<i32>(1)
-    /// @Type(nextNode): LinkedNode<i32>?
+    /// @Type(node1): LinkedNode<string>
+    let node1: LinkedNode<string> = new LinkedNode<string>("1")
+    /// @Type(nextNode): LinkedNode<string>?
     let nextNode = node1.next
-    /// @Type(nextValue): i32?
+    /// @Type(nextValue): string?
     let nextValue = node1.next?.value
 }
 

@@ -2,7 +2,7 @@
 // Tests operations that exit optional safety or fundamentally change the value
 
 type Data = interface {
-    fn getValue() -> u32
+    fn getValue() -> string
 }
 
 type Container = interface {

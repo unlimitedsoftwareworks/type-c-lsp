@@ -30,8 +30,8 @@ fn isString(x: string) -> x is string {
     return true
 }
 
-/// @Type(isNullableNumber): fn(x: u32) -> x is u32?
-fn isNullableNumber(x: u32) -> x is u32? {
+/// @Type(isNullableNumber): fn(x: u32) -> x is string?
+fn isNullableNumber(x: u32) -> x is string? {
     return true
 }
 

@@ -38,7 +38,7 @@ type StructType = struct { field: u32 }
 type UnionType = u32 | f32
 type FunctionType = fn(u32) -> u32
 type ArrayType = u32[]
-type NullableType = u32?
+type NullableType = {x: u32}?
 
 // Generic types with same base name are OK if parameters differ
 type Container<T> = struct { value: T }

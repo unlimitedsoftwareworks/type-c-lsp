@@ -28,10 +28,10 @@ import {
     TypeDescription,
     TypeKind
 } from "../typing/type-c-types.js";
-import * as factory from "../typing/type-factory.js";
 import { TypeCTypeUtils } from "../typing/type-utils.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import * as valUtils from "./tc-valdiation-helper.js";
+import { TypeCTypeFactory } from "../typing/type-factory.js";
 
 /**
  * Type system validator for Type-C.
@@ -45,11 +45,13 @@ import * as valUtils from "./tc-valdiation-helper.js";
 export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     private readonly typeProvider: TypeCTypeProvider;
     private readonly typeUtils: TypeCTypeUtils;
+    private readonly typeFactory: TypeCTypeFactory;
 
     constructor(services: TypeCServices) {
         super();
         this.typeProvider = services.typing.TypeProvider;
         this.typeUtils = services.typing.TypeUtils;
+        this.typeFactory = services.typing.TypeFactory;
     }
 
     getChecks(): ValidationChecks<ast.TypeCAstType> {
@@ -96,6 +98,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ObjectUpdate: this.checkObjectUpdateFields,
             ForEachIterator: this.checkForEachIterator,
             ForRangeIterator: this.checkForRangeIterator,
+            NullableType: this.checkNullableType
         };
     }
 
@@ -1071,12 +1074,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const returnStatements = this.collectReturnStatements(body);
 
         if (returnStatements.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
 
         // Get types of all return expressions
         const allReturnTypes = returnStatements
-            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : factory.createVoidType());
+            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : this.typeFactory.createVoidType());
 
         // Filter out recursion placeholders
         const nonPlaceholderTypes = allReturnTypes.filter(type => {
@@ -1089,7 +1092,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const returnTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allReturnTypes;
 
         if (returnTypes.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
 
         // Find common type
@@ -1140,12 +1143,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const yieldStatements = this.collectYieldExpressions(body);
 
         if (yieldStatements.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
 
         // Get types of all yield expressions
         const allYieldTypes = yieldStatements
-            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : factory.createVoidType());
+            .map(stmt => stmt.expr ? this.typeProvider.getType(stmt.expr) : this.typeFactory.createVoidType());
 
         // Filter out recursion placeholders
         const nonPlaceholderTypes = allYieldTypes.filter(type => {
@@ -1158,7 +1161,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const yieldTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allYieldTypes;
 
         if (yieldTypes.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
 
         // Find common type
@@ -2862,6 +2865,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
     }
 
+    checkNullableType(node: ast.NullableType, accept: ValidationAcceptor) {
+        let type = this.typeProvider.getType(node.baseType);
+
+        if(this.typeUtils.isTypeBasic(type)) {
+            accept('error', 'Basic types cannot be nullables', {
+                node: node,
+                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+            });
+        }
+    }
+
     /**
      * Helper method to get the name of a referenced entity.
      */
@@ -2883,4 +2897,5 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         return 'unknown';
     }
+
 }

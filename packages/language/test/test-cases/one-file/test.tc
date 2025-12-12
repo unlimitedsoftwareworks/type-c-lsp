@@ -1,0 +1,18 @@
+// @test: Test correct optional chaining behavior
+// Tests TypeScript-compliant optional chaining propagation
+
+type Vec = interface {
+    fn set(vec: {x: u32, y: i32}?) -> void
+    fn set(vec: null) -> void
+    fn get() -> {data: {f: fn() -> {x: u32, y: u32}}}
+    fn method() -> {nested: {value: u32}}
+}
+
+type Container = interface {
+    fn getValue() -> u32
+    fn getVec() -> Vec
+}
+
+fn main() {
+    let v: Vec? = null
+    let c: Container? = null

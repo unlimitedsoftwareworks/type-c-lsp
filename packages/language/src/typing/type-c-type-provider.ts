@@ -52,8 +52,8 @@ import {
     TypeKind,
     VariantConstructorTypeDescription
 } from './type-c-types.js';
-import * as factory from './type-factory.js';
 import { TypeCTypeUtils } from './type-utils.js';
+import { TypeCTypeFactory } from './type-factory.js';
 
 /**
  * Main type provider service.
@@ -71,6 +71,9 @@ export class TypeCTypeProvider {
 
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
+    
+    /** Type Factory service */
+    private readonly typeFactory: TypeCTypeFactory;
     /**
      * Tracks functions currently being inferred to prevent infinite recursion.
      *
@@ -116,6 +119,8 @@ export class TypeCTypeProvider {
         this.expectedTypeCache = new DocumentCache(services.shared);
         this.patternValidationErrorCache = new DocumentCache(services.shared);
         this.typeUtils = services.typing.TypeUtils;
+        // Use lazy getter to avoid circular dependency
+        this.typeFactory = services.typing.TypeFactory;
     }
 
     // ========================================================================
@@ -151,7 +156,7 @@ export class TypeCTypeProvider {
      */
     getType(node: AstNode | undefined): TypeDescription {
         if (!node) {
-            return factory.createErrorType('Node is undefined');
+            return this.typeFactory.createErrorType('Node is undefined');
         }
 
         const documentUri = AstUtils.getDocument(node).uri;
@@ -360,7 +365,7 @@ export class TypeCTypeProvider {
                             for (let i = 0; i < args.length; i++) {
                                 if (i === argIndex) {
                                     // Skip the current argument
-                                    argumentTypes.push(factory.createErrorType('__contextual_placeholder__', undefined, node));
+                                    argumentTypes.push(this.typeFactory.createErrorType('__contextual_placeholder__', undefined, node));
                                 } else if (this.expressionNeedsContextualTyping(args[i])) {
                                     // Try to infer contextual argument with current substitutions
                                     // Apply current substitutions to parameter type
@@ -384,7 +389,7 @@ export class TypeCTypeProvider {
                                     
                                     if (hasUnresolvedGenerics) {
                                         // Still has unresolved generics - skip for now
-                                        argumentTypes.push(factory.createErrorType('__contextual_placeholder__', undefined, args[i]));
+                                        argumentTypes.push(this.typeFactory.createErrorType('__contextual_placeholder__', undefined, args[i]));
                                     } else {
                                         // All generics resolved - try to infer this argument's type
                                         // Temporarily set the expected type for contextual expressions
@@ -627,7 +632,7 @@ export class TypeCTypeProvider {
                 if (!isClassType(resolvedClassType)) {
                     // Return error type that will be caught by validations
                     // This allows the validation system to report proper error messages
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot use 'new' with non-class type '${resolvedClassType.toString()}'`,
                         undefined,
                         parent
@@ -913,7 +918,7 @@ export class TypeCTypeProvider {
         // Tuple types are represented directly in grammar, not as separate AST nodes
         if (ast.isTupleType(node)) return this.inferTupleTypeFromDataType(node);
         if (ast.isTypeGuard(node)) return this.inferTypeGuard(node);
-        if (ast.isPrimitiveType(node)) return factory.createPrimitiveTypeFromAST(node);
+        if (ast.isPrimitiveType(node)) return this.typeFactory.createPrimitiveTypeFromAST(node);
         if (ast.isStructType(node)) return this.inferStructType(node);
         if (ast.isVariantType(node)) return this.inferVariantType(node);
         if (ast.isEnumType(node)) return this.inferEnumType(node);
@@ -943,14 +948,14 @@ export class TypeCTypeProvider {
             }
             
             // If we can't infer type from context, return error
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Parameter '${node.name}' requires type annotation or must be in a context where type can be inferred`,
                 undefined,
                 node
             );
         }
         if (ast.isGenericType(node)) return this.inferGenericType(node);
-        if (ast.isNamespaceDecl(node)) return factory.createNamespaceType(node.name, node, node);
+        if (ast.isNamespaceDecl(node)) return this.typeFactory.createNamespaceType(node.name, node, node);
         if (ast.isExternFFIDecl(node)) return this.inferFFIDecl(node);
 
         // Class/Interface members
@@ -963,29 +968,29 @@ export class TypeCTypeProvider {
         // Enum and Variant members
         if (ast.isEnumCase(node)) {
             const enumType = AstUtils.getContainerOfType(node, ast.isEnumType);
-            return enumType ? this.getType(enumType) : factory.createErrorType('Enum case outside enum', undefined, node);
+            return enumType ? this.getType(enumType) : this.typeFactory.createErrorType('Enum case outside enum', undefined, node);
         }
         if (ast.isVariantConstructor(node)) {
             const variantType = AstUtils.getContainerOfType(node, ast.isVariantType);
             if (!variantType) {
-                return factory.createErrorType('Variant constructor outside variant', undefined, node);
+                return this.typeFactory.createErrorType('Variant constructor outside variant', undefined, node);
             }
 
             // Get the variant's type declaration to create a proper reference
             const variantDecl = AstUtils.getContainerOfType(variantType, ast.isTypeDeclaration);
             if (!variantDecl) {
-                return factory.createErrorType('Variant type without declaration', undefined, node);
+                return this.typeFactory.createErrorType('Variant type without declaration', undefined, node);
             }
 
             // Get the resolved variant type
             // We need VariantTypeDescription, not ReferenceType
             const resolvedVariant = this.getType(variantDecl.definition);
             if (!isVariantType(resolvedVariant)) {
-                return factory.createErrorType('Expected variant type', undefined, node);
+                return this.typeFactory.createErrorType('Expected variant type', undefined, node);
             }
 
             // Create a VariantConstructorType as the return type
-            const constructorReturnType = factory.createVariantConstructorType(
+            const constructorReturnType = this.typeFactory.createVariantConstructorType(
                 resolvedVariant,
                 node.name,
                 node,
@@ -997,10 +1002,10 @@ export class TypeCTypeProvider {
             // Create a function type for the constructor
             // The parameters come from the constructor definition (node.params)
             const params = node.params.map((p: ast.VariantConstructorField) =>
-                factory.createFunctionParameterType(p.name, this.getType(p.type))
+                this.typeFactory.createFunctionParameterType(p.name, this.getType(p.type))
             );
 
-            return factory.createFunctionType(
+            return this.typeFactory.createFunctionType(
                 params,
                 constructorReturnType,
                 'fn',
@@ -1015,12 +1020,12 @@ export class TypeCTypeProvider {
         // Built-in symbols
         if (ast.isBuiltinSymbolID(node)) return this.getType(node.type);
         if (ast.isBuiltinSymbolFn(node)) {
-            const params = node.args.map(arg => factory.createFunctionParameterType(
+            const params = node.args.map(arg => this.typeFactory.createFunctionParameterType(
                 arg.name,
                 this.getType(arg.type),
                 arg.isMut
             ));
-            return factory.createFunctionType(params, this.getType(node.returnType), 'fn', [], node);
+            return this.typeFactory.createFunctionType(params, this.getType(node.returnType), 'fn', [], node);
         }
         if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
         if (ast.isVariantConstructorField(node)) return this.inferVariantConstructorField(node);
@@ -1031,7 +1036,7 @@ export class TypeCTypeProvider {
         if (ast.isVariablePattern(node)) return this.inferVariablePattern(node);
         if (ast.isKeyValuePair(node)) return this.inferKeyValuePair(node);
 
-        return factory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
+        return this.typeFactory.createErrorType(`Cannot infer type for ${node.$type}`, undefined, node);
     }
 
     // ========================================================================
@@ -1040,12 +1045,12 @@ export class TypeCTypeProvider {
 
     private inferArrayType(node: ast.ArrayType): TypeDescription {
         const elementType = this.getType(node.arrayOf);
-        return factory.createArrayType(elementType, node);
+        return this.typeFactory.createArrayType(elementType, node);
     }
 
     private inferNullableType(node: ast.NullableType): TypeDescription {
         const baseType = this.getType(node.baseType);
-        return factory.createNullableType(baseType, node);
+        return this.typeFactory.createNullableType(baseType, node);
     }
 
     private inferUnionType(node: ast.UnionType): TypeDescription {
@@ -1065,7 +1070,7 @@ export class TypeCTypeProvider {
             types.push(right);
         }
 
-        return this.typeUtils.simplifyType(factory.createUnionType(types, node));
+        return this.typeUtils.simplifyType(this.typeFactory.createUnionType(types, node));
     }
 
     private inferJoinType(node: ast.JoinType): TypeDescription {
@@ -1085,20 +1090,20 @@ export class TypeCTypeProvider {
             types.push(right);
         }
 
-        return this.typeUtils.simplifyType(factory.createJoinType(types, node));
+        return this.typeUtils.simplifyType(this.typeFactory.createJoinType(types, node));
     }
 
     private inferTupleTypeFromDataType(node: ast.TupleType): TypeDescription {
         // Tuple types have a 'types' property with array of DataType
         const elementTypes = node.types.map(t => this.getType(t));
-        return factory.createTupleType(elementTypes, node);
+        return this.typeFactory.createTupleType(elementTypes, node);
     }
 
     private inferTypeGuard(node: ast.TypeGuard): TypeDescription {
         // TypeGuard: param=[FunctionParameter:ID] 'is' type=DataType<false>
         const paramRef = node.param?.ref;
         if (!paramRef) {
-            return factory.createErrorType('Unresolved type guard parameter reference', undefined, node);
+            return this.typeFactory.createErrorType('Unresolved type guard parameter reference', undefined, node);
         }
         
         const parameterName = paramRef.name;
@@ -1108,46 +1113,46 @@ export class TypeCTypeProvider {
         const parameterIndex = paramRef.$containerIndex ?? -1;
         
         if (parameterIndex === -1) {
-            return factory.createErrorType('Could not determine parameter index for type guard', undefined, node);
+            return this.typeFactory.createErrorType('Could not determine parameter index for type guard', undefined, node);
         }
         
         const guardedType = this.getType(node.type);
 
         if(!parameterName) {
-            return factory.createErrorType("Cannot guard parameter without a name");
+            return this.typeFactory.createErrorType("Cannot guard parameter without a name");
         }
         
-        return factory.createTypeGuardType(parameterName, parameterIndex, guardedType, node);
+        return this.typeFactory.createTypeGuardType(parameterName, parameterIndex, guardedType, node);
     }
 
     private inferStructType(node: ast.StructType): TypeDescription {
-        const fields = node.fields.map(f => factory.createStructField(
+        const fields = node.fields.map(f => this.typeFactory.createStructField(
             f.name,
             this.getType(f.type),
             f
         ));
-        return factory.createStructType(fields, !node.name, node);
+        return this.typeFactory.createStructType(fields, !node.name, node);
     }
 
     private inferVariantType(node: ast.VariantType): TypeDescription {
-        const constructors = node.constructors.map(c => factory.createVariantConstructor(
+        const constructors = node.constructors.map(c => this.typeFactory.createVariantConstructor(
             c.name,
-            c.params?.map(p => factory.createStructField(p.name, this.getType(p.type), p)) ?? []
+            c.params?.map(p => this.typeFactory.createStructField(p.name, this.getType(p.type), p)) ?? []
         ));
-        return factory.createVariantType(constructors, node);
+        return this.typeFactory.createVariantType(constructors, node);
     }
 
     private inferEnumType(node: ast.EnumType): TypeDescription {
-        const cases = node.cases.map(c => factory.createEnumCase(
+        const cases = node.cases.map(c => this.typeFactory.createEnumCase(
             c.name,
             c.init ? this.evalIntegerLiteral(c.init) : undefined
         ));
 
         const encoding = node.encoding
-            ? factory.createIntegerTypeFromString(node.encoding, node)
+            ? this.typeFactory.createIntegerTypeFromString(node.encoding, node)
             : undefined;
 
-        return factory.createEnumType(cases, encoding, node);
+        return this.typeFactory.createEnumType(cases, encoding, node);
     }
 
     private evalIntegerLiteral(node: ast.IntegerLiteral): number | undefined {
@@ -1174,13 +1179,13 @@ export class TypeCTypeProvider {
 
     private inferStringEnumType(node: ast.StringEnumType): TypeDescription {
         // Langium parser already strips quotes from STRING terminals, use values directly
-        return factory.createStringEnumType(node.cases, node);
+        return this.typeFactory.createStringEnumType(node.cases, node);
     }
 
     private inferInterfaceType(node: ast.InterfaceType): TypeDescription {
         const methods = node.methods.map(m => this.inferMethodHeader(m));
         const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
-        return factory.createInterfaceType(methods, superTypes, node);
+        return this.typeFactory.createInterfaceType(methods, superTypes, node);
     }
 
     private inferClassType(node: ast.ClassType): TypeDescription {
@@ -1190,7 +1195,7 @@ export class TypeCTypeProvider {
             // This allows `this` expressions to get the class type without infinite recursion
             // Stub methods have void return types to break cycles
             const attributes = node.attributes?.map(attrDecl =>
-                factory.createAttributeType(
+                this.typeFactory.createAttributeType(
                     attrDecl.name,
                     this.getType(attrDecl.type),
                     attrDecl.isStatic ?? false,
@@ -1204,7 +1209,7 @@ export class TypeCTypeProvider {
             const stubMethods = node.methods?.map(m => {
                 const methodHeader = m.method;
                 const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-                const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+                const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
                     arg.isMut
@@ -1214,7 +1219,7 @@ export class TypeCTypeProvider {
                 // Otherwise use void as placeholder to break cycles
                 const returnType = methodHeader.header?.returnType
                     ? this.getType(methodHeader.header.returnType)
-                    : factory.createVoidType(m);
+                    : this.typeFactory.createVoidType(m);
 
                 return {
                     names: methodHeader.names,
@@ -1232,7 +1237,7 @@ export class TypeCTypeProvider {
             const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
             // Return class with stub methods to break recursion
-            return factory.createClassType(attributes, stubMethods, superTypes, implementations, node);
+            return this.typeFactory.createClassType(attributes, stubMethods, superTypes, implementations, node);
         }
 
         // Mark this class as being inferred
@@ -1241,7 +1246,7 @@ export class TypeCTypeProvider {
         try {
             // node.attributes is directly an Array<ClassAttributeDecl>
             const attributes = node.attributes?.map(attrDecl =>
-                factory.createAttributeType(
+                this.typeFactory.createAttributeType(
                     attrDecl.name,
                     this.getType(attrDecl.type),
                     attrDecl.isStatic ?? false,
@@ -1253,7 +1258,7 @@ export class TypeCTypeProvider {
             const methods = node.methods?.map(m => {
             const methodHeader = m.method;
             const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-            const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+            const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                 arg.name,
                 this.getType(arg.type),
                 arg.isMut
@@ -1267,7 +1272,7 @@ export class TypeCTypeProvider {
                 return {
                     names: methodHeader.names,
                     parameters: params,
-                    returnType: factory.createVoidType(m),
+                    returnType: this.typeFactory.createVoidType(m),
                     node: methodHeader,
                     genericParameters: genericParams,
                     isStatic: m.isStatic ?? false,
@@ -1295,7 +1300,7 @@ export class TypeCTypeProvider {
                         returnType = this.inferReturnTypeFromBody(m.body);
                     } else {
                         // No body or expression (abstract method or interface method)
-                        returnType = factory.createVoidType(m);
+                        returnType = this.typeFactory.createVoidType(m);
                     }
                 }
 
@@ -1319,7 +1324,7 @@ export class TypeCTypeProvider {
 
             const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
-            return factory.createClassType(attributes, methods, superTypes, implementations, node);
+            return this.typeFactory.createClassType(attributes, methods, superTypes, implementations, node);
         } finally {
             // Always remove from the set, even if inference fails
             this.inferringClasses.delete(node);
@@ -1327,7 +1332,7 @@ export class TypeCTypeProvider {
     }
 
     private inferImplementationType(node: ast.ImplementationType): TypeDescription {
-        const attributes = node.attributes?.map(a => factory.createAttributeType(
+        const attributes = node.attributes?.map(a => this.typeFactory.createAttributeType(
             a.name,
             this.getType(a.type),
             a.isStatic ?? false,
@@ -1347,21 +1352,21 @@ export class TypeCTypeProvider {
 
         const targetType = node.superType ? this.getType(node.superType) : undefined;
 
-        return factory.createImplementationType(attributes, methods, targetType, node);
+        return this.typeFactory.createImplementationType(attributes, methods, targetType, node);
     }
 
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-        const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
+        const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
         const returnType = node.header?.returnType
             ? this.getType(node.header.returnType)
-            : factory.createVoidType(node);
+            : this.typeFactory.createVoidType(node);
 
-        return factory.createMethodType(
+        return this.typeFactory.createMethodType(
             node.names,
             params,
             returnType,
@@ -1380,7 +1385,7 @@ export class TypeCTypeProvider {
     private inferClassMethod(node: ast.ClassMethod): TypeDescription {
         const methodHeader = node.method;
         const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-        const params = methodHeader.header?.args?.map(arg => factory.createFunctionParameterType(
+        const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
             arg.isMut
@@ -1391,7 +1396,7 @@ export class TypeCTypeProvider {
         const containingClass = AstUtils.getContainerOfType(node, ast.isClassType);
         if (containingClass && this.inferringMethods.has(node)) {
             // Return a placeholder function type with void return type to break the cycle
-            return factory.createFunctionType(params, factory.createVoidType(node), 'fn', genericParams, node);
+            return this.typeFactory.createFunctionType(params, this.typeFactory.createVoidType(node), 'fn', genericParams, node);
         }
 
         // Mark this method as being inferred
@@ -1417,11 +1422,11 @@ export class TypeCTypeProvider {
                     returnType = this.inferReturnTypeFromBody(node.body);
                 } else {
                     // No body or expression (abstract method or interface method)
-                    returnType = factory.createVoidType(node);
+                    returnType = this.typeFactory.createVoidType(node);
                 }
             }
 
-            return factory.createFunctionType(params, returnType, 'fn', genericParams, node);
+            return this.typeFactory.createFunctionType(params, returnType, 'fn', genericParams, node);
         } finally {
             // Always remove from the set, even if inference fails
             this.inferringMethods.delete(node);
@@ -1447,7 +1452,7 @@ export class TypeCTypeProvider {
         
         // Otherwise, use the MethodHeader directly (for interfaces, etc.)
         const methodType = this.inferMethodHeader(node);
-        return factory.createFunctionType(
+        return this.typeFactory.createFunctionType(
             methodType.parameters,
             methodType.returnType,
             'fn',
@@ -1457,20 +1462,20 @@ export class TypeCTypeProvider {
     }
 
     private inferFunctionType(node: ast.FunctionType): TypeDescription {
-        const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
+        const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg?.name ?? '_',
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
         const returnType = node.header?.returnType
             ? this.getType(node.header.returnType)
-            : factory.createVoidType(node);
+            : this.typeFactory.createVoidType(node);
 
-        return factory.createFunctionType(params, returnType, node.fnType, [], node);
+        return this.typeFactory.createFunctionType(params, returnType, node.fnType, [], node);
     }
 
     private inferCoroutineType(node: ast.CoroutineType): TypeDescription {
-        const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
+        const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
             arg.isMut
@@ -1479,15 +1484,15 @@ export class TypeCTypeProvider {
         // The "returnType" in the header actually represents the yield type
         const yieldType = node.header?.returnType
             ? this.getType(node.header.returnType)
-            : factory.createVoidType(node);
+            : this.typeFactory.createVoidType(node);
 
-        return factory.createCoroutineType(params, yieldType, node);
+        return this.typeFactory.createCoroutineType(params, yieldType, node);
     }
 
     private inferReferenceType(node: ast.ReferenceType): TypeDescription {
         const declaration: AstNode | undefined = node?.field?.ref;
         if (!declaration) {
-            return factory.createErrorType('Unresolved type reference', undefined, node);
+            return this.typeFactory.createErrorType('Unresolved type reference', undefined, node);
         }
 
 
@@ -1504,7 +1509,7 @@ export class TypeCTypeProvider {
         if (ast.isTypeDeclaration(declaration)) {
             let genericArgs = node.genericArgs?.map(arg => this.getType(arg)) ?? [];
             // Regular type reference (e.g., Option, Array<T>)
-            return factory.createReferenceType(declaration, genericArgs, node);
+            return this.typeFactory.createReferenceType(declaration, genericArgs, node);
         }
 
         // We could also reference a variant constructor directly
@@ -1514,9 +1519,9 @@ export class TypeCTypeProvider {
                 let genericArgs = node.genericArgs?.map(arg => this.getType(arg)) ?? [];
                 const variantContainer = baseVariant.node?.$container;
                 const typeDecl = variantContainer && ast.isTypeDeclaration(variantContainer) ? variantContainer : undefined;
-                return factory.createVariantConstructorType(baseVariant, declaration.name, declaration, genericArgs, node, typeDecl);
+                return this.typeFactory.createVariantConstructorType(baseVariant, declaration.name, declaration, genericArgs, node, typeDecl);
             }
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Expected variant type`,
                 undefined,
                 node
@@ -1525,7 +1530,7 @@ export class TypeCTypeProvider {
 
         // Handle any other identifiable references that might be types
         const declType = declaration.$type || 'unknown';
-        return factory.createErrorType(
+        return this.typeFactory.createErrorType(
             `Reference does not point to a type declaration or generic parameter (found: ${declType})`,
             undefined,
             node
@@ -1569,24 +1574,24 @@ export class TypeCTypeProvider {
 
     private inferGenericType(node: ast.GenericType): TypeDescription {
         const constraint = node.constraint ? this.getType(node.constraint) : undefined;
-        return factory.createGenericType(node.name, constraint, node, node);
+        return this.typeFactory.createGenericType(node.name, constraint, node, node);
     }
 
     private inferFFIDecl(node: ast.ExternFFIDecl): TypeDescription {
         const methods = node.methods?.map(m => {
-            const params = m.header.args?.map(arg => factory.createFunctionParameterType(
+            const params = m.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
                 arg.name,
                 this.getType(arg.type),
                 arg.isMut
             )) ?? [];
             const returnType = m.header.returnType
                 ? this.getType(m.header.returnType)
-                : factory.createVoidType(m);
+                : this.typeFactory.createVoidType(m);
 
-            return factory.createMethodType([m.name], params, returnType, undefined);
+            return this.typeFactory.createMethodType([m.name], params, returnType, undefined);
         }) ?? [];
 
-        return factory.createFFIType(
+        return this.typeFactory.createFFIType(
             node.name,
             node.dynlib.substring(1, node.dynlib.length - 1), // Remove quotes
             methods,
@@ -1645,7 +1650,7 @@ export class TypeCTypeProvider {
                 // Extract generic parameters from the function's AST
                 const genericParams = (symbol.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
 
-                const params = symbol.args.map(arg => factory.createFunctionParameterType(
+                const params = symbol.args.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
                     arg.isMut
@@ -1653,7 +1658,7 @@ export class TypeCTypeProvider {
                 const returnType = this.getType(symbol.returnType);
 
                 // Create function type WITH generic parameters from the AST
-                const functionType = factory.createFunctionType(params, returnType, 'fn', genericParams, symbol);
+                const functionType = this.typeFactory.createFunctionType(params, returnType, 'fn', genericParams, symbol);
                 symbol.names.forEach(name => {
                     methods.push({
                         name,
@@ -1670,7 +1675,7 @@ export class TypeCTypeProvider {
             }
         }
 
-        return factory.createPrototypeType(node.name, methods, properties, node);
+        return this.typeFactory.createPrototypeType(node.name, methods, properties, node);
     }
 
     // ========================================================================
@@ -1701,7 +1706,7 @@ export class TypeCTypeProvider {
      */
     private inferFunctionDeclaration(node: ast.FunctionDeclaration): TypeDescription {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-        const params = node.header?.args?.map(arg => factory.createFunctionParameterType(
+        const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
             arg.isMut
@@ -1714,14 +1719,14 @@ export class TypeCTypeProvider {
             if (node.header?.returnType) {
                 // Explicit return type provided - use it
                 const returnType = this.getType(node.header.returnType);
-                return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
+                return this.typeFactory.createFunctionType(params, returnType, node.fnType, genericParams, node);
             } else {
                 // In recursive call - return an error placeholder to break cycle
                 // The actual return type will be inferred from non-recursive paths
                 // Using error type instead of void so validators ignore it
-                return factory.createFunctionType(
+                return this.typeFactory.createFunctionType(
                     params,
-                    factory.createErrorType('__recursion_placeholder__', undefined, node),
+                    this.typeFactory.createErrorType('__recursion_placeholder__', undefined, node),
                     node.fnType,
                     genericParams,
                     node
@@ -1749,7 +1754,7 @@ export class TypeCTypeProvider {
                 }
             }
 
-            return factory.createFunctionType(params, returnType, node.fnType, genericParams, node);
+            return this.typeFactory.createFunctionType(params, returnType, node.fnType, genericParams, node);
         } finally {
             // Always remove from the set, even if inference fails
             this.inferringFunctions.delete(node);
@@ -1776,12 +1781,12 @@ export class TypeCTypeProvider {
             const returnStatements = this.collectReturnStatements(body);
 
             if (returnStatements.length === 0) {
-                return factory.createVoidType();
+                return this.typeFactory.createVoidType();
             }
 
             // Get types of all return expressions
             const allReturnTypes = returnStatements
-                .map(stmt => stmt.expr ? this.getType(stmt.expr) : factory.createVoidType());
+                .map(stmt => stmt.expr ? this.getType(stmt.expr) : this.typeFactory.createVoidType());
 
             // Filter out recursion placeholders (error types with specific message)
             const nonPlaceholderTypes = allReturnTypes.filter(type => {
@@ -1795,14 +1800,14 @@ export class TypeCTypeProvider {
             const returnTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allReturnTypes;
 
             if (returnTypes.length === 0) {
-                return factory.createVoidType();
+                return this.typeFactory.createVoidType();
             }
 
             // Find common type
             return this.typeUtils.getCommonType(returnTypes);
         }
 
-        return factory.createVoidType();
+        return this.typeFactory.createVoidType();
     }
 
     /**
@@ -1825,12 +1830,12 @@ export class TypeCTypeProvider {
             const yieldExpressions = this.collectYieldExpressions(body);
 
             if (yieldExpressions.length === 0) {
-                return factory.createVoidType();
+                return this.typeFactory.createVoidType();
             }
 
             // Get types of all yield expressions
             const allYieldTypes = yieldExpressions
-                .map(yieldExpr => yieldExpr.expr ? this.getType(yieldExpr.expr) : factory.createVoidType());
+                .map(yieldExpr => yieldExpr.expr ? this.getType(yieldExpr.expr) : this.typeFactory.createVoidType());
 
             // Filter out recursion placeholders (error types with specific message)
             const nonPlaceholderTypes = allYieldTypes.filter(type => {
@@ -1844,14 +1849,14 @@ export class TypeCTypeProvider {
             const yieldTypes = nonPlaceholderTypes.length > 0 ? nonPlaceholderTypes : allYieldTypes;
 
             if (yieldTypes.length === 0) {
-                return factory.createVoidType();
+                return this.typeFactory.createVoidType();
             }
 
             // Find common type
             return this.typeUtils.getCommonType(yieldTypes);
         }
 
-        return factory.createVoidType();
+        return this.typeFactory.createVoidType();
     }
 
     /**
@@ -1957,13 +1962,13 @@ export class TypeCTypeProvider {
         if (node.initializer) {
             inferredType = this.inferExpression(node.initializer);
         } else {
-            return factory.createErrorType('Variable has no type annotation or initializer', undefined, node);
+            return this.typeFactory.createErrorType('Variable has no type annotation or initializer', undefined, node);
         }
 
         // Check if variable is marked as nullable with the `?` suffix
         // Example: let arr? = new Array<u32>(10) → Array<u32>?
         if (ast.isVariableDeclSingle(node) && node.isNullable) {
-            return factory.createNullableType(inferredType, node);
+            return this.typeFactory.createNullableType(inferredType, node);
         }
 
         return inferredType;
@@ -1995,20 +2000,20 @@ export class TypeCTypeProvider {
             
             // If expected type is a string enum, keep as literal for validation
             if (expectedType && isStringEnumType(expectedType)) {
-                return factory.createStringLiteralType(stringValue, node);
+                return this.typeFactory.createStringLiteralType(stringValue, node);
             }
             
             // Otherwise, widen to string type (for better compatibility with generic inference)
             // This includes: expected type is string, expected type is generic, or no expected type
-            return factory.createStringType(node);
+            return this.typeFactory.createStringType(node);
         }
         if (ast.isBinaryStringLiteralExpression(node)) {
-            return factory.createArrayType(factory.createU8Type(node), node);
+            return this.typeFactory.createArrayType(this.typeFactory.createU8Type(node), node);
         }
         if (ast.isTrueBooleanLiteral(node) || ast.isFalseBooleanLiteral(node)) {
-            return factory.createBoolType(node);
+            return this.typeFactory.createBoolType(node);
         }
-        if (ast.isNullLiteralExpression(node)) return factory.createNullType(node);
+        if (ast.isNullLiteralExpression(node)) return this.typeFactory.createNullType(node);
 
 
         // Operations
@@ -2040,23 +2045,23 @@ export class TypeCTypeProvider {
 
         // Type operations
         if (ast.isTypeCastExpression(node)) return this.inferTypeCastExpression(node);
-        if (ast.isInstanceCheckExpression(node)) return factory.createBoolType(node);
+        if (ast.isInstanceCheckExpression(node)) return this.typeFactory.createBoolType(node);
 
         // Special
         if (ast.isThisExpression(node)) return this.inferThisExpression(node);
-        if (ast.isThrowExpression(node)) return factory.createNeverType(node);
-        if (ast.isUnreachableExpression(node)) return factory.createNeverType(node);
+        if (ast.isThrowExpression(node)) return this.typeFactory.createNeverType(node);
+        if (ast.isUnreachableExpression(node)) return this.typeFactory.createNeverType(node);
         if (ast.isYieldExpression(node)) return this.inferYieldExpression(node);
         if (ast.isCoroutineExpression(node)) return this.inferCoroutineExpression(node);
         if (ast.isDenullExpression(node)) return this.inferDenullExpression(node);
         if (ast.isTupleExpression(node)) return this.inferTupleExpression(node);
-        if (ast.isWildcardExpression(node)) return factory.createAnyType(node);
+        if (ast.isWildcardExpression(node)) return this.typeFactory.createAnyType(node);
         if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
 
         if(node == undefined) {
             console.log("undefined node")
         }
-        return factory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
+        return this.typeFactory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
     }
 
     /**
@@ -2078,8 +2083,8 @@ export class TypeCTypeProvider {
         if (suffixMatch) {
             // Explicit suffix always takes precedence
             const typeStr = suffixMatch[0];
-            return factory.createIntegerTypeFromString(typeStr, node)
-                ?? factory.createI32Type(node);
+            return this.typeFactory.createIntegerTypeFromString(typeStr, node)
+                ?? this.typeFactory.createI32Type(node);
         }
 
         // Try to use contextual typing
@@ -2094,7 +2099,7 @@ export class TypeCTypeProvider {
         }
 
         // Default to i32 for decimal literals without suffix
-        return factory.createI32Type(node);
+        return this.typeFactory.createI32Type(node);
     }
 
     /**
@@ -2129,7 +2134,7 @@ export class TypeCTypeProvider {
     private inferFloatLiteral(node: ast.FloatingPointLiteral): TypeDescription {
         // If there's an explicit 'f' suffix, it's f32
         if (ast.isFloatLiteral(node)) {
-            return factory.createF32Type(node);
+            return this.typeFactory.createF32Type(node);
         }
 
         // Try to use contextual typing
@@ -2144,19 +2149,19 @@ export class TypeCTypeProvider {
         }
 
         // Default to f64 (double precision)
-        return factory.createF64Type(node);
+        return this.typeFactory.createF64Type(node);
     }
 
     private inferQualifiedReference(node: ast.QualifiedReference): TypeDescription {
         // Langium cross-references have a .ref property pointing to the target AST node
         const ref = node.reference;
         if (!ref || !('ref' in ref) || !ref.ref) {
-            return factory.createErrorType('Unresolved reference', undefined, node);
+            return this.typeFactory.createErrorType('Unresolved reference', undefined, node);
         }
 
         const refNode = ref.ref;
         if (!refNode) {
-            return factory.createErrorType('Invalid reference node', undefined, node);
+            return this.typeFactory.createErrorType('Invalid reference node', undefined, node);
         }
         let type = this.getType(refNode);
         const originalType = type;
@@ -2172,7 +2177,7 @@ export class TypeCTypeProvider {
                 const genericParams = type.genericParameters || [];
                 
                 if (genericParams.length !== node.genericArgs.length) {
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Generic argument count mismatch: expected ${genericParams.length}, got ${node.genericArgs.length}`,
                         undefined,
                         node
@@ -2191,7 +2196,7 @@ export class TypeCTypeProvider {
             }
             
             // If not a function type, having generic args is an error
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot apply generic arguments to non-generic type '${type.toString()}'`,
                 undefined,
                 node
@@ -2200,15 +2205,15 @@ export class TypeCTypeProvider {
 
         if (isVariantType(type) && ast.isTypeDeclaration(node.reference.ref)) {
             // Generics are pushed to the constuctor i.e Option.Some<T>
-            return factory.createMetaVariantType(type, [], node);
+            return this.typeFactory.createMetaVariantType(type, [], node);
         }
 
         if(isEnumType(type) && ast.isTypeDeclaration(node.reference.ref)) {
-            return factory.createMetaEnumType(type, node);
+            return this.typeFactory.createMetaEnumType(type, node);
         }
 
         if(isClassType(type) && ast.isTypeDeclaration(node.reference.ref)) {
-            return factory.createMetaClassType(type, node);
+            return this.typeFactory.createMetaClassType(type, node);
         }
 
         return originalType;
@@ -2229,12 +2234,12 @@ export class TypeCTypeProvider {
 
         // Comparison operators return bool
         if (['==', '!=', '<', '>', '<=', '>='].includes(node.op)) {
-            return factory.createBoolType(node);
+            return this.typeFactory.createBoolType(node);
         }
 
         // Logical operators
         if (['&&', '||'].includes(node.op)) {
-            return factory.createBoolType(node);
+            return this.typeFactory.createBoolType(node);
         }
 
         // Null coalescing
@@ -2262,7 +2267,7 @@ export class TypeCTypeProvider {
         const exprType = this.inferExpression(node.expr);
 
         if (node.op === '!') {
-            return factory.createBoolType(node);
+            return this.typeFactory.createBoolType(node);
         }
 
         // Check for operator overloads on classes/interfaces
@@ -2525,7 +2530,7 @@ export class TypeCTypeProvider {
             const constructorType = baseType;
             // Create a temporary reference type to use the helper method
             if (constructorType.variantDeclaration && constructorType.genericArgs.length > 0) {
-                const tempRef = factory.createReferenceType(
+                const tempRef = this.typeFactory.createReferenceType(
                     constructorType.variantDeclaration,
                     constructorType.genericArgs,
                     constructorType.node
@@ -2556,7 +2561,7 @@ export class TypeCTypeProvider {
                 }
                 // Wrap in nullable if using optional chaining
                 if (node.isNullable || baseIsNullable) {
-                    memberType = factory.createNullableType(memberType, node);
+                    memberType = this.typeFactory.createNullableType(memberType, node);
                 }
                 return memberType;
             }
@@ -2565,7 +2570,7 @@ export class TypeCTypeProvider {
             const method = baseType.methods.find(m => m.names.includes(memberName));
             if (method) {
                 // Convert method to function type
-                memberType = factory.createFunctionType(
+                memberType = this.typeFactory.createFunctionType(
                     method.parameters,
                     method.returnType,
                     'fn',
@@ -2578,19 +2583,19 @@ export class TypeCTypeProvider {
                 }
                 // Wrap in nullable if using optional chaining
                 if (node.isNullable || baseIsNullable) {
-                    memberType = factory.createNullableType(memberType, node);
+                    memberType = this.typeFactory.createNullableType(memberType, node);
                 }
                 return memberType;
             }
             
             // Member not found in the class type
-            return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
+            return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
         // Normal case: Get the target node via Langium's linker (handles overload resolution)
         const targetRef = node.element.ref;
         if (!targetRef) {
-            return factory.createErrorType(`Member '${memberName}' not found`, undefined, node);
+            return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
         /**
@@ -2660,7 +2665,7 @@ export class TypeCTypeProvider {
             if (method) {
                 // Convert method to function type for return
                 // The method already has substituted types (e.g., return type is `string`, not `T`)
-                memberType = factory.createFunctionType(
+                memberType = this.typeFactory.createFunctionType(
                     method.parameters,
                     method.returnType,
                     'fn',
@@ -2686,16 +2691,16 @@ export class TypeCTypeProvider {
         // If the element is a type-decl, we wrap it in a meta type!
         if (ast.isTypeDeclaration(targetRef)) {
             if (isVariantType(memberType)) {
-                memberType = factory.createMetaVariantType(memberType);
+                memberType = this.typeFactory.createMetaVariantType(memberType);
             }
             else if (isVariantConstructorType(memberType)) {
-                memberType = factory.createMetaVariantConstructorType(memberType, [], targetRef);
+                memberType = this.typeFactory.createMetaVariantConstructorType(memberType, [], targetRef);
             }
             else if (isEnumType(memberType)) {
-                memberType = factory.createMetaEnumType(memberType, targetRef);
+                memberType = this.typeFactory.createMetaEnumType(memberType, targetRef);
             }
             else if (isClassType(memberType)) {
-                memberType = factory.createMetaClassType(memberType, targetRef);
+                memberType = this.typeFactory.createMetaClassType(memberType, targetRef);
             }
         }
 
@@ -2703,7 +2708,7 @@ export class TypeCTypeProvider {
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain: a?.b.c → c is nullable)
         if(node.isNullable || baseIsNullable) {
-            memberType = factory.createNullableType(memberType, node);
+            memberType = this.typeFactory.createNullableType(memberType, node);
         }
         return memberType;
     }
@@ -2733,7 +2738,7 @@ export class TypeCTypeProvider {
         if (isCoroutineType(fnType)) {
             // Coroutine instances are callable and yield their yieldType
             // No need to apply generic substitutions here - already done in coroutine creation
-            return isOptionalCall ? factory.createNullableType(fnType.yieldType, node) : fnType.yieldType;
+            return isOptionalCall ? this.typeFactory.createNullableType(fnType.yieldType, node) : fnType.yieldType;
         }
 
         // Handle regular function types
@@ -2742,7 +2747,7 @@ export class TypeCTypeProvider {
             // If so, we need to infer generics from the call arguments
             if (isVariantConstructorType(fnType.returnType)) {
                 const returnType = this.inferVariantConstructorCall(fnType.returnType, node);
-                return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
+                return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
             }
 
             const genericParams = fnType.genericParameters || [];
@@ -2786,19 +2791,19 @@ export class TypeCTypeProvider {
             }
 
             // Wrap return type in nullable if this was an optional call
-            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
+            return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
         }
 
         // Handle variant constructor calls (e.g., Result.Ok(42))
         // This is the key feature: infer generics from arguments and create a properly typed constructor
         if (isVariantConstructorType(fnType)) {
             const returnType = this.inferVariantConstructorCall(fnType, node);
-            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
+            return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
         }
 
         // Handle old-style variant constructor calls (backward compatibility)
         if (fnType.kind === TypeKind.Variant) {
-            return isOptionalCall ? factory.createNullableType(fnType, node) : fnType;
+            return isOptionalCall ? this.typeFactory.createNullableType(fnType, node) : fnType;
         }
 
         // Handle callable classes/interfaces (with () operator overload)
@@ -2814,12 +2819,12 @@ export class TypeCTypeProvider {
             
             const operatorOverload = this.resolveOperatorOverload(fnType, '()', argTypes, node);
             if (operatorOverload) {
-                return isOptionalCall ? factory.createNullableType(operatorOverload, node) : operatorOverload;
+                return isOptionalCall ? this.typeFactory.createNullableType(operatorOverload, node) : operatorOverload;
             }
             
             // If no call operator found, this is an error
             const typeName = baseClassType ? 'Class' : 'Interface';
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `${typeName} type does not have a call operator '()'. ${baseClassType ? "Use 'new' for constructors." : ''}`,
                 undefined,
                 node
@@ -2828,10 +2833,10 @@ export class TypeCTypeProvider {
 
         if (isMetaVariantConstructorType(fnType)) {
             const returnType = this.inferVariantConstructorCall(fnType.baseVariantConstructor, node);
-            return isOptionalCall ? factory.createNullableType(returnType, node) : returnType;
+            return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
         }
 
-        return factory.createErrorType(
+        return this.typeFactory.createErrorType(
             `Cannot call value of type '${fnType.toString()}'. Only functions, callable classes/interfaces, and variant constructors can be called.`,
             undefined,
             node
@@ -2874,7 +2879,7 @@ export class TypeCTypeProvider {
         }
 
         if (!variantDecl) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Could not find variant declaration for constructor ${constructorType.constructorName}`,
                 undefined,
                 callNode
@@ -2887,7 +2892,7 @@ export class TypeCTypeProvider {
         );
 
         if (!constructorDef) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Constructor '${constructorType.constructorName}' not found in variant`,
                 undefined,
                 callNode
@@ -2920,17 +2925,17 @@ export class TypeCTypeProvider {
         }
 
         // Create a ReferenceType with the inferred generic arguments
-        const variantRefWithGenerics = factory.createReferenceType(
+        const variantRefWithGenerics = this.typeFactory.createReferenceType(
             variantDecl,
             // Sort names per the original declaration order
-            genericParamNames.map(name => genericMap.get(name) ?? factory.createNeverType()),
+            genericParamNames.map(name => genericMap.get(name) ?? this.typeFactory.createNeverType()),
             callNode
         );
 
         // Resolve the reference to get the actual VariantType with substituted generics
         const resolvedVariant = this.resolveReference(variantRefWithGenerics);
         if (!isVariantType(resolvedVariant)) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Failed to resolve variant type for ${constructorType.constructorName}`,
                 undefined,
                 callNode
@@ -2941,11 +2946,11 @@ export class TypeCTypeProvider {
         // Example: Result.Ok(42) returns Result<i32, never>.Ok
         // This represents that the value is specifically an Ok constructor,
         // which is a subtype of Result<i32, never>
-        return factory.createVariantConstructorType(
+        return this.typeFactory.createVariantConstructorType(
             resolvedVariant,
             constructorType.constructorName,
             constructorType.parentConstructor,
-            genericParamNames.map(name => genericMap.get(name) ?? factory.createNeverType()),
+            genericParamNames.map(name => genericMap.get(name) ?? this.typeFactory.createNeverType()),
             callNode,
             variantDecl  // Pass the declaration for display purposes
         );
@@ -2968,7 +2973,7 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
-        return factory.createErrorType('Type does not implement index access operator `[]`', undefined, node);
+        return this.typeFactory.createErrorType('Type does not implement index access operator `[]`', undefined, node);
     }
 
     private inferIndexSet(node: ast.IndexSet): TypeDescription {
@@ -3009,7 +3014,7 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
-        return factory.createErrorType('Type does not implement reverse index access operator `[-]`', undefined, node);
+        return this.typeFactory.createErrorType('Type does not implement reverse index access operator `[-]`', undefined, node);
     }
 
     private inferReverseIndexSet(node: ast.ReverseIndexSet): TypeDescription {
@@ -3078,7 +3083,7 @@ export class TypeCTypeProvider {
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain)
         if (node.isNullable || baseIsNullable) {
-            resultType = factory.createNullableType(resultType, node);
+            resultType = this.typeFactory.createNullableType(resultType, node);
         }
         
         return resultType;
@@ -3109,7 +3114,7 @@ export class TypeCTypeProvider {
             }
 
             // No context available - cannot infer type
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 'Cannot infer type of empty array literal. Provide a type annotation (e.g., let x: T[] = [])',
                 undefined,
                 node
@@ -3129,7 +3134,7 @@ export class TypeCTypeProvider {
                 }
                 
                 // If not an array, return an error type (will be validated separately)
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Array spread requires an array type, but got '${spreadType.toString()}'`,
                     undefined,
                     v
@@ -3148,13 +3153,13 @@ export class TypeCTypeProvider {
             return commonType;
         }
         
-        return factory.createArrayType(commonType, node);
+        return this.typeFactory.createArrayType(commonType, node);
     }
 
     private inferNamedStructConstruction(node: ast.NamedStructConstructionExpression): TypeDescription {
         const fields = node.fields?.flatMap(f => {
             if (ast.isStructFieldKeyValuePair(f)) {
-                return [factory.createStructField(f.name, this.inferExpression(f.expr), f)];
+                return [this.typeFactory.createStructField(f.name, this.inferExpression(f.expr), f)];
             }
             // Handle struct spread: {...base}
             if (ast.isStructSpreadExpression(f)) {
@@ -3177,7 +3182,7 @@ export class TypeCTypeProvider {
             return [];
         }) ?? [];
 
-        return factory.createStructType(fields, false, node);
+        return this.typeFactory.createStructType(fields, false, node);
     }
 
     private inferAnonymousStructConstruction(node: ast.AnonymousStructConstructionExpression): TypeDescription {
@@ -3199,7 +3204,7 @@ export class TypeCTypeProvider {
             
             // Check if the number of expressions matches the number of fields
             if (expressions.length !== expectedStruct.fields.length) {
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Anonymous struct has ${expressions.length} value(s), but expected struct type has ${expectedStruct.fields.length} field(s)`,
                     undefined,
                     node
@@ -3211,18 +3216,18 @@ export class TypeCTypeProvider {
                 const expectedField = expectedStruct.fields[index];
                 const inferredType = this.inferExpression(expr);
                 
-                return factory.createStructField(
+                return this.typeFactory.createStructField(
                     expectedField.name,  // Use expected field name
                     inferredType,        // Use inferred type (will be validated later)
                     expr                 // Use expression as node
                 );
             });
             
-            return factory.createStructType(fields, true, node);
+            return this.typeFactory.createStructType(fields, true, node);
         }
         
         // No expected type or not a struct - cannot infer
-        return factory.createErrorType(
+        return this.typeFactory.createErrorType(
             `Cannot infer type of anonymous struct literal {${node.expressions?.length ?? 0} values}. ` +
             `Anonymous struct literals require a known struct type context (e.g., from return type or variable annotation)`,
             undefined,
@@ -3235,7 +3240,7 @@ export class TypeCTypeProvider {
             return this.getType(node.instanceType);
         }
 
-        return factory.createErrorType('New expression without type', undefined, node);
+        return this.typeFactory.createErrorType('New expression without type', undefined, node);
     }
 
     private inferLambdaExpression(node: ast.LambdaExpression): TypeDescription {
@@ -3254,14 +3259,14 @@ export class TypeCTypeProvider {
                 paramType = expectedFnType.parameters[index].type;
             } else {
                 // No type available
-                paramType = factory.createErrorType(
+                paramType = this.typeFactory.createErrorType(
                     `Parameter '${arg.name}' requires type annotation or must be in a context where type can be inferred`,
                     undefined,
                     arg
                 );
             }
             
-            return factory.createFunctionParameterType(
+            return this.typeFactory.createFunctionParameterType(
                 arg.name,
                 paramType,
                 arg.isMut
@@ -3285,7 +3290,7 @@ export class TypeCTypeProvider {
             }
         }
 
-        return factory.createFunctionType(params, returnType, node.fnType, [], node);
+        return this.typeFactory.createFunctionType(params, returnType, node.fnType, [], node);
     }
 
     /**
@@ -3306,7 +3311,7 @@ export class TypeCTypeProvider {
         const allTypes = elseType ? [...thenTypes, elseType] : thenTypes;
 
         if (allTypes.length === 0) {
-            return factory.createVoidType(node);
+            return this.typeFactory.createVoidType(node);
         }
 
         // Filter out recursion placeholders
@@ -3346,7 +3351,7 @@ export class TypeCTypeProvider {
         const allTypes = defaultType ? [...caseTypes, defaultType] : caseTypes;
 
         if (allTypes.length === 0) {
-            return factory.createVoidType(node);
+            return this.typeFactory.createVoidType(node);
         }
 
         // Filter out recursion placeholders - use non-placeholder types for inference
@@ -3364,7 +3369,7 @@ export class TypeCTypeProvider {
     }
 
     private inferLetInExpression(node: ast.LetInExpression): TypeDescription {
-        return node.expr ? this.inferExpression(node.expr) : factory.createVoidType(node);
+        return node.expr ? this.inferExpression(node.expr) : this.typeFactory.createVoidType(node);
     }
 
     private inferDoExpression(node: ast.DoExpression): TypeDescription {
@@ -3374,22 +3379,22 @@ export class TypeCTypeProvider {
             const returnStatements = this.collectReturnStatementsFromDo(node.body);
             
             if (returnStatements.length === 0) {
-                return factory.createVoidType(node);
+                return this.typeFactory.createVoidType(node);
             }
             
             // Get types of all return expressions
             const allReturnTypes = returnStatements
-                .map(stmt => stmt.expr ? this.getType(stmt.expr) : factory.createVoidType());
+                .map(stmt => stmt.expr ? this.getType(stmt.expr) : this.typeFactory.createVoidType());
             
             if (allReturnTypes.length === 0) {
-                return factory.createVoidType(node);
+                return this.typeFactory.createVoidType(node);
             }
             
             // Find common type
             return this.typeUtils.getCommonType(allReturnTypes);
         }
         
-        return factory.createVoidType(node);
+        return this.typeFactory.createVoidType(node);
     }
 
     private inferTypeCastExpression(node: ast.TypeCastExpression): TypeDescription {
@@ -3398,7 +3403,7 @@ export class TypeCTypeProvider {
         if(node.castType === "as?") {
             let rtype = isReferenceType(type)?this.resolveReference(type):type;
             if(!isNullableType(rtype)){
-                return factory.createNullableType(rtype);
+                return this.typeFactory.createNullableType(rtype);
             }
         }
 
@@ -3412,12 +3417,12 @@ export class TypeCTypeProvider {
             return this.getType(classNode);
         }
 
-        return factory.createErrorType('this outside of class', undefined, node);
+        return this.typeFactory.createErrorType('this outside of class', undefined, node);
     }
 
     private inferYieldExpression(node: ast.YieldExpression): TypeDescription {
         // Yield expression type is void
-        return factory.createVoidType(node);
+        return this.typeFactory.createVoidType(node);
     }
 
     private inferCoroutineExpression(node: ast.CoroutineExpression): TypeDescription {
@@ -3426,14 +3431,14 @@ export class TypeCTypeProvider {
         if (isFunctionType(fnType)) {
             // The coroutine expression wraps a function and creates a coroutine instance
             // For coroutines, the function's returnType is actually the yieldType
-            return factory.createCoroutineType(
+            return this.typeFactory.createCoroutineType(
                 fnType.parameters,
                 fnType.returnType,  // This is the yield type for coroutines
                 node
             );
         }
 
-        return factory.createErrorType('Coroutine of non-function', undefined, node);
+        return this.typeFactory.createErrorType('Coroutine of non-function', undefined, node);
     }
 
     private inferDenullExpression(node: ast.DenullExpression): TypeDescription {
@@ -3452,7 +3457,7 @@ export class TypeCTypeProvider {
         }
 
         const types = node.expressions.map(e => this.inferExpression(e));
-        return factory.createTupleType(types, node);
+        return this.typeFactory.createTupleType(types, node);
     }
 
     private inferDestructuringElement(node: ast.DestructuringElement): TypeDescription {
@@ -3462,22 +3467,22 @@ export class TypeCTypeProvider {
          */
         // Check if underscore -> return never
         if (node.name === undefined) {
-            return factory.createNeverType();
+            return this.typeFactory.createNeverType();
         }
 
         const index = node.$containerIndex;
         const initializer = node.$container.initializer;
         // Unreachable, but create an error, you never know these days
         if (index == undefined || !ast.isVariableDeclaration(node.$container) || !initializer) {
-            return factory.createErrorType('Invalid destructuring element', undefined, node);
+            return this.typeFactory.createErrorType('Invalid destructuring element', undefined, node);
         }
 
         /**
          * Wraps a node with a nullable type if the node is nullable
          */
-        function wrapNode(node: ast.DestructuringElement, t: TypeDescription): TypeDescription {
-            return node.isNullable ? factory.createNullableType(t, node) : t;
-        }
+        const wrapNode = (node: ast.DestructuringElement, t: TypeDescription): TypeDescription => {
+            return node.isNullable ? this.typeFactory.createNullableType(t, node) : t;
+        };
 
         // Infer the type of the initializer
         const initializerType = this.inferExpression(initializer);
@@ -3490,7 +3495,7 @@ export class TypeCTypeProvider {
 
         if (isArrayType(initializerType)) {
             if (node.isSpread) {
-                return wrapNode(node, factory.createArrayType(initializerType.elementType, node));
+                return wrapNode(node, this.typeFactory.createArrayType(initializerType.elementType, node));
             }
             else {
                 return wrapNode(node, initializerType.elementType);
@@ -3512,7 +3517,7 @@ export class TypeCTypeProvider {
                     const structFields = structType.fields;
                     // Grab all previous elements, not including the current one
                     const fieldsToRemove = (node.$container.elements ?? []).slice(0, index).map(e => e.originalName ?? e.name);
-                    const newStructType = factory.createStructType(structFields.filter(f => !fieldsToRemove.includes(f.name)), false, node);
+                    const newStructType = this.typeFactory.createStructType(structFields.filter(f => !fieldsToRemove.includes(f.name)), false, node);
                     return wrapNode(node, newStructType);
                 }
                 else {
@@ -3522,13 +3527,13 @@ export class TypeCTypeProvider {
                         return wrapNode(node, field.type);
                     }
                     else {
-                        return factory.createErrorType(`Field '${node.name}' not found`, undefined, node);
+                        return this.typeFactory.createErrorType(`Field '${node.name}' not found`, undefined, node);
                     }
                 }
             }
         }
 
-        return factory.createErrorType('Invalid destructuring element', undefined, node);
+        return this.typeFactory.createErrorType('Invalid destructuring element', undefined, node);
     }
 
     private inferVariantConstructorField(node: ast.VariantConstructorField): TypeDescription {
@@ -3583,7 +3588,7 @@ export class TypeCTypeProvider {
         // Get the parent ObjectUpdate
         const objectUpdate = node.$container;
         if (!objectUpdate || !ast.isObjectUpdate(objectUpdate)) {
-            return factory.createErrorType('KeyValuePair outside ObjectUpdate', undefined, node);
+            return this.typeFactory.createErrorType('KeyValuePair outside ObjectUpdate', undefined, node);
         }
         
         // Get the base type being updated
@@ -3608,17 +3613,17 @@ export class TypeCTypeProvider {
         // Field not found - return error with appropriate message
         const isClass = isClassType(baseType);
         const fieldKind = isClass ? 'Attribute' : 'Field';
-        return factory.createErrorType(`${fieldKind} '${node.name}' not found in ${baseType.toString()}`, undefined, node);
+        return this.typeFactory.createErrorType(`${fieldKind} '${node.name}' not found in ${baseType.toString()}`, undefined, node);
     }
     
     private inferFFIMethodHeader(node: ast.FFIMethodHeader): TypeDescription {
-        return factory.createFunctionType(
-            node.header.args?.map(arg => factory.createFunctionParameterType(
+        return this.typeFactory.createFunctionType(
+            node.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
                 arg.name,
                 this.getType(arg.type),
                 arg.isMut
             )) ?? [],
-            node.header.returnType ? this.getType(node.header.returnType) : factory.createVoidType(node),
+            node.header.returnType ? this.getType(node.header.returnType) : this.typeFactory.createVoidType(node),
             'fn',
             [],
             node
@@ -3640,7 +3645,7 @@ export class TypeCTypeProvider {
         // Get the containing foreach statement
         const foreachStmt = AstUtils.getContainerOfType(node, ast.isForeachStatement);
         if (!foreachStmt) {
-            return factory.createErrorType('IteratorVar outside foreach statement', undefined, node);
+            return this.typeFactory.createErrorType('IteratorVar outside foreach statement', undefined, node);
         }
 
         // Infer the collection type
@@ -3651,7 +3656,7 @@ export class TypeCTypeProvider {
             }
 
             if(!foreachStmt.start || !foreachStmt.end){
-                return factory.createErrorType('Unable to infer iterator variable type when no bounds are defined')
+                return this.typeFactory.createErrorType('Unable to infer iterator variable type when no bounds are defined')
             }
 
             const startType = this.inferExpression(foreachStmt.start);
@@ -3660,7 +3665,7 @@ export class TypeCTypeProvider {
         }
 
         if(!ast.isForEachIterator(foreachStmt)) {
-            return factory.createErrorType('Unknown foreach statement');
+            return this.typeFactory.createErrorType('Unknown foreach statement');
         }
         const collectionType = this.inferExpression(foreachStmt.collection);
         
@@ -3670,7 +3675,7 @@ export class TypeCTypeProvider {
         // Handle arrays: index is u64, value is element type
         if (isArrayType(collectionType)) {
             if (isIndexVar) {
-                return factory.createU64Type(node);
+                return this.typeFactory.createU64Type(node);
             } else {
                 return collectionType.elementType;
             }
@@ -3687,7 +3692,7 @@ export class TypeCTypeProvider {
             }
         }
         
-        return factory.createErrorType(
+        return this.typeFactory.createErrorType(
             `Type '${collectionType.toString()}' is not iterable. ` +
             `Expected array type or type implementing Iterable<U, V>`,
             undefined,
@@ -3746,7 +3751,7 @@ export class TypeCTypeProvider {
 
         // Return the cached type for this variable
         const documentUri = AstUtils.getDocument(node).uri;
-        return this.typeCache.get(documentUri, node, () => factory.createErrorType(`Failed to infer type for pattern variable '${node.name}'`));
+        return this.typeCache.get(documentUri, node, () => this.typeFactory.createErrorType(`Failed to infer type for pattern variable '${node.name}'`));
     }
 
     /**
@@ -3832,7 +3837,7 @@ export class TypeCTypeProvider {
             
             // Still infer types for sub-patterns to avoid cascading errors
             // Use a placeholder error type that won't create additional validation errors
-            const errorType = factory.createErrorType(
+            const errorType = this.typeFactory.createErrorType(
                 `Pattern expects array type, but got '${contextType.toString()}'`,
                 undefined,
                 pattern
@@ -3876,7 +3881,7 @@ export class TypeCTypeProvider {
             this.setPatternValidationError(pattern, `Pattern expects struct type, but got '${contextType.toString()}'`);
             
             // Still infer types for sub-patterns to avoid cascading errors
-            const errorType = factory.createErrorType(
+            const errorType = this.typeFactory.createErrorType(
                 `Pattern expects struct type, but got '${contextType.toString()}'`,
                 undefined,
                 pattern
@@ -3900,7 +3905,7 @@ export class TypeCTypeProvider {
             } else {
                 // Field not found in struct
                 this.inferPatternTypes(fieldPattern.pattern,
-                    factory.createErrorType(
+                    this.typeFactory.createErrorType(
                         `Field '${fieldName}' not found in struct type`,
                         undefined,
                         fieldPattern
@@ -3914,7 +3919,7 @@ export class TypeCTypeProvider {
         if (pattern.trailVariable) {
             const extractedFieldNames = (pattern.fields ?? []).map(f => f.name);
             const remainingFields = structType.fields.filter(f => !extractedFieldNames.includes(f.name));
-            const remainingStructType = factory.createStructType(remainingFields, false, pattern);
+            const remainingStructType = this.typeFactory.createStructType(remainingFields, false, pattern);
             this.typeCache.set(documentUri, pattern.trailVariable, remainingStructType);
         }
     }
@@ -3941,7 +3946,7 @@ export class TypeCTypeProvider {
         
         if (!hasTypeProperty(pattern)) {
             // No type specified - error
-            const errorType = factory.createErrorType(
+            const errorType = this.typeFactory.createErrorType(
                 `Type pattern missing type annotation`,
                 undefined,
                 pattern
@@ -3976,7 +3981,7 @@ export class TypeCTypeProvider {
             this.inferVariantConstructorPattern(pattern, constructorType, contextType, depth);
         } else {
             // Not a variant constructor - can't destructure parameters
-            const errorType = factory.createErrorType(
+            const errorType = this.typeFactory.createErrorType(
                 `Cannot destructure non-variant type '${patternType.toString()}'`,
                 undefined,
                 pattern
@@ -4024,7 +4029,7 @@ export class TypeCTypeProvider {
 
         if (!constructor) {
             // Constructor not found in variant
-            const errorType = factory.createErrorType(
+            const errorType = this.typeFactory.createErrorType(
                 `Constructor '${constructorType.constructorName}' not found in variant`,
                 undefined,
                 pattern
@@ -4050,7 +4055,7 @@ export class TypeCTypeProvider {
             } else {
                 // Too many parameters in pattern
                 this.inferPatternTypes(params[i],
-                    factory.createErrorType(
+                    this.typeFactory.createErrorType(
                         `Too many parameters in pattern (expected ${constructor.parameters.length})`,
                         undefined,
                         params[i]
@@ -4107,7 +4112,7 @@ export class TypeCTypeProvider {
         else if (isVariantType(contextType)) {
             // No generic args available in plain variant type - use never as fallback
             genericParamNames.forEach(name => {
-                substitutions.set(name, factory.createNeverType());
+                substitutions.set(name, this.typeFactory.createNeverType());
             });
         }
 
@@ -4214,11 +4219,11 @@ export class TypeCTypeProvider {
             // There should be only one definition in the document
             const parseResult = document.parseResult.value;
             if (!ast.isModule(parseResult)) {
-                return factory.createPrototypeType('array', [], []);
+                return this.typeFactory.createPrototypeType('array', [], []);
             }
             const firstDef = parseResult.definitions[0];
             if (!ast.isBuiltinDefinition(firstDef)) {
-                return factory.createPrototypeType('array', [], []);
+                return this.typeFactory.createPrototypeType('array', [], []);
             }
             const prototype = firstDef;
             this.builtinPrototypes.set('array', this.getType(prototype));
@@ -4226,7 +4231,7 @@ export class TypeCTypeProvider {
         }
 
         // Return empty prototype if not found
-        return factory.createPrototypeType('array', [], []);
+        return this.typeFactory.createPrototypeType('array', [], []);
     }
 
     private getStringPrototype(): TypeDescription {
@@ -4239,11 +4244,11 @@ export class TypeCTypeProvider {
         if (document) {
             const parseResult = document.parseResult.value;
             if (!ast.isModule(parseResult)) {
-                return factory.createPrototypeType('string', [], []);
+                return this.typeFactory.createPrototypeType('string', [], []);
             }
             const firstDef = parseResult.definitions[0];
             if (!ast.isBuiltinDefinition(firstDef)) {
-                return factory.createPrototypeType('string', [], []);
+                return this.typeFactory.createPrototypeType('string', [], []);
             }
             const prototype = firstDef;
             this.builtinPrototypes.set('string', this.getType(prototype));
@@ -4251,7 +4256,7 @@ export class TypeCTypeProvider {
         }
 
         // Return empty prototype if not found
-        return factory.createPrototypeType('array', [], []);
+        return this.typeFactory.createPrototypeType('array', [], []);
     }
 
     /**
@@ -4341,7 +4346,7 @@ export class TypeCTypeProvider {
         const finalMap = new Map<string, TypeDescription>();
         for (const [key, values] of inferredGenerics) {
             if (values.length === 0) {
-                finalMap.set(key, factory.createNeverType());
+                finalMap.set(key, this.typeFactory.createNeverType());
                 continue;
             }
             const commonType = this.typeUtils.getCommonType(values);

@@ -21,19 +21,6 @@ import {
     GenericTypeDescription,
     IntegerTypeDescription,
     InterfaceTypeDescription,
-    JoinTypeDescription,
-    MethodType,
-    NullableTypeDescription,
-    ReferenceTypeDescription,
-    StringEnumTypeDescription,
-    StructFieldType,
-    StructTypeDescription,
-    TupleTypeDescription,
-    TypeDescription,
-    TypeKind,
-    UnionTypeDescription,
-    VariantConstructorTypeDescription,
-    VariantTypeDescription,
     isAnyType,
     isArrayType,
     isClassType,
@@ -54,14 +41,27 @@ import {
     isStringLiteralType,
     isStructType,
     isTupleType,
+    isTypeGuardType,
     isUnionType,
     isUnsetType,
     isVariantConstructorType,
     isVariantType,
-    isTypeGuardType,
-    TypeGuardTypeDescription
+    JoinTypeDescription,
+    MethodType,
+    ReferenceTypeDescription,
+    StringEnumTypeDescription,
+    StructFieldType,
+    StructTypeDescription,
+    TupleTypeDescription,
+    TypeDescription,
+    TypeGuardTypeDescription,
+    TypeKind,
+    UnionTypeDescription,
+    VariantConstructorTypeDescription,
+    VariantTypeDescription
 } from "./type-c-types.js";
-import * as factory from "./type-factory.js";
+import { TypeCTypeFactory } from "./type-factory.js";
+
 
 
 // ============================================================================
@@ -96,10 +96,12 @@ export function failure(message: string): TypeCheckResult {
 export class TypeCTypeUtils {
     // Lazy, due to circular dependencies
     readonly typeProvider: () => TypeCTypeProvider;
+    readonly typeFactory: TypeCTypeFactory;
     readonly pendingChecks: Array<{ from: TypeDescription; to: TypeDescription }> = [];
 
     constructor(services: TypeCServices) {
         this.typeProvider = () => services.typing.TypeProvider;
+        this.typeFactory = services.typing.TypeFactory;
     }
 
 
@@ -1478,13 +1480,7 @@ export class TypeCTypeUtils {
         }
 
         if (isNullableType(type)) {
-            const nullableType: NullableTypeDescription = {
-                kind: type.kind,
-                baseType: this.substituteGenerics(type.baseType, substitutions),
-                node: type.node,
-                toString: () => `${this.substituteGenerics(type.baseType, substitutions).toString()}?`
-            };
-            return nullableType;
+            return this.typeFactory.createNullableType(this.substituteGenerics(type.baseType, substitutions));
         }
 
         if (isUnionType(type)) {
@@ -1671,13 +1667,13 @@ export class TypeCTypeUtils {
             return classType;
         }
         if (isInterfaceType(type)) {
-            const substitutedMethods = type.methods.map(m => factory.createMethodType(m.names, m.parameters.map(p => ({
+            const substitutedMethods = type.methods.map(m => this.typeFactory.createMethodType(m.names, m.parameters.map(p => ({
                 name: p.name,
                 type: this.substituteGenerics(p.type, substitutions),
                 isMut: p.isMut
             })), this.substituteGenerics(m.returnType, substitutions), m.node, m.genericParameters, m.isStatic, m.isOverride, m.isLocal));
 
-            return factory.createInterfaceType(substitutedMethods, type.superTypes.map(t => this.substituteGenerics(t, substitutions)), type.node);
+            return this.typeFactory.createInterfaceType(substitutedMethods, type.superTypes.map(t => this.substituteGenerics(t, substitutions)), type.node);
         }
 
         if (isTypeGuardType(type)) {
@@ -1790,7 +1786,7 @@ export class TypeCTypeUtils {
                         const typesEqual = this.areTypesEqual(existing.type, field.type);
                         if (!typesEqual.success) {
                             // Conflicting field types - return error
-                            return factory.createErrorType(
+                            return this.typeFactory.createErrorType(
                                 `Join type has conflicting field '${field.name}': ${existing.type.toString()} in ${existing.sources.join(', ')} vs ${field.type.toString()} in ${structName}`,
                                 undefined,
                                 type.node
@@ -1810,9 +1806,9 @@ export class TypeCTypeUtils {
             
             // Create a merged struct type with all fields
             const allFields = Array.from(mergedFields.entries()).map(([name, info]) =>
-                factory.createStructField(name, info.type, info.nodes[0])
+                this.typeFactory.createStructField(name, info.type, info.nodes[0])
             );
-            return factory.createStructType(allFields, false, type.node);
+            return this.typeFactory.createStructType(allFields, false, type.node);
         }
 
         // Check if all types are interfaces - merge them similarly
@@ -1830,7 +1826,7 @@ export class TypeCTypeUtils {
                 allSuperTypes.push(...iface.superTypes);
             }
             // Create merged interface
-            return factory.createInterfaceType(allMethods, allSuperTypes, type.node);
+            return this.typeFactory.createInterfaceType(allMethods, allSuperTypes, type.node);
         }
 
         // Remove duplicates
@@ -1999,7 +1995,7 @@ export class TypeCTypeUtils {
      */
     getCommonType(types: TypeDescription[]): TypeDescription {
         if (types.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
 
         if (types.length === 1) {
@@ -2012,7 +2008,7 @@ export class TypeCTypeUtils {
         
         // If all types are never, return never
         if (nonNeverTypes.length === 0) {
-            return factory.createNeverType();
+            return this.typeFactory.createNeverType();
         }
         
         // If we filtered out some never types and only one type remains, return it
@@ -2032,7 +2028,7 @@ export class TypeCTypeUtils {
         if (typeGuards.length > 0) {
             // If we have type guards mixed with bools or other types, result is bool
             if (boolTypes.length > 0 || otherTypes.length > 0) {
-                return factory.createBoolType();
+                return this.typeFactory.createBoolType();
             }
             
             // All are type guards - check if they reference the same parameter
@@ -2040,7 +2036,7 @@ export class TypeCTypeUtils {
             const allSameParameter = typeGuards.every(g => g.parameterIndex === firstGuard.parameterIndex);
             
             if (!allSameParameter) {
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common type: type guards reference different parameters`,
                     undefined,
                     types[0].node
@@ -2052,7 +2048,7 @@ export class TypeCTypeUtils {
             const commonGuardedType = this.getCommonType(guardedTypes);
             
             if (isErrorType(commonGuardedType)) {
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common type: type guard guarded types are incompatible`,
                     commonGuardedType.message,
                     types[0].node
@@ -2060,7 +2056,7 @@ export class TypeCTypeUtils {
             }
             
             // Return a type guard with the common guarded type
-            return factory.createTypeGuardType(
+            return this.typeFactory.createTypeGuardType(
                 firstGuard.parameterName,
                 firstGuard.parameterIndex,
                 commonGuardedType,
@@ -2074,7 +2070,7 @@ export class TypeCTypeUtils {
 
         // If all types are null, return null
         if (nonNullTypes.length === 0) {
-            return factory.createNullType();
+            return this.typeFactory.createNullType();
         }
 
         // Find common type of non-null types
@@ -2095,7 +2091,7 @@ export class TypeCTypeUtils {
                     return commonElementType;
                 }
                 
-                commonType = factory.createArrayType(commonElementType, types[0].node);
+                commonType = this.typeFactory.createArrayType(commonElementType, types[0].node);
             }
             // CRITICAL FIX: Handle tuples specially to recursively find common element types
             // This allows tuples with different element types at each position to unify
@@ -2109,7 +2105,7 @@ export class TypeCTypeUtils {
                 const allSameArity = tupleTypes.every(t => t.elementTypes.length === firstTuple.elementTypes.length);
                 
                 if (!allSameArity) {
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot infer common type: tuples have different arities: ${types.map(t => t.toString()).join(', ')}`,
                         undefined,
                         types[0].node
@@ -2123,7 +2119,7 @@ export class TypeCTypeUtils {
                     const commonTypeAtPosition = this.getCommonType(typesAtPosition);
                     
                     if (isErrorType(commonTypeAtPosition)) {
-                        return factory.createErrorType(
+                        return this.typeFactory.createErrorType(
                             `Cannot infer common type: tuple element at position ${i + 1} has incompatible types: ${typesAtPosition.map(t => t.toString()).join(', ')}`,
                             undefined,
                             types[0].node
@@ -2133,7 +2129,7 @@ export class TypeCTypeUtils {
                     commonElementTypes.push(commonTypeAtPosition);
                 }
                 
-                commonType = factory.createTupleType(commonElementTypes, types[0].node);
+                commonType = this.typeFactory.createTupleType(commonElementTypes, types[0].node);
             }
             // Handle function types by recursively finding common return type
             // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify
@@ -2154,7 +2150,7 @@ export class TypeCTypeUtils {
                 );
                 
                 if (!allSameParamCount) {
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot infer common type: function parameter counts differ`,
                         undefined,
                         types[0].node
@@ -2169,7 +2165,7 @@ export class TypeCTypeUtils {
                     const commonParamType = this.getCommonType(paramTypesAtPosition);
                     
                     if (isErrorType(commonParamType)) {
-                        return factory.createErrorType(
+                        return this.typeFactory.createErrorType(
                             `Cannot infer common type: function parameter ${i + 1} has incompatible types: ${paramTypesAtPosition.map(t => t.toString()).join(', ')}`,
                             undefined,
                             types[0].node
@@ -2192,7 +2188,7 @@ export class TypeCTypeUtils {
                 }
                 
                 // Create function type with unified parameter and return types
-                commonType = factory.createFunctionType(
+                commonType = this.typeFactory.createFunctionType(
                     unifiedParams,
                     commonReturnType,
                     firstFunc.fnType,
@@ -2221,7 +2217,7 @@ export class TypeCTypeUtils {
                     
                     // If any were nullable, make the result nullable
                     if (unwrappedTypes.some(item => item.wasNullable)) {
-                        commonType = factory.createNullableType(commonType, types[0].node);
+                        commonType = this.typeFactory.createNullableType(commonType, types[0].node);
                     }
                 } else {
                     // CRITICAL: Handle string literal + string combinations FIRST
@@ -2237,7 +2233,7 @@ export class TypeCTypeUtils {
                     if (allStringRelated && (hasString || hasStringLiterals || hasStringEnums)) {
                         // If any is string type, widen all to string
                         if (hasString) {
-                            commonType = factory.createStringType();
+                            commonType = this.typeFactory.createStringType();
                         } else {
                             // All are string literals/enums - combine them into a string enum
                             const allLiterals = nonNullTypes.filter(isStringLiteralType);
@@ -2254,7 +2250,7 @@ export class TypeCTypeUtils {
                                 }
                             }
                             
-                            commonType = factory.createStringEnumType(Array.from(values), types[0].node);
+                            commonType = this.typeFactory.createStringEnumType(Array.from(values), types[0].node);
                         }
                     } else {
                         // Check if all non-null types are identical
@@ -2325,7 +2321,7 @@ export class TypeCTypeUtils {
                                     } else {
                                         // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
                                         // For now, if types differ, it's an error
-                                        return factory.createErrorType(
+                                        return this.typeFactory.createErrorType(
                                             `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
                                             undefined,
                                             firstType.node
@@ -2346,7 +2342,7 @@ export class TypeCTypeUtils {
             if (isNullableType(commonType)) {
                 return commonType;
             }
-            return factory.createNullableType(commonType, types[0].node);
+            return this.typeFactory.createNullableType(commonType, types[0].node);
         }
 
         return commonType;
@@ -2371,7 +2367,7 @@ export class TypeCTypeUtils {
         // We know all types are ReferenceType from the caller
         const referenceTypes = types.filter(isReferenceType);
         if (referenceTypes.length === 0) {
-            return factory.createErrorType('Expected reference types', undefined, types[0].node);
+            return this.typeFactory.createErrorType('Expected reference types', undefined, types[0].node);
         }
         
         const firstRef = referenceTypes[0];
@@ -2395,7 +2391,7 @@ export class TypeCTypeUtils {
 
             if (concreteTypes.length === 0) {
                 // All are never - keep never
-                unifiedGenericArgs.push(factory.createNeverType());
+                unifiedGenericArgs.push(this.typeFactory.createNeverType());
             } else {
                 // Check if all concrete types are identical
                 const firstConcreteType = concreteTypes[0];
@@ -2406,7 +2402,7 @@ export class TypeCTypeUtils {
                     unifiedGenericArgs.push(firstConcreteType);
                 } else {
                     // Multiple different concrete types - error
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
                         undefined,
                         firstRef.node
@@ -2416,7 +2412,7 @@ export class TypeCTypeUtils {
         }
 
         // Create a reference to the same declaration with unified generic arguments
-        return factory.createReferenceType(declaration, unifiedGenericArgs, firstRef.node);
+        return this.typeFactory.createReferenceType(declaration, unifiedGenericArgs, firstRef.node);
     }
 
     /**
@@ -2459,7 +2455,7 @@ export class TypeCTypeUtils {
         }
 
         if (commonFieldNames.size === 0) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot infer common struct type: no common fields found`,
                 undefined,
                 types[0].node
@@ -2478,7 +2474,7 @@ export class TypeCTypeUtils {
             
             if (isErrorType(commonFieldType)) {
                 // Enhance error message with field context
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common struct type: field '${fieldName}' has incompatible types: ${fieldTypes.map(t => t.toString()).join(', ')}`,
                     undefined,
                     types[0].node
@@ -2493,7 +2489,7 @@ export class TypeCTypeUtils {
         }
 
         // Create the common struct type (not anonymous - show 'struct' keyword)
-        return factory.createStructType(commonFields, false, types[0].node);
+        return this.typeFactory.createStructType(commonFields, false, types[0].node);
     }
 
     /**
@@ -2529,7 +2525,7 @@ export class TypeCTypeUtils {
         }
 
         if (!baseVariantDecl) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 'Cannot infer common type: variant constructor has no base variant declaration',
                 undefined,
                 firstConstructor.node
@@ -2553,7 +2549,7 @@ export class TypeCTypeUtils {
         });
 
         if (!allSameBase) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot infer common type: variant constructors from different variants: ${types.map(t => t.toString()).join(', ')}`,
                 undefined,
                 firstConstructor.node
@@ -2574,7 +2570,7 @@ export class TypeCTypeUtils {
 
             if (concreteTypes.length === 0) {
                 // All are never - keep never
-                unifiedGenericArgs.push(factory.createNeverType());
+                unifiedGenericArgs.push(this.typeFactory.createNeverType());
             } else {
                 // Check if all concrete types are identical
                 const firstConcreteType = concreteTypes[0];
@@ -2585,7 +2581,7 @@ export class TypeCTypeUtils {
                     unifiedGenericArgs.push(firstConcreteType);
                 } else {
                     // Multiple different concrete types - error
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
                         undefined,
                         firstConstructor.node
@@ -2595,7 +2591,7 @@ export class TypeCTypeUtils {
         }
 
         // Create a reference to the base variant with unified generic arguments
-        return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, firstConstructor.node);
+        return this.typeFactory.createReferenceType(baseVariantDecl, unifiedGenericArgs, firstConstructor.node);
     }
 
     /**
@@ -2638,7 +2634,7 @@ export class TypeCTypeUtils {
         }
         
         if (!baseVariantDecl) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 'Cannot infer common type: no base variant declaration found',
                 undefined,
                 types[0].node
@@ -2657,7 +2653,7 @@ export class TypeCTypeUtils {
         });
         
         if (!allSameBase) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot infer common type: types belong to different variants`,
                 undefined,
                 types[0].node
@@ -2693,7 +2689,7 @@ export class TypeCTypeUtils {
             
             if (concreteTypes.length === 0) {
                 // All are never - keep never
-                unifiedGenericArgs.push(factory.createNeverType());
+                unifiedGenericArgs.push(this.typeFactory.createNeverType());
             } else {
                 // Check if all concrete types are identical
                 const firstConcreteType = concreteTypes[0];
@@ -2704,7 +2700,7 @@ export class TypeCTypeUtils {
                     unifiedGenericArgs.push(firstConcreteType);
                 } else {
                     // Multiple different concrete types - error
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot infer common type: generic parameter at position ${i + 1} has incompatible types: ${concreteTypes.map(t => t.toString()).join(', ')}`,
                         undefined,
                         types[0].node
@@ -2714,7 +2710,7 @@ export class TypeCTypeUtils {
         }
         
         // Create a reference to the base variant with unified generic arguments
-        return factory.createReferenceType(baseVariantDecl, unifiedGenericArgs, types[0].node);
+        return this.typeFactory.createReferenceType(baseVariantDecl, unifiedGenericArgs, types[0].node);
     }
 
     // ============================================================================
@@ -2837,7 +2833,7 @@ export class TypeCTypeUtils {
      */
     private combineStringEnums(enums: StringEnumTypeDescription[]): TypeDescription {
         if (enums.length === 0) {
-            return factory.createErrorType('No string enums to combine', undefined);
+            return this.typeFactory.createErrorType('No string enums to combine', undefined);
         }
         
         if (enums.length === 1) {
@@ -2852,7 +2848,7 @@ export class TypeCTypeUtils {
             }
         }
         
-        return factory.createStringEnumType(Array.from(allValues), enums[0].node);
+        return this.typeFactory.createStringEnumType(Array.from(allValues), enums[0].node);
     }
 
     /**
@@ -2928,7 +2924,7 @@ export class TypeCTypeUtils {
      */
     private getLUBForStructs(structs: StructTypeDescription[]): TypeDescription {
         if (structs.length === 0) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 'Cannot compute LUB: no struct types provided',
                 undefined
             );
@@ -2952,7 +2948,7 @@ export class TypeCTypeUtils {
         // Step 2: Check for empty result (not allowed - structs must have fields)
         if (commonFieldNames.size === 0) {
             const structReprs = structs.map(s => s.toString()).join(', ');
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot infer common struct type: no common fields found among ${structReprs}`,
                 'Structs must share at least one field to have a common supertype',
                 structs[0].node
@@ -2975,7 +2971,7 @@ export class TypeCTypeUtils {
             
             if (isErrorType(fieldLUB)) {
                 // Enhanced error message with field context
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common struct type: field '${fieldName}' has incompatible types ${fieldTypes.map(t => t.toString()).join(', ')}`,
                     fieldLUB.message,
                     structs[0].node
@@ -2993,7 +2989,7 @@ export class TypeCTypeUtils {
         }
         
         // Step 4: Create the LUB struct type (not anonymous - represents a supertype)
-        return factory.createStructType(
+        return this.typeFactory.createStructType(
             commonFields,
             false, // Not anonymous - this is a structural supertype
             structs[0].node
@@ -3013,7 +3009,7 @@ export class TypeCTypeUtils {
      */
     private getLUBForInterfaces(interfaces: InterfaceTypeDescription[]): TypeDescription {
         if (interfaces.length === 0) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 'Cannot compute LUB: no interface types provided',
                 undefined
             );
@@ -3043,7 +3039,7 @@ export class TypeCTypeUtils {
         }
         
         if (commonMethodNames.size === 0) {
-            return factory.createErrorType(
+            return this.typeFactory.createErrorType(
                 `Cannot infer common interface type: no common methods found`,
                 undefined,
                 interfaces[0].node
@@ -3071,7 +3067,7 @@ export class TypeCTypeUtils {
             });
             
             if (!allParamsMatch) {
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common interface type: method '${methodName}' has incompatible signatures`,
                     undefined,
                     interfaces[0].node
@@ -3083,7 +3079,7 @@ export class TypeCTypeUtils {
             const returnLUB = this.getCommonType(returnTypes);
             
             if (isErrorType(returnLUB)) {
-                return factory.createErrorType(
+                return this.typeFactory.createErrorType(
                     `Cannot infer common interface type: method '${methodName}' has incompatible return types`,
                     returnLUB.message,
                     interfaces[0].node
@@ -3109,7 +3105,7 @@ export class TypeCTypeUtils {
             allSuperTypes.push(...iface.superTypes);
         }
         
-        return factory.createInterfaceType(commonMethods, allSuperTypes, interfaces[0].node);
+        return this.typeFactory.createInterfaceType(commonMethods, allSuperTypes, interfaces[0].node);
     }
 
     /**
@@ -3133,7 +3129,7 @@ export class TypeCTypeUtils {
      */
     private computeLeastUpperBound(types: TypeDescription[]): TypeDescription {
         if (types.length === 0) {
-            return factory.createVoidType();
+            return this.typeFactory.createVoidType();
         }
         
         if (types.length === 1) {
@@ -3166,7 +3162,7 @@ export class TypeCTypeUtils {
                     
                 case 'class':
                     // Classes are name-based, no structural LUB possible
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot find LUB for different classes: ${categoryTypes.map(t => t.toString()).join(', ')}`,
                         'Classes use name-based identity, not structural typing',
                         types[0].node
@@ -3175,7 +3171,7 @@ export class TypeCTypeUtils {
                 case 'variant':
                     // Already handled by existing variant logic in getCommonType
                     // This should not be reached in normal flow
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         'Variant LUB computation should use existing getCommonVariantConstructorType',
                         undefined,
                         types[0].node
@@ -3192,7 +3188,7 @@ export class TypeCTypeUtils {
                         return firstType;
                     }
                     
-                    return factory.createErrorType(
+                    return this.typeFactory.createErrorType(
                         `Cannot find LUB for types in category '${category}': ${categoryTypes.map(t => t.toString()).join(', ')}`,
                         undefined,
                         types[0].node
@@ -3203,16 +3199,60 @@ export class TypeCTypeUtils {
         // Step 4: Handle mixed categories
         // Special case: string enum + string → string
         if (grouped.has('string-enum') && grouped.has('string')) {
-            return factory.createStringType();
+            return this.typeFactory.createStringType();
         }
         
         // No other mixed category combinations are valid
         const categories = Array.from(grouped.keys()).join(', ');
-        return factory.createErrorType(
+        return this.typeFactory.createErrorType(
             `Cannot find LUB for mixed type categories: ${categories}`,
             `Types: ${types.map(t => t.toString()).join(', ')}`,
             types[0].node
         );
+    }
+
+    /**
+     * Checks if a given type is a basic data type
+     */
+    isTypeBasic(type: TypeDescription) {
+        // Direct primitive types
+        function isBasic(type: TypeDescription){
+            
+            if (type.kind === TypeKind.U8 || type.kind === TypeKind.U16 ||
+                type.kind === TypeKind.U32 || type.kind === TypeKind.U64 ||
+                type.kind === TypeKind.I8 || type.kind === TypeKind.I16 ||
+                type.kind === TypeKind.I32 || type.kind === TypeKind.I64 ||
+                type.kind === TypeKind.F32 || type.kind === TypeKind.F64 ||
+                type.kind === TypeKind.Bool || type.kind === TypeKind.Void ||
+                type.kind === TypeKind.Null
+            ) {
+                return true;
+            }
+
+            return false;
+        }
+
+        if(isBasic(type)){
+            return true;
+        }
+
+        if(!type.node) {
+            return false;
+        }
+
+        if(isReferenceType(type)) {
+            let declType: AstNode = type.declaration.definition;
+            while(ast.isReferenceType(declType)){
+                declType = declType.field?.ref!;
+            }
+            
+            /// string considired primitive but not basic!
+            if (ast.isPrimitiveType(declType) && (!declType.stringType)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
 

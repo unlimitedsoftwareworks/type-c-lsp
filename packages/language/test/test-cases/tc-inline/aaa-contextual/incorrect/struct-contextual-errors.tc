@@ -125,8 +125,8 @@ fn test12() {
 
 // ERROR: Struct with nullable field mismatch
 type NullablePoint = struct {
-    x: f32?,
-    y: f32?
+    x: f32,
+    y: f32
 }
 
 fn test13() {

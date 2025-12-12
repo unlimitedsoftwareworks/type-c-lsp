@@ -7,6 +7,8 @@
 
 import * as ast from "../generated/ast.js";
 import { AstNode } from "langium";
+import { ErrorCode } from "../codes/errors.js";
+import type { TypeCServices } from "../type-c-module.js";
 import {
     TypeDescription,
     TypeKind,
@@ -54,14 +56,17 @@ import {
     MetaEnumTypeDescription,
     MetaClassTypeDescription,
     TypeGuardTypeDescription,
+    isReferenceType,
 } from "./type-c-types.js";
 import { serializer } from "./type-serialization.js";
+import { TypeCTypeProvider } from "./type-c-type-provider.js";
+import { TypeCTypeUtils } from "./type-utils.js";
 
 // ============================================================================
 // Primitive Types
 // ============================================================================
 
-export function createU8Type(node?: AstNode): IntegerTypeDescription {
+function createU8Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.U8,
         signed: false,
@@ -71,7 +76,7 @@ export function createU8Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createU16Type(node?: AstNode): IntegerTypeDescription {
+function createU16Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.U16,
         signed: false,
@@ -81,7 +86,7 @@ export function createU16Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createU32Type(node?: AstNode): IntegerTypeDescription {
+function createU32Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.U32,
         signed: false,
@@ -91,7 +96,7 @@ export function createU32Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createU64Type(node?: AstNode): IntegerTypeDescription {
+function createU64Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.U64,
         signed: false,
@@ -101,7 +106,7 @@ export function createU64Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createI8Type(node?: AstNode): IntegerTypeDescription {
+function createI8Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.I8,
         signed: true,
@@ -111,7 +116,7 @@ export function createI8Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createI16Type(node?: AstNode): IntegerTypeDescription {
+function createI16Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.I16,
         signed: true,
@@ -121,7 +126,7 @@ export function createI16Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createI32Type(node?: AstNode): IntegerTypeDescription {
+function createI32Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.I32,
         signed: true,
@@ -131,7 +136,7 @@ export function createI32Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createI64Type(node?: AstNode): IntegerTypeDescription {
+function createI64Type(node?: AstNode): IntegerTypeDescription {
     return {
         kind: TypeKind.I64,
         signed: true,
@@ -141,7 +146,7 @@ export function createI64Type(node?: AstNode): IntegerTypeDescription {
     };
 }
 
-export function createF32Type(node?: AstNode): FloatTypeDescription {
+function createF32Type(node?: AstNode): FloatTypeDescription {
     return {
         kind: TypeKind.F32,
         bits: 32,
@@ -150,7 +155,7 @@ export function createF32Type(node?: AstNode): FloatTypeDescription {
     };
 }
 
-export function createF64Type(node?: AstNode): FloatTypeDescription {
+function createF64Type(node?: AstNode): FloatTypeDescription {
     return {
         kind: TypeKind.F64,
         bits: 64,
@@ -159,7 +164,7 @@ export function createF64Type(node?: AstNode): FloatTypeDescription {
     };
 }
 
-export function createBoolType(node?: AstNode): BoolTypeDescription {
+function createBoolType(node?: AstNode): BoolTypeDescription {
     return {
         kind: TypeKind.Bool,
         node,
@@ -167,7 +172,7 @@ export function createBoolType(node?: AstNode): BoolTypeDescription {
     };
 }
 
-export function createVoidType(node?: AstNode): VoidTypeDescription {
+function createVoidType(node?: AstNode): VoidTypeDescription {
     return {
         kind: TypeKind.Void,
         node,
@@ -175,7 +180,7 @@ export function createVoidType(node?: AstNode): VoidTypeDescription {
     };
 }
 
-export function createStringType(node?: AstNode): StringTypeDescription {
+function createStringType(node?: AstNode): StringTypeDescription {
     return {
         kind: TypeKind.String,
         node,
@@ -183,7 +188,7 @@ export function createStringType(node?: AstNode): StringTypeDescription {
     };
 }
 
-export function createStringLiteralType(value: string, node?: AstNode): StringLiteralTypeDescription {
+function createStringLiteralType(value: string, node?: AstNode): StringLiteralTypeDescription {
     return {
         kind: TypeKind.StringLiteral,
         value,
@@ -192,7 +197,7 @@ export function createStringLiteralType(value: string, node?: AstNode): StringLi
     };
 }
 
-export function createNullType(node?: AstNode): NullTypeDescription {
+function createNullType(node?: AstNode): NullTypeDescription {
     return {
         kind: TypeKind.Null,
         node,
@@ -204,7 +209,7 @@ export function createNullType(node?: AstNode): NullTypeDescription {
 // Composite Types
 // ============================================================================
 
-export function createArrayType(elementType: TypeDescription, node?: AstNode): ArrayTypeDescription {
+function createArrayType(elementType: TypeDescription, node?: AstNode): ArrayTypeDescription {
     return {
         kind: TypeKind.Array,
         elementType,
@@ -213,7 +218,7 @@ export function createArrayType(elementType: TypeDescription, node?: AstNode): A
     };
 }
 
-export function createNullableType(baseType: TypeDescription, node?: AstNode): NullableTypeDescription {
+function createNullableType(baseType: TypeDescription, node?: AstNode): NullableTypeDescription | ErrorTypeDescription {
     return {
         kind: TypeKind.Nullable,
         baseType,
@@ -222,7 +227,7 @@ export function createNullableType(baseType: TypeDescription, node?: AstNode): N
     };
 }
 
-export function createUnionType(types: readonly TypeDescription[], node?: AstNode): UnionTypeDescription {
+function createUnionType(types: readonly TypeDescription[], node?: AstNode): UnionTypeDescription {
     return {
         kind: TypeKind.Union,
         types,
@@ -231,7 +236,7 @@ export function createUnionType(types: readonly TypeDescription[], node?: AstNod
     };
 }
 
-export function createJoinType(types: readonly TypeDescription[], node?: AstNode): JoinTypeDescription {
+function createJoinType(types: readonly TypeDescription[], node?: AstNode): JoinTypeDescription {
     return {
         kind: TypeKind.Join,
         types,
@@ -240,7 +245,7 @@ export function createJoinType(types: readonly TypeDescription[], node?: AstNode
     };
 }
 
-export function createTupleType(elementTypes: readonly TypeDescription[], node?: AstNode): TupleTypeDescription {
+function createTupleType(elementTypes: readonly TypeDescription[], node?: AstNode): TupleTypeDescription {
     return {
         kind: TypeKind.Tuple,
         elementTypes,
@@ -253,7 +258,7 @@ export function createTupleType(elementTypes: readonly TypeDescription[], node?:
 // Structural Types
 // ============================================================================
 
-export function createStructType(
+function createStructType(
     fields: readonly StructFieldType[],
     isAnonymous: boolean = true,
     node?: AstNode
@@ -270,11 +275,11 @@ export function createStructType(
     };
 }
 
-export function createStructField(name: string, type: TypeDescription, node: AstNode): StructFieldType {
+function createStructField(name: string, type: TypeDescription, node: AstNode): StructFieldType {
     return { name, type, node };
 }
 
-export function createVariantType(
+function createVariantType(
     constructors: readonly VariantConstructorType[],
     node?: AstNode
 ): VariantTypeDescription {
@@ -295,7 +300,7 @@ export function createVariantType(
     };
 }
 
-export function createMetaVariantType(
+function createMetaVariantType(
     baseVariant: VariantTypeDescription,
     genericArgs: readonly TypeDescription[] = [],
     node?: AstNode
@@ -303,7 +308,7 @@ export function createMetaVariantType(
     return { kind: TypeKind.MetaVariant, baseVariant, genericArgs, node, toString: () => `${baseVariant.toString()}` };
 }
 
-export function createVariantConstructor(
+function createVariantConstructor(
     name: string,
     parameters: readonly StructFieldType[]
 ): VariantConstructorType {
@@ -324,7 +329,7 @@ export function createVariantConstructor(
  * @param variantDeclaration Optional type declaration (for displaying the name, e.g., "Result")
  * @returns A VariantConstructorTypeDescription
  */
-export function createVariantConstructorType(
+function createVariantConstructorType(
     baseVariant: VariantTypeDescription,
     constructorName: string,
     parentConstructor: ast.VariantConstructor,
@@ -360,7 +365,7 @@ export function createVariantConstructorType(
 }
 
 
-export function createMetaVariantConstructorType(
+function createMetaVariantConstructorType(
     baseVariantConstructor: VariantConstructorTypeDescription,
     genericArgs: readonly TypeDescription[] = [],
     node?: AstNode
@@ -368,7 +373,7 @@ export function createMetaVariantConstructorType(
     return { kind: TypeKind.MetaVariantConstructor, baseVariantConstructor, genericArgs, node, toString: () => `${baseVariantConstructor.toString()}` };
 }
 
-export function createEnumType(
+function createEnumType(
     cases: readonly EnumCaseType[],
     encoding?: IntegerTypeDescription,
     node?: AstNode
@@ -388,18 +393,18 @@ export function createEnumType(
     };
 }
 
-export function createMetaEnumType(
+function createMetaEnumType(
     baseEnum: EnumTypeDescription,
     node?: AstNode
 ): MetaEnumTypeDescription {
     return { kind: TypeKind.MetaEnum, baseEnum, node, toString: () => `${baseEnum.toString()}` };
 }
 
-export function createEnumCase(name: string, value?: number): EnumCaseType {
+function createEnumCase(name: string, value?: number): EnumCaseType {
     return { name, value };
 }
 
-export function createStringEnumType(values: readonly string[], node?: AstNode): StringEnumTypeDescription {
+function createStringEnumType(values: readonly string[], node?: AstNode): StringEnumTypeDescription {
     return {
         kind: TypeKind.StringEnum,
         values,
@@ -412,7 +417,7 @@ export function createStringEnumType(values: readonly string[], node?: AstNode):
 // Object-Oriented Types
 // ============================================================================
 
-export function createInterfaceType(
+function createInterfaceType(
     methods: readonly MethodType[],
     superTypes: readonly TypeDescription[] = [],
     node?: AstNode
@@ -432,7 +437,7 @@ export function createInterfaceType(
     };
 }
 
-export function createClassType(
+function createClassType(
     attributes: readonly AttributeType[],
     methods: readonly MethodType[],
     superTypes: readonly TypeDescription[] = [],
@@ -458,14 +463,14 @@ export function createClassType(
     };
 }
 
-export function createMetaClassType(
+function createMetaClassType(
     baseClass: ClassTypeDescription,
     node?: AstNode
 ): MetaClassTypeDescription {
     return { kind: TypeKind.MetaClass, baseClass, node, toString: () => `${baseClass.toString()}` };
 }
 
-export function createImplementationType(
+function createImplementationType(
     attributes: readonly AttributeType[],
     methods: readonly MethodType[],
     targetType?: TypeDescription,
@@ -484,7 +489,7 @@ export function createImplementationType(
     };
 }
 
-export function createMethodType(
+function createMethodType(
     names: readonly string[],
     parameters: readonly FunctionParameterType[],
     returnType: TypeDescription,
@@ -506,7 +511,7 @@ export function createMethodType(
     };
 }
 
-export function createAttributeType(
+function createAttributeType(
     name: string,
     type: TypeDescription,
     isStatic: boolean = false,
@@ -526,7 +531,7 @@ export function createAttributeType(
 // Functional Types
 // ============================================================================
 
-export function createFunctionParameterType(
+function createFunctionParameterType(
     name: string,
     type: TypeDescription,
     isMut: boolean = false
@@ -534,7 +539,7 @@ export function createFunctionParameterType(
     return { name, type, isMut };
 }
 
-export function createFunctionType(
+function createFunctionType(
     parameters: readonly FunctionParameterType[],
     returnType: TypeDescription,
     fnType: 'fn' | 'cfn' = 'fn',
@@ -570,7 +575,7 @@ export function createFunctionType(
  * @param yieldType The type that gets yielded when the coroutine is called
  * @param node Optional AST node for source tracking
  */
-export function createCoroutineType(
+function createCoroutineType(
     parameters: readonly FunctionParameterType[],
     yieldType: TypeDescription,
     node?: AstNode
@@ -589,7 +594,7 @@ export function createCoroutineType(
     };
 }
 
-export function createReturnType(returnType: TypeDescription, node?: AstNode): ReturnTypeDescription {
+function createReturnType(returnType: TypeDescription, node?: AstNode): ReturnTypeDescription {
     return {
         kind: TypeKind.ReturnType,
         returnType,
@@ -598,7 +603,7 @@ export function createReturnType(returnType: TypeDescription, node?: AstNode): R
     };
 }
 
-export function createTypeGuardType(
+function createTypeGuardType(
     parameterName: string,
     parameterIndex: number,
     guardedType: TypeDescription,
@@ -618,7 +623,7 @@ export function createTypeGuardType(
 // Special Types
 // ============================================================================
 
-export function createReferenceType(
+function createReferenceType(
     declaration: ast.TypeDeclaration,
     genericArgs: readonly TypeDescription[] = [],
     node?: AstNode
@@ -637,7 +642,7 @@ export function createReferenceType(
     };
 }
 
-export function createGenericType(
+function createGenericType(
     name: string,
     constraint?: TypeDescription,
     declaration?: ast.GenericType,
@@ -653,7 +658,7 @@ export function createGenericType(
     };
 }
 
-export function createPrototypeType(
+function createPrototypeType(
     targetKind: 'array' | 'coroutine' | 'string',
     methods: readonly PrototypeMethodType[],
     properties: readonly StructFieldType[] = [],
@@ -669,14 +674,14 @@ export function createPrototypeType(
     };
 }
 
-export function createPrototypeMethod(
+function createPrototypeMethod(
     name: string,
     functionType: FunctionTypeDescription
 ): PrototypeMethodType {
     return { name, functionType };
 }
 
-export function createNamespaceType(
+function createNamespaceType(
     name: string,
     declaration: ast.NamespaceDecl,
     node?: AstNode
@@ -690,7 +695,7 @@ export function createNamespaceType(
     };
 }
 
-export function createFFIType(
+function createFFIType(
     name: string,
     dynlib: string,
     methods: readonly MethodType[],
@@ -712,7 +717,7 @@ export function createFFIType(
 // Meta Types
 // ============================================================================
 
-export function createErrorType(message: string, cause?: unknown, node?: AstNode): ErrorTypeDescription {
+function createErrorType(message: string, cause?: unknown, node?: AstNode): ErrorTypeDescription {
     return {
         kind: TypeKind.Error,
         message,
@@ -722,7 +727,7 @@ export function createErrorType(message: string, cause?: unknown, node?: AstNode
     };
 }
 
-export function createNeverType(node?: AstNode): NeverTypeDescription {
+function createNeverType(node?: AstNode): NeverTypeDescription {
     return {
         kind: TypeKind.Never,
         node,
@@ -730,7 +735,7 @@ export function createNeverType(node?: AstNode): NeverTypeDescription {
     };
 }
 
-export function createAnyType(node?: AstNode): AnyTypeDescription {
+function createAnyType(node?: AstNode): AnyTypeDescription {
     return {
         kind: TypeKind.Any,
         node,
@@ -738,7 +743,7 @@ export function createAnyType(node?: AstNode): AnyTypeDescription {
     };
 }
 
-export function createUnsetType(node?: AstNode): UnsetTypeDescription {
+function createUnsetType(node?: AstNode): UnsetTypeDescription {
     return {
         kind: TypeKind.Unset,
         node,
@@ -753,7 +758,7 @@ export function createUnsetType(node?: AstNode): UnsetTypeDescription {
 /**
  * Creates an integer type from a string specifier (e.g., "u32", "i64")
  */
-export function createIntegerTypeFromString(spec: string, node?: AstNode): IntegerTypeDescription | undefined {
+function createIntegerTypeFromString(spec: string, node?: AstNode): IntegerTypeDescription | undefined {
     switch (spec) {
         case 'u8': return createU8Type(node);
         case 'u16': return createU16Type(node);
@@ -770,7 +775,7 @@ export function createIntegerTypeFromString(spec: string, node?: AstNode): Integ
 /**
  * Creates a float type from a string specifier (e.g., "f32", "f64")
  */
-export function createFloatTypeFromString(spec: string, node?: AstNode): FloatTypeDescription | undefined {
+function createFloatTypeFromString(spec: string, node?: AstNode): FloatTypeDescription | undefined {
     switch (spec) {
         case 'f32': return createF32Type(node);
         case 'f64': return createF64Type(node);
@@ -781,7 +786,7 @@ export function createFloatTypeFromString(spec: string, node?: AstNode): FloatTy
 /**
  * Creates a primitive type from an AST PrimitiveType node
  */
-export function createPrimitiveTypeFromAST(astType: ast.PrimitiveType): TypeDescription {
+function createPrimitiveTypeFromAST(astType: ast.PrimitiveType): TypeDescription {
     if (astType.integerType) {
         return createIntegerTypeFromString(astType.integerType, astType) ?? createErrorType(`Unknown integer type: ${astType.integerType}`, undefined, astType);
     }
@@ -805,5 +810,128 @@ export function createPrimitiveTypeFromAST(astType: ast.PrimitiveType): TypeDesc
     }
 
     return createErrorType('Unknown primitive type', undefined, astType);
+}
+
+// ============================================================================
+// Type Factory Service
+// ============================================================================
+
+/**
+ * Type Factory Service
+ *
+ * This service wraps the factory functions and provides additional validation.
+ * It can access the TypeProvider to resolve type references when needed.
+ */
+export class TypeCTypeFactory {
+    private readonly typeProvider: () => TypeCTypeProvider;
+    private readonly typeUtils: () => TypeCTypeUtils;
+
+    constructor(services: TypeCServices) {
+        // Use lazy getter to avoid circular dependency
+        this.typeProvider = () => services.typing.TypeProvider;
+        this.typeUtils = () => services.typing.TypeUtils;
+    }
+
+    /**
+     * Checks if a type is a basic/primitive type (either directly or through a reference)
+     */
+    isBasicType(type: TypeDescription): boolean {
+        // Direct primitive types
+        if (type.kind === TypeKind.U8 || type.kind === TypeKind.U16 ||
+            type.kind === TypeKind.U32 || type.kind === TypeKind.U64 ||
+            type.kind === TypeKind.I8 || type.kind === TypeKind.I16 ||
+            type.kind === TypeKind.I32 || type.kind === TypeKind.I64 ||
+            type.kind === TypeKind.F32 || type.kind === TypeKind.F64 ||
+            type.kind === TypeKind.Bool || type.kind === TypeKind.Void ||
+            type.kind === TypeKind.Null
+        ) {
+            return true;
+        }
+
+        // Reference types - need to resolve them
+        if (isReferenceType(type)) {
+            const resolvedType = this.typeProvider().resolveReference(type);
+            // Avoid infinite recursion - if it's still a reference after resolution, it's not basic
+            if (resolvedType.kind === TypeKind.Reference) {
+                return false;
+            }
+            return this.isBasicType(resolvedType);
+        }
+
+        return false;
+    }
+
+    /**
+     * Creates a nullable type with validation
+     * Returns an error if trying to make a basic type nullable
+     */
+    createNullableType(baseType: TypeDescription, node?: AstNode): TypeDescription {
+        // Check if baseType is a basic type (or resolves to one)
+        if (this.typeUtils().isTypeBasic(baseType)) {
+            return createErrorType(
+                `Cannot create nullable type from basic type '${baseType.toString()}'. Nullable basic types are not allowed.`,
+                ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE,
+                node
+            );
+        }
+
+        return createNullableType(baseType, node);
+    }
+
+    // Delegate all other factory methods to the standalone functions
+    createU8Type = createU8Type;
+    createU16Type = createU16Type;
+    createU32Type = createU32Type;
+    createU64Type = createU64Type;
+    createI8Type = createI8Type;
+    createI16Type = createI16Type;
+    createI32Type = createI32Type;
+    createI64Type = createI64Type;
+    createF32Type = createF32Type;
+    createF64Type = createF64Type;
+    createBoolType = createBoolType;
+    createVoidType = createVoidType;
+    createStringType = createStringType;
+    createStringLiteralType = createStringLiteralType;
+    createNullType = createNullType;
+    createArrayType = createArrayType;
+    createUnionType = createUnionType;
+    createJoinType = createJoinType;
+    createTupleType = createTupleType;
+    createStructType = createStructType;
+    createStructField = createStructField;
+    createVariantType = createVariantType;
+    createMetaVariantType = createMetaVariantType;
+    createVariantConstructor = createVariantConstructor;
+    createVariantConstructorType = createVariantConstructorType;
+    createMetaVariantConstructorType = createMetaVariantConstructorType;
+    createEnumType = createEnumType;
+    createMetaEnumType = createMetaEnumType;
+    createEnumCase = createEnumCase;
+    createStringEnumType = createStringEnumType;
+    createInterfaceType = createInterfaceType;
+    createClassType = createClassType;
+    createMetaClassType = createMetaClassType;
+    createImplementationType = createImplementationType;
+    createMethodType = createMethodType;
+    createAttributeType = createAttributeType;
+    createFunctionParameterType = createFunctionParameterType;
+    createFunctionType = createFunctionType;
+    createCoroutineType = createCoroutineType;
+    createReturnType = createReturnType;
+    createTypeGuardType = createTypeGuardType;
+    createReferenceType = createReferenceType;
+    createGenericType = createGenericType;
+    createPrototypeType = createPrototypeType;
+    createPrototypeMethod = createPrototypeMethod;
+    createNamespaceType = createNamespaceType;
+    createFFIType = createFFIType;
+    createErrorType = createErrorType;
+    createNeverType = createNeverType;
+    createAnyType = createAnyType;
+    createUnsetType = createUnsetType;
+    createIntegerTypeFromString = createIntegerTypeFromString;
+    createFloatTypeFromString = createFloatTypeFromString;
+    createPrimitiveTypeFromAST = createPrimitiveTypeFromAST;
 }
 

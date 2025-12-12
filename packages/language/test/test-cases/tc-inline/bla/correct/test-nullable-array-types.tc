@@ -7,14 +7,14 @@ fn main() {
     let points3: {x: u32, y: u32}[]? = null
     
     // Array of nullable primitives
-    let nums1: u32?[] = [1u32, null, 3u32]
+    let nums1: string?[] = ["1u32", null, "3u32"]
     
     // Nullable array of primitives
     let nums2: u32[]? = [1u32, 2u32, 3u32]
     let nums3: u32[]? = null
     
     // More complex examples
-    let nested1: u32?[]? = null
-    let nested2: u32?[]? = [1u32, null, 3u32]
-    let nested3: u32[]?[] = [[1u32, 2u32], null, null]
+    let nested1: string?[]? = null
+    let nested2: string?[]? = ["1u32", null, "3u32"]
+    let nested3: string[]?[] = [["1u32", "2u32"], null, null]
 }

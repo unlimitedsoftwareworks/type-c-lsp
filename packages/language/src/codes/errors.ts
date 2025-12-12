@@ -127,4 +127,7 @@ export enum ErrorCode {
     // Cast Expression Errors (TCE160-TCE169)
     TC_CAST_INVALID_REGULAR_CAST = 'TCE160',
     TC_CAST_INVALID_TARGET_TYPE = 'TCE161',
+
+    // Nullable Type Errors (TCE170-TCE179)
+    TC_NULLABLE_PRIMITIVE_TYPE = 'TCE170',
 }

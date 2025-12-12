@@ -2,7 +2,7 @@
 // Tests that nullability propagates correctly through chains
 
 type Data = interface {
-    fn getValue() -> u32
+    fn getValue() -> "u32"
     fn getNext() -> Data
 }
 

@@ -8,9 +8,9 @@
 import type { TypeCServices } from '../type-c-module.js';
 import type { AstNode } from 'langium';
 import { TypeDescription } from './type-c-types.js';
-import * as factory from './type-factory.js';
 import { TypeCTypeProvider } from './type-c-type-provider.js';
 import { TypeCheckResult, TypeCTypeUtils } from './type-utils.js';
+import { TypeCTypeFactory } from './type-factory.js';
 
 /**
  * Main type system facade.
@@ -20,11 +20,13 @@ export class TypeCTypeSystem {
     protected readonly services: TypeCServices;
     private readonly typeProvider: TypeCTypeProvider;
     private readonly typeUtils: TypeCTypeUtils;
+    private readonly typeFactory: TypeCTypeFactory;
 
     constructor(services: TypeCServices) {
         this.services = services;
         this.typeProvider = services.typing.TypeProvider;
         this.typeUtils = services.typing.TypeUtils;
+        this.typeFactory = services.typing.TypeFactory;
     }
 
     // ========================================================================
@@ -104,55 +106,55 @@ export class TypeCTypeSystem {
     // ========================================================================
 
     createErrorType(message: string, cause?: unknown, node?: AstNode): TypeDescription {
-        return factory.createErrorType(message, cause, node);
+        return this.typeFactory.createErrorType(message, cause, node);
     }
 
     createVoidType(node?: AstNode): TypeDescription {
-        return factory.createVoidType(node);
+        return this.typeFactory.createVoidType(node);
     }
 
     createBoolType(node?: AstNode): TypeDescription {
-        return factory.createBoolType(node);
+        return this.typeFactory.createBoolType(node);
     }
 
     createIntegerType(spec: string, node?: AstNode): TypeDescription | undefined {
-        return factory.createIntegerTypeFromString(spec, node);
+        return this.typeFactory.createIntegerTypeFromString(spec, node);
     }
 
     createFloatType(spec: string, node?: AstNode): TypeDescription | undefined {
-        return factory.createFloatTypeFromString(spec, node);
+        return this.typeFactory.createFloatTypeFromString(spec, node);
     }
 
     createStringType(node?: AstNode): TypeDescription {
-        return factory.createStringType(node);
+        return this.typeFactory.createStringType(node);
     }
 
     createNullType(node?: AstNode): TypeDescription {
-        return factory.createNullType(node);
+        return this.typeFactory.createNullType(node);
     }
 
     createArrayType(elementType: TypeDescription, node?: AstNode): TypeDescription {
-        return factory.createArrayType(elementType, node);
+        return this.typeFactory.createArrayType(elementType, node);
     }
 
     createNullableType(baseType: TypeDescription, node?: AstNode): TypeDescription {
-        return factory.createNullableType(baseType, node);
+        return this.typeFactory.createNullableType(baseType, node);
     }
 
     createUnionType(types: readonly TypeDescription[], node?: AstNode): TypeDescription {
-        return factory.createUnionType(types, node);
+        return this.typeFactory.createUnionType(types, node);
     }
 
     createTupleType(types: readonly TypeDescription[], node?: AstNode): TypeDescription {
-        return factory.createTupleType(types, node);
+        return this.typeFactory.createTupleType(types, node);
     }
 
     createNeverType(node?: AstNode): TypeDescription {
-        return factory.createNeverType(node);
+        return this.typeFactory.createNeverType(node);
     }
 
     createAnyType(node?: AstNode): TypeDescription {
-        return factory.createAnyType(node);
+        return this.typeFactory.createAnyType(node);
     }
 }
 

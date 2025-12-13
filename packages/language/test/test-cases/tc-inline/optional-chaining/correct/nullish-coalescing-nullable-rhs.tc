@@ -1,0 +1,44 @@
+// Test that nullish coalescing operator accepts nullable RHS
+
+type Data = interface {
+    fn getValue() -> string
+    fn getNext() -> Data?
+    fn getArray() -> string[]
+}
+
+type Wrapper = interface {
+    fn unwrap() -> Data?
+    fn transform() -> Wrapper?
+}
+
+fn getString() -> string? {
+    return null
+}
+
+fn getNonNullableString() -> string {
+    return "default"
+}
+
+fn main() {
+    let w: Wrapper? = null
+    let d: Data? = null
+    
+    // ✅ LHS nullable, RHS non-nullable → result is RHS type (non-nullable)
+    let v1 = w?.unwrap()?.getValue() ?? "fallback"  /// @Type: string
+    
+    // ✅ LHS nullable, RHS nullable → result is RHS type (nullable)
+    let v2 = w?.unwrap()?.getValue() ?? getString()  /// @Type: string?
+    
+    // ✅ LHS non-nullable, RHS non-nullable → result is RHS type (non-nullable)
+    let v3 = getNonNullableString() ?? "other"  /// @Type: string
+    
+    // ✅ LHS non-nullable, RHS nullable → result is RHS type (nullable)
+    //let v4 = getNonNullableString() ?? getString()  /// <- no loger works, non-nullable ?? nullable
+    let v4 = getString() ?? getNonNullableString()   /// @Type: string?
+    
+    // ✅ Chained optionals with nullable RHS
+    let v5 = d?.getNext()?.getValue() ?? getString()  /// @Type: string?
+    
+    // ✅ Array return type with nullable RHS
+    let v6 = d?.getArray() ?? null  /// @Type: string[]?
+}

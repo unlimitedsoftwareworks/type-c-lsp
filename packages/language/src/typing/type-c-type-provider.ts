@@ -2252,11 +2252,13 @@ export class TypeCTypeProvider {
 
         // Null coalescing
         if (node.op === '??') {
-            // T? ?? T -> T
-            if (isNullableType(left)) {
-                return left.baseType;
-            }
-            return left;
+            // The result type is the RHS type
+            // - T? ?? U → U
+            // - T? ?? U? → U?
+            // - T ?? U → U (but LHS is always returned if not null, so result is effectively T)
+            // For non-nullable LHS, the RHS is never evaluated at runtime, but we still use RHS type
+            // This allows: string ?? string? → string?
+            return right;
         }
 
         // Check for operator overloads on classes/interfaces

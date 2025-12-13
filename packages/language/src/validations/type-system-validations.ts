@@ -1930,14 +1930,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     /**
      * Check nullish coalescing operator for type compatibility.
      *
-     * The `??` operator requires:
-     * 1. LHS and RHS must be type-compatible (RHS can be assigned to LHS type)
-     * 2. LHS is typically nullable, RHS is the default value
+     * The `??` operator requires that the base types are compatible:
+     * 1. Both sides can be nullable or non-nullable independently
+     * 2. The base types (unwrapped if nullable) must be compatible
+     * 3. Result type is the RHS type (preserving its nullability)
      *
      * Examples:
-     * - `c?.getValue() ?? 0` where `getValue()` returns `u32` → ✅ OK (u32 ?? u32)
+     * - `c?.getValue() ?? 0` where `getValue()` returns `u32` → ✅ OK (u32 ?? u32 → u32)
+     * - `c?.getValue() ?? getString()` where `getString()` returns `string?` → ✅ OK (u32 ?? string? → string?)
      * - `c?.getValue() ?? "default"` where `getValue()` returns `u32` → ❌ Error (u32 ?? string)
-     * - `obj?.getData() ?? defaultData` where both are `Data` → ✅ OK
+     * - `obj?.getData() ?? defaultData` where both are `Data` → ✅ OK (Data ?? Data → Data)
+     * - `obj?.getData() ?? getData()` where `getData()` returns `Data?` → ✅ OK (Data ?? Data? → Data?)
      */
     checkNullishCoalescing = (node: ast.BinaryExpression, accept: ValidationAcceptor): void => {
         // Only validate nullish coalescing operator
@@ -1953,17 +1956,20 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
 
-        // The right side must be assignable to the left side's base type
-        // If left is nullable, unwrap it for comparison
-        const leftBaseType = isNullableType(leftType) ? leftType.baseType : leftType;
+        //const leftBaseType = isNullableType(leftType) ? leftType.baseType : leftType;
+        //const rightBaseType = isNullableType(rightType) ? rightType.baseType : rightType;
+        const leftBaseType = leftType;
+        const rightBaseType = rightType;
 
-        // Check if right side is compatible with left side
-        const compatResult = this.isTypeCompatible(rightType, leftBaseType);
+
+        // Check if the base types are compatible
+        // The RHS base type must be assignable to the LHS base type
+        const compatResult = this.isTypeCompatible(rightBaseType, leftBaseType);
         if (!compatResult.success) {
             const errorCode = ErrorCode.TC_NULLISH_COALESCING_TYPE_MISMATCH;
             const errorMsg = compatResult.message
                 ? `Nullish coalescing operator type mismatch: ${compatResult.message}`
-                : `Nullish coalescing operator type mismatch: Left side has type '${leftBaseType.toString()}', but right side has incompatible type '${rightType.toString()}'`;
+                : `Nullish coalescing operator type mismatch: Left side has base type '${leftBaseType.toString()}', but right side has incompatible base type '${rightBaseType.toString()}'`;
             accept('error', errorMsg, {
                 node: node.right,
                 code: errorCode

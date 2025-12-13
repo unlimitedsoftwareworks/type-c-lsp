@@ -1,17 +1,13 @@
-fn main1() {
-    
-    /// @Error(TCE170): Basic types cannot be nullables
-    let nums1: u32?[] = 
-        /// @Error(TCE120): Nullable basic types are not allowed
-        [1u32, null, 3u32]
-    
+type Data = interface {
+    fn getValue() -> u32
 }
 
-fn test<T>(x: T) -> T? {
-    return x
+type Container = interface {
+    fn getData() -> Data
 }
 
-fn main2() {
-    /// @Error(TCE170): Basic types cannot be nullable
-    let z = test(1)
+fn testChaining() {
+    let c: Container? = null
+    
+    let value = c?.getData().getValue() 
 }

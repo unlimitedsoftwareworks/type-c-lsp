@@ -34,7 +34,7 @@ fn main() {
     // v4: u32?
     
     // ✅ Null coalescing after optional chain
-    let v5 = d?.getValue() ?? 0u32
+    let v5 = d?.getValue() ?? "0u32"
     // v5: u32 (unwrapped by ??)
     
     // ✅ Optional chain in function argument
@@ -43,13 +43,16 @@ fn main() {
     // Passes u32? to function expecting u32?
     
     // ✅ Optional chain in binary expression
-    let sum = (d?.getValue() ?? 0u32) + 10u32
+    let sum = (d?.getValue() ?? "0u32") + 10u32
     // sum: u32
     
     // ✅ Optional chain in conditional
-    if d?.getValue() == 5u32 {
+    if (d?.getValue()?.length() ?? 0) == 5u32 {
         // Comparison with u32? and u32 is valid
     }
+
+    /// @Type(len): u64
+    let len = d?.getValue()?.length() ?? 0
     
     // ✅ Optional chain with array construction
     let arr = [d?.getValue(), d?.getNext()?.getValue()]

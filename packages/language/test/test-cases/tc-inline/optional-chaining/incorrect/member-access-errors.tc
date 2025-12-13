@@ -60,4 +60,8 @@ fn testChaining() {
     // But this is an error - no optional chaining at all
     /// @Error(TCE070)
     let value4 = c.getData().getValue()
+
+
+    /// @Error(TCE074): Nullish coalescing operator type mismatch
+    let value5 = c?.getData().getValue() ?? "string"
 }

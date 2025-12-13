@@ -473,6 +473,14 @@ export class TypeCTypeProvider {
                 return this.inferExpression(parent.left);
             }
 
+            // Nullish coalescing operator: RHS uses LHS type (unwrapped if nullable)
+            // This enables: d?.getValue() ?? 0 where getValue() returns u64 → 0 is inferred as u64
+            if (parent.op === '??' && parent.right === node) {
+                const leftType = this.inferExpression(parent.left);
+                // Unwrap nullable to get the base type for contextual typing
+                return isNullableType(leftType) ? leftType.baseType : leftType;
+            }
+
             // Comparison and arithmetic operators: use the OTHER operand's type
             // BUT: Only use contextual typing for literals to avoid infinite recursion
             // AND: Only for primitive types (not classes/interfaces with operator overloads)
@@ -2560,8 +2568,11 @@ export class TypeCTypeProvider {
                     memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
                 }
                 // Wrap in nullable if using optional chaining
+                // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    memberType = this.typeFactory.createNullableType(memberType, node);
+                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                        memberType = this.typeFactory.createNullableType(memberType, node);
+                    }
                 }
                 return memberType;
             }
@@ -2582,8 +2593,11 @@ export class TypeCTypeProvider {
                     memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
                 }
                 // Wrap in nullable if using optional chaining
+                // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    memberType = this.typeFactory.createNullableType(memberType, node);
+                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                        memberType = this.typeFactory.createNullableType(memberType, node);
+                    }
                 }
                 return memberType;
             }
@@ -2707,8 +2721,11 @@ export class TypeCTypeProvider {
         // Wrap in nullable if:
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain: a?.b.c → c is nullable)
+        // BUT: Don't wrap basic types - they can't be nullable
         if(node.isNullable || baseIsNullable) {
-            memberType = this.typeFactory.createNullableType(memberType, node);
+            if (!this.typeUtils.isTypeBasic(memberType)) {
+                memberType = this.typeFactory.createNullableType(memberType, node);
+            }
         }
         return memberType;
     }
@@ -2738,7 +2755,11 @@ export class TypeCTypeProvider {
         if (isCoroutineType(fnType)) {
             // Coroutine instances are callable and yield their yieldType
             // No need to apply generic substitutions here - already done in coroutine creation
-            return isOptionalCall ? this.typeFactory.createNullableType(fnType.yieldType, node) : fnType.yieldType;
+            // Don't wrap basic types with nullable
+            if (isOptionalCall && !this.typeUtils.isTypeBasic(fnType.yieldType)) {
+                return this.typeFactory.createNullableType(fnType.yieldType, node);
+            }
+            return fnType.yieldType;
         }
 
         // Handle regular function types
@@ -2747,7 +2768,11 @@ export class TypeCTypeProvider {
             // If so, we need to infer generics from the call arguments
             if (isVariantConstructorType(fnType.returnType)) {
                 const returnType = this.inferVariantConstructorCall(fnType.returnType, node);
-                return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
+                // Don't wrap basic types with nullable
+                if (isOptionalCall && !this.typeUtils.isTypeBasic(returnType)) {
+                    return this.typeFactory.createNullableType(returnType, node);
+                }
+                return returnType;
             }
 
             const genericParams = fnType.genericParameters || [];
@@ -2791,7 +2816,11 @@ export class TypeCTypeProvider {
             }
 
             // Wrap return type in nullable if this was an optional call
-            return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
+            // Don't wrap basic types with nullable
+            if (isOptionalCall && !this.typeUtils.isTypeBasic(returnType)) {
+                return this.typeFactory.createNullableType(returnType, node);
+            }
+            return returnType;
         }
 
         // Handle variant constructor calls (e.g., Result.Ok(42))
@@ -3082,8 +3111,11 @@ export class TypeCTypeProvider {
         // Wrap in nullable if:
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain)
+        // BUT: Don't wrap basic types - they can't be nullable
         if (node.isNullable || baseIsNullable) {
-            resultType = this.typeFactory.createNullableType(resultType, node);
+            if (!this.typeUtils.isTypeBasic(resultType)) {
+                resultType = this.typeFactory.createNullableType(resultType, node);
+            }
         }
         
         return resultType;

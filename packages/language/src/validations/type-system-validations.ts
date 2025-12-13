@@ -61,8 +61,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ClassAttributeDecl: this.checkClassAttributeDecl,
             IteratorVar: this.checkIteratorVar,
             VariablePattern: [this.checkVariablePattern, this.checkExpressionForErrors],
-            BinaryExpression: [this.checkBinaryExpression, this.checkExpressionForErrors],
-            FunctionCall: [this.checkFunctionCall, this.checkExpressionForErrors],
+            BinaryExpression: [this.checkBinaryExpression, this.checkNullishCoalescing, this.checkExpressionForErrors],
+            FunctionCall: [this.checkFunctionCall, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
@@ -73,20 +73,20 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
             ClassType: this.checkClassImplementation,
-            MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkExpressionForErrors],
+            MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
             ReferenceType: this.checkReferenceType,
             UnaryExpression: this.checkExpressionForErrors,
-            IndexAccess: this.checkExpressionForErrors,
-            ReverseIndexAccess: this.checkExpressionForErrors,
-            PostfixOp: this.checkExpressionForErrors,
+            IndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
+            ReverseIndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
+            PostfixOp: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ConditionalExpression: this.checkExpressionForErrors,
             MatchExpression: this.checkExpressionForErrors,
             LetInExpression: this.checkExpressionForErrors,
             DoExpression: this.checkExpressionForErrors,
-            TypeCastExpression: [this.checkTypeCastExpression, this.checkExpressionForErrors],
+            TypeCastExpression: [this.checkTypeCastExpression, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ArrayConstructionExpression: this.checkExpressionForErrors,
             ArraySpreadExpression: this.checkArraySpreadExpression,
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
@@ -98,7 +98,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             InstanceCheckExpression: this.checkExpressionForErrors,
             ThisExpression: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
-            ObjectUpdate: this.checkObjectUpdateFields,
+            ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
             ForEachIterator: this.checkForEachIterator,
             ForRangeIterator: this.checkForRangeIterator,
             NullableType: this.checkNullableType
@@ -271,6 +271,24 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         if(isReferenceType(rightType)) {
             const resolved = this.typeProvider.resolveReference(rightType);
             if (resolved) rightType = resolved;
+        }
+
+        // Check nullish coalescing operator for nullable basic types
+        // The ?? operator should not be used with nullable basic types
+        // Example: test(1) ?? 1 where test returns T? and T=i32 → Error
+        if (node.op === '??') {
+            if (isNullableType(leftType) && this.typeUtils.isTypeBasic(leftType.baseType)) {
+                accept('error',
+                    `Nullish coalescing operator '??' cannot be used with nullable basic type '${leftType.toString()}'. ` +
+                    `Basic types cannot be nullable. The expression '${node.left.$cstNode?.text || 'expression'}' ` +
+                    `should not produce a nullable basic type.`,
+                    {
+                        node: node.left,
+                        code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+                    }
+                );
+                return;
+            }
         }
 
         // Skip if operator might be overloaded (class type)
@@ -1848,6 +1866,108 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: errorCode
                 }
             );
+        }
+    }
+
+    /**
+     * Check that expressions using optional chaining that return basic types are wrapped with `??`.
+     *
+     * When an optional chain (e.g., `c?.getData().getValue()`) returns a basic type,
+     * the result could be null (from short-circuit) but basic types can't be nullable.
+     * Therefore, the user MUST use `??` to handle the null case.
+     *
+     * Rules:
+     * 1. If expression uses optional chaining AND returns a basic type → must be wrapped with `??`
+     * 2. If already wrapped with `??` → ✅ OK
+     * 3. If returns reference type → ✅ OK (can be nullable)
+     *
+     * Examples:
+     * - `c?.getData().getValue()` where `getValue()` returns `u32` → ❌ Error (must use `??`)
+     * - `c?.getData().getValue() ?? 0` → ✅ OK (handles null case)
+     * - `c?.getData()` where `getData()` returns `Data` → ✅ OK (reference type can be nullable)
+     */
+    checkOptionalChainingBasicType = (node: AstNode, accept: ValidationAcceptor): void => {
+        // Only check expressions that could have optional chaining
+        if (!ast.isExpression(node)) {
+            return;
+        }
+
+        // Check if this expression uses optional chaining anywhere in its chain
+        const usesOptionalChaining = this.hasOptionalChaining(node);
+        if (!usesOptionalChaining) {
+            return; // No optional chaining, no validation needed
+        }
+
+        // Get the type of this expression
+        const exprType = this.typeProvider.getType(node);
+        
+        // If the result is a basic type, it MUST be wrapped with ??
+        // (Basic types can't be nullable, but optional chaining can short-circuit to null)
+        if (this.typeUtils.isTypeBasic(exprType)) {
+            // Check if this expression is already wrapped with ??
+            const parent = node.$container;
+            const isWrappedWithNullishCoalescing =
+                parent &&
+                ast.isBinaryExpression(parent) &&
+                parent.op === '??' &&
+                parent.left === node;
+            
+            if (!isWrappedWithNullishCoalescing) {
+                const errorCode = ErrorCode.TC_OPTIONAL_CHAINING_BASIC_TYPE_REQUIRES_NULLISH_COALESCING;
+                accept('error',
+                    `Optional chaining expression returns basic type '${exprType.toString()}' which could be null. ` +
+                    `Basic types cannot be nullable, so you must handle the null case using the nullish coalescing operator '??'. ` +
+                    `Example: ${node.$cstNode?.text || 'expression'} ?? defaultValue`,
+                    {
+                        node,
+                        code: errorCode
+                    }
+                );
+            }
+        }
+    }
+
+    /**
+     * Check nullish coalescing operator for type compatibility.
+     *
+     * The `??` operator requires:
+     * 1. LHS and RHS must be type-compatible (RHS can be assigned to LHS type)
+     * 2. LHS is typically nullable, RHS is the default value
+     *
+     * Examples:
+     * - `c?.getValue() ?? 0` where `getValue()` returns `u32` → ✅ OK (u32 ?? u32)
+     * - `c?.getValue() ?? "default"` where `getValue()` returns `u32` → ❌ Error (u32 ?? string)
+     * - `obj?.getData() ?? defaultData` where both are `Data` → ✅ OK
+     */
+    checkNullishCoalescing = (node: ast.BinaryExpression, accept: ValidationAcceptor): void => {
+        // Only validate nullish coalescing operator
+        if (node.op !== '??') {
+            return;
+        }
+
+        const leftType = this.typeProvider.getType(node.left);
+        const rightType = this.typeProvider.getType(node.right);
+
+        // Skip if either side is an error type (will be reported elsewhere)
+        if (isErrorType(leftType) || isErrorType(rightType)) {
+            return;
+        }
+
+        // The right side must be assignable to the left side's base type
+        // If left is nullable, unwrap it for comparison
+        const leftBaseType = isNullableType(leftType) ? leftType.baseType : leftType;
+
+        // Check if right side is compatible with left side
+        const compatResult = this.isTypeCompatible(rightType, leftBaseType);
+        if (!compatResult.success) {
+            const errorCode = ErrorCode.TC_NULLISH_COALESCING_TYPE_MISMATCH;
+            const errorMsg = compatResult.message
+                ? `Nullish coalescing operator type mismatch: ${compatResult.message}`
+                : `Nullish coalescing operator type mismatch: Left side has type '${leftBaseType.toString()}', but right side has incompatible type '${rightType.toString()}'`;
+            accept('error', errorMsg, {
+                node: node.right,
+                code: errorCode
+            });
         }
     }
 

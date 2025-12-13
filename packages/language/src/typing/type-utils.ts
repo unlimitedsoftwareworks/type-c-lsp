@@ -3236,8 +3236,7 @@ export class TypeCTypeUtils {
                 type.kind === TypeKind.I8 || type.kind === TypeKind.I16 ||
                 type.kind === TypeKind.I32 || type.kind === TypeKind.I64 ||
                 type.kind === TypeKind.F32 || type.kind === TypeKind.F64 ||
-                type.kind === TypeKind.Bool || type.kind === TypeKind.Void ||
-                type.kind === TypeKind.Null
+                type.kind === TypeKind.Bool || type.kind === TypeKind.Null
             ) {
                 return true;
             }

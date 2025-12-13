@@ -26,7 +26,7 @@ fn main() {
     // assigned: u32 (not u32[]?)
     
     // ✅ Null coalescing unwraps nullable
-    let value = c?.getData().getValue() ?? 0u32
+    let value = c?.getData().getValue() ?? "0u32"
     // value: u32 (unwrapped by ??)
     
     // ✅ After denull, regular access works (not nullable anymore)

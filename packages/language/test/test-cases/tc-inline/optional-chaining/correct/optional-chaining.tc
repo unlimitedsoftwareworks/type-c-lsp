@@ -39,7 +39,7 @@ fn main() {
     // val: u32?
     
     // ✅ Optional chaining through function calls
-    let result = c?.getVec().method().nested.value ?? "hiii"
+    let result = c?.getVec().method().nested.value ?? 1u32
     // result: u32?
     
     // ✅ Type cast in optional chain

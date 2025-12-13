@@ -11,5 +11,5 @@ fn test<T>(x: T) -> T? {
 
 fn main2() {
     /// @Error(TCE170): Basic types cannot be nullable.
-    let z = test(1)
+    let z = test(1) ?? 1
 }

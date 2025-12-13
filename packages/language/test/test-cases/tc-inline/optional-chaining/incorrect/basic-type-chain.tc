@@ -1,0 +1,21 @@
+// @error: TCE073
+// Test that optional chaining with basic type return requires ??
+
+type Data = interface {
+    fn getValue() -> u32
+}
+
+type Container = interface {
+    fn getData() -> Data
+}
+
+fn testChaining() {
+    let c: Container? = null
+    
+    // ERROR: Optional chaining returns u32 (basic type) but could be null
+    // Must use ?? to handle null case
+    let value = c?.getData().getValue() 
+    
+    // CORRECT: Use ?? to handle the null case
+    let value2 = c?.getData().getValue() ?? 0u32
+}

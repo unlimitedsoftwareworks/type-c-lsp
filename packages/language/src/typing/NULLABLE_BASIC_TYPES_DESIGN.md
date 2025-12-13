@@ -12,157 +12,97 @@ interface Vec {
     fn get() -> u32
 }
 let v: Vec? = ...
-let x = v?.get()  // Should be u32?, but factory returned ErrorType
+let x = v?.get()  // Should work, but what type should x have?
 
 // Case 2: Nullish coalescing should handle null case
-let y = v?.get() ?? 1u32  // Should work: u32? ?? u32 -> u32
-                           // But factory prevented u32? from existing
+let y = v?.get() ?? 1u32  // Should work and return u32
 
-// Case 3: Chained optional access
-let z = v?.get().toString()  // Should propagate nullability
+// Case 3: Array with null and basic values
+let nums = [1u32, null, 3u32]  // Should error - can't create u32?[]
 ```
-
-In all cases, the intermediate `u32?` type is:
-1. **Necessary** for correct type inference
-2. **Safe** because it's consumed by null-handling operators (`??`, `!`) or checked before use
-3. **Not user-declared** - it's an internal representation
 
 ## Root Cause
 
-The validation was placed in the **wrong layer** - the type factory (`createNullableType()`) was rejecting nullable basic types immediately, preventing them from existing even temporarily during type inference.
+The validation was placed in the **wrong layer** - the type factory was rejecting nullable basic types immediately, preventing the type system from handling them properly.
 
 ## Solution Design
 
-### Core Principle: Separate Creation from Validation
+### Core Principle: Never Create Nullable Basic Types
 
-The solution follows a clear separation of concerns:
+The solution follows a "prevent at source" approach:
 
-1. **Factory Layer** (`type-factory.ts`): Creates types without judgment
-   - Allows any nullable type to be created, including nullable basic types
-   - Acts as a pure constructor - no business logic
+1. **Don't wrap basic types with nullable** during optional chaining
+2. **Validate in `getCommonType`** for expressions that would infer nullable basics
+3. **Validate at declaration points** as a safety net
 
-2. **Validation Layer** (`type-system-validations.ts`): Validates usage contexts
-   - Checks explicit type declarations (e.g., `let x: u32?`)
-   - Reports errors only for user-visible type annotations
+### Type System Behavior
 
-### Type Lifecycle
+When you use optional chaining on a method that returns a basic type:
 
+```typescript
+v?.get()  // get() returns u32
 ```
-Creation → Inference → Consumption → Validation
-   ↓          ↓            ↓            ↓
-Factory   Provider    Provider     Validator
-(allow)   (propagate) (transform)  (check decls)
-```
+
+**What happens**:
+1. Check if `v` is null → if yes, short-circuit to `null`
+2. If not null, call `get()` → returns `u32`
+3. Result is `u32`, **NOT** `u32?`
+
+This makes sense because:
+- The `?.` operator handles the null check
+- If the method executes, it returns a non-nullable `u32`
+- There's no need to wrap the result in nullable
 
 ### Implementation Details
 
-#### 1. Factory Layer Changes
+#### 1. Factory Layer
 
 **File**: `packages/language/src/typing/type-factory.ts`
 
-**Before**:
-```typescript
-createNullableType(baseType: TypeDescription, node?: AstNode): TypeDescription {
-    // Check if baseType is a basic type (or resolves to one)
-    if (this.typeUtils().isTypeBasic(baseType)) {
-        return createErrorType(
-            `Cannot create nullable type from basic type...`,
-            ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE,
-            node
-        );
-    }
-    return createNullableType(baseType, node);
-}
-```
-
-**After**:
 ```typescript
 /**
  * Creates a nullable type.
  * 
- * IMPORTANT: This factory method does NOT validate whether creating 
- * a nullable basic type is appropriate for the usage context. 
- * It simply creates the type description.
- * 
- * Validation happens at the validation layer, which checks explicit 
- * type declarations like `let x: u32?` and reports them as errors.
- * 
- * This design allows nullable basic types to exist temporarily during 
- * type inference and be consumed by null-handling operators.
+ * This factory does NOT validate - it just creates the type.
+ * Prevention of nullable basic types happens at the call sites.
  */
 createNullableType(baseType: TypeDescription, node?: AstNode): TypeDescription {
-    // No validation here - just create the type
     return createNullableType(baseType, node);
 }
 ```
 
-**Key Changes**:
-- Removed validation logic from factory
-- Added comprehensive documentation explaining the design
-- Factory now acts as a pure constructor
+#### 2. Type Provider Layer (Optional Chaining)
 
-#### 2. Validation Layer
+**File**: `packages/language/src/typing/type-c-type-provider.ts`
 
-**File**: `packages/language/src/validations/type-system-validations.ts`
-
-The validation layer has **multiple validators** to comprehensively catch nullable basic types in all contexts:
-
-**Validator 1: Explicit Type Annotations** (`checkNullableType`):
+**Member Access** (lines 2563-2565, 2585-2587, 2710-2712):
 ```typescript
-checkNullableType(node: ast.NullableType, accept: ValidationAcceptor) {
-    let type = this.typeProvider.getType(node.baseType);
-    if(this.typeUtils.isTypeBasic(type)) {
-        accept('error', 'Basic types cannot be nullables', ...);
+// Wrap in nullable if using optional chaining
+// BUT: Don't wrap basic types - they can't be nullable
+if (node.isNullable || baseIsNullable) {
+    if (!this.typeUtils.isTypeBasic(memberType)) {
+        memberType = this.typeFactory.createNullableType(memberType, node);
     }
 }
 ```
 
-**Validator 2: Variable Declarations** (`checkVariableDeclSingle`):
+**Function Calls** (lines 2739-2743, 2748-2753, 2791-2796, etc.):
 ```typescript
-checkVariableDeclSingle = (node: ast.VariableDeclSingle, ...) => {
-    // Check final type (annotation or inferred)
-    if (isNullableType(finalType) && this.typeUtils.isTypeBasic(finalType.baseType)) {
-        accept('error', ...);
-    }
+// Wrap return type in nullable if this was an optional call
+// Don't wrap basic types with nullable
+if (isOptionalCall && !this.typeUtils.isTypeBasic(returnType)) {
+    return this.typeFactory.createNullableType(returnType, node);
 }
+return returnType;
 ```
 
-**Validator 3: Function Parameters** (`checkFunctionParameter`):
+**Index Access** (lines 3083-3089):
 ```typescript
-checkFunctionParameter = (node: ast.FunctionParameter, ...) => {
-    const paramType = this.typeProvider.getType(node.type);
-    if (isNullableType(paramType) && this.typeUtils.isTypeBasic(...)) {
-        accept('error', `Parameter '${node.name}' cannot have...`);
-    }
-}
-```
-
-**Validator 4: Class Attributes** (`checkClassAttributeDecl`):
-```typescript
-checkClassAttributeDecl = (node: ast.ClassAttributeDecl, ...) => {
-    const attrType = this.typeProvider.getType(node.type);
-    if (isNullableType(attrType) && this.typeUtils.isTypeBasic(...)) {
-        accept('error', `Attribute '${node.name}' cannot have...`);
-    }
-}
-```
-
-**Validator 5: Iterator Variables** (`checkIteratorVar`):
-```typescript
-checkIteratorVar = (node: ast.IteratorVar, ...) => {
-    const varType = this.typeProvider.getType(node);
-    if (isNullableType(varType) && this.typeUtils.isTypeBasic(...)) {
-        accept('error', `Iterator variable '${node.name}' cannot have...`);
-    }
-}
-```
-
-**Validator 6: Pattern Variables** (`checkVariablePattern`):
-```typescript
-checkVariablePattern = (node: ast.VariablePattern, ...) => {
-    const varType = this.typeProvider.getType(node);
-    if (isNullableType(varType) && this.typeUtils.isTypeBasic(...)) {
-        accept('error', `Pattern variable '${node.name}' cannot have...`);
+// Wrap in nullable if using optional chaining
+// BUT: Don't wrap basic types - they can't be nullable
+if (node.isNullable || baseIsNullable) {
+    if (!this.typeUtils.isTypeBasic(resultType)) {
+        resultType = this.typeFactory.createNullableType(resultType, node);
     }
 }
 ```
@@ -171,277 +111,215 @@ checkVariablePattern = (node: ast.VariablePattern, ...) => {
 
 **File**: `packages/language/src/typing/type-utils.ts`
 
-**Enhanced `getCommonType`** - Validates nullable basic type creation:
+**`getCommonType`** validation (lines 2218-2228, 2345-2355):
 ```typescript
-getCommonType(types: TypeDescription[]): TypeDescription {
-    // ... existing logic to find common type ...
+// When wrapping in nullable, check if result is nullable basic
+if (unwrappedTypes.some(item => item.wasNullable)) {
+    commonType = this.typeFactory.createNullableType(commonType, types[0].node);
     
-    // When wrapping in nullable, check if result is nullable basic
-    if (unwrappedTypes.some(item => item.wasNullable)) {
-        commonType = this.typeFactory.createNullableType(commonType, types[0].node);
-        
-        // Validate: no nullable basic types allowed
-        if (isNullableType(commonType) && this.isTypeBasic(commonType.baseType)) {
-            return this.typeFactory.createErrorType(
-                `Cannot create expression with nullable basic type '${commonType.toString()}'...`
-            );
-        }
+    // Validate: no nullable basic types allowed
+    if (isNullableType(commonType) && this.isTypeBasic(commonType.baseType)) {
+        return this.typeFactory.createErrorType(
+            `Cannot create expression with nullable basic type '${commonType.toString()}'...`
+        );
     }
 }
 ```
 
-**Why validate in `getCommonType`?**
+This catches:
+- Array literals: `[1u32, null, 3u32]` → Error
+- Match expressions: `match x { 0 => 1u32, _ => null }` → Error
+- Function returns: Multiple returns with nullable basics → Error
 
-`getCommonType` is the **centralized** function used for:
-- Array literal type inference: `[1u32, null, 3u32]`
-- Function return type inference from multiple returns
-- Match expression type inference from all arms
-- Conditional expression type inference
+#### 4. Validation Layer (Variable Binding)
 
-By validating here, we catch nullable basic types **at the point they're created** across all these contexts, eliminating the need for separate validators for each.
+**File**: `packages/language/src/validations/type-system-validations.ts`
 
-**Coverage Map**:
+**Six specialized validators**:
 
-| Context | Validator/Layer | Examples |
-|---------|-----------------|----------|
-| Explicit `T?` syntax | `checkNullableType` | `let x: u32?`, `fn foo() -> bool?` |
-| Variable declarations | `checkVariableDeclSingle` | `let x = get<u32>()` where `get<T>() -> T?` |
-| Function parameters | `checkFunctionParameter` | `fn foo(x: u32?)`, generic params |
-| Class attributes | `checkClassAttributeDecl` | `class C { let x: u32? }` |
-| Iterator variables | `checkIteratorVar` | `foreach x: u32? in ...` |
-| Match patterns | `checkVariablePattern` | `match val { x => ... }` where x is u32? |
-| **Array/Match/Function** | **`getCommonType`** | **`[1u32, null]`, match arms, returns** |
-
-**Why This Design?**
-
-Validation happens at **two strategic layers**:
-1. **Variable declaration validators** (6 validators): Catch nullable basics bound to names
-2. **Type utility layer** (`getCommonType`): Catch nullable basics in type inference
-
-This ensures complete coverage with minimal redundancy.
+1. **`checkNullableType`** - Explicit `T?` syntax
+2. **`checkVariableDeclSingle`** - Local variable final types
+3. **`checkFunctionParameter`** - Function parameter types
+4. **`checkClassAttributeDecl`** - Class attribute types
+5. **`checkIteratorVar`** - Iterator variable types
+6. **`checkVariablePattern`** - Pattern variable types
 
 ### How It Works
 
-#### Example 1: Optional Chaining
+#### Example 1: Optional Chaining with Basic Type Return
 
 ```typescript
 interface Vec {
     fn get() -> u32
 }
 let v: Vec? = ...
-let x = v?.get()  // x: u32?
+let x = v?.get()  // x: u32 (NOT u32?)
 ```
 
 **Flow**:
 1. `v` has type `Vec?`
 2. Optional chaining `?.` unwraps to `Vec`
 3. `get()` returns `u32`
-4. Optional chaining wraps result: `u32?` ✅ (factory allows creation)
-5. `x` inferred as `u32?` ✅
-6. No validation error because `u32?` not explicitly declared
+4. Check: Is `u32` a basic type? **Yes**
+5. **Don't wrap with nullable** → result is `u32` ✅
+6. `x` inferred as `u32` ✅
 
-#### Example 2: Nullish Coalescing
+#### Example 2: Optional Chaining with Reference Type Return
+
+```typescript
+interface Container {
+    fn getData() -> Data  // Data is a class
+}
+let c: Container? = ...
+let d = c?.getData()  // d: Data?
+```
+
+**Flow**:
+1. `c` has type `Container?`
+2. Optional chaining `?.` unwraps to `Container`
+3. `getData()` returns `Data`
+4. Check: Is `Data` a basic type? **No**
+5. **Wrap with nullable** → result is `Data?` ✅
+6. `d` inferred as `Data?` ✅
+
+#### Example 3: Nullish Coalescing
 
 ```typescript
 let y = v?.get() ?? 1u32  // y: u32
 ```
 
 **Flow**:
-1. `v?.get()` creates intermediate `u32?` ✅
-2. `??` operator checks left side is nullable
-3. `??` unwraps: `u32? ?? u32 -> u32` ✅
-4. `y` inferred as `u32` ✅
-5. No nullable basic type in final result
+1. `v?.get()` returns `u32` (basic type not wrapped)
+2. `??` operator: left is `u32` (not nullable)
+3. Since left is not nullable, `??` just returns left side
+4. Result is `u32` ✅
 
-#### Example 3: Explicit Declaration (Error Case)
+**Note**: The `??` operator can now be simplified since optional chaining never produces nullable basic types!
+
+#### Example 4: Array Literal (Error Case)
 
 ```typescript
-let x: u32? = 42  // ❌ Error: Basic types cannot be nullables
+let nums = [1u32, null, 3u32]  // ❌ Error
 ```
 
 **Flow**:
-1. Parser creates `NullableType` AST node for `u32?`
-2. Factory creates `u32?` type (no error yet)
-3. **Checkpoint 1**: `checkNullableType` detects basic type `u32` in annotation
-4. Error reported to user ❌
+1. Elements: `u32`, `null`, `u32`
+2. `getCommonType([u32, null, u32])` called
+3. Tries to create nullable wrapper for `u32`
+4. Detects nullable basic type → returns ErrorType ❌
 
-#### Example 4: Generic Instantiation (Error Case)
-
-```typescript
-fn get<T>(x: T) -> T? = null
-let x = get<u32>(1)  // ❌ Error: Variable 'x' cannot have nullable basic type 'u32?'
-```
-
-**Flow**:
-1. Function `get` has valid signature (T could be reference type)
-2. Call `get<u32>(1)` substitutes `T` with `u32`
-3. Return type becomes `u32?` (factory allows creation)
-4. Variable `x` would have type `u32?`
-5. **Validator 2**: `checkVariableDeclSingle` detects final type is nullable basic
-6. Error reported to user ❌
-
-#### Example 5: Function Parameter (Error Case)
+#### Example 5: Generic Instantiation (Error Case)
 
 ```typescript
-fn process<T>(data: T?) -> void {  // Valid signature
-    // ...
-}
-
-process<u32>(42)  // ❌ Error: Parameter 'data' cannot have nullable basic type 'u32?'
+fn test<T>(x: T) -> T? = null
+let z = test<u32>(1)  // ❌ Error: Variable cannot have nullable basic type
 ```
 
 **Flow**:
 1. Function signature is valid (T could be reference type)
-2. Call instantiates T with u32
-3. Parameter type becomes `u32?`
-4. **Validator 3**: `checkFunctionParameter` detects nullable basic
+2. `test<u32>(1)` substitutes T with `u32`
+3. Return type becomes `u32?`
+4. **`checkVariableDeclSingle`** detects final type is nullable basic
 5. Error reported ❌
-
-#### Example 6: Iterator Variable (Error Case)
-
-```typescript
-fn getNullableInts<T>() -> T?[] = ...
-foreach x in getNullableInts<u32>() {  // ❌ Error: Iterator variable 'x' cannot have...
-    // x would be u32?
-}
-```
-
-**Flow**:
-1. `getNullableInts<u32>()` returns `u32?[]`
-2. Iterator `x` would have type `u32?`
-3. **Validator 5**: `checkIteratorVar` detects nullable basic
-4. Error reported ❌
-
-#### Example 7: Array Literal with null (Error Case)
-
-```typescript
-let nums = [1u32, null, 3u32]  // ❌ Error from type inference
-```
-
-**Flow**:
-1. Array elements have types: `u32`, `null`, `u32`
-2. `getCommonType([u32, null, u32])` called during array type inference
-3. Attempts to create `u32?` (nullable basic)
-4. **`getCommonType`** detects nullable basic type and returns ErrorType
-5. Array expression gets ErrorType, reported by `checkExpressionForErrors` ❌
-
-**Valid Alternative**:
-```typescript
-let vecs = [vec1, null, vec2]  // ✅ OK: Vec?[] is allowed for reference types
-```
-
-#### Example 8: Match Expression (Error Case)
-
-```typescript
-match value {
-    0 => 1u32,
-    1 => null,
-    _ => 2u32
-}  // ❌ Error from getCommonType
-```
-
-**Flow**:
-1. Match arms return: `u32`, `null`, `u32`
-2. `getCommonType` attempts to create `u32?`
-3. Detects nullable basic type and returns ErrorType ❌
 
 ### Why This Design Works
 
-#### 1. Intermediate Types Are Allowed
-Nullable basic types can exist during type inference, enabling:
-- Optional chaining on methods returning basic types
-- Nullish coalescing with basic types
-- Complex nullable chains
+#### 1. Optional Chaining Never Creates Nullable Basics
+When you use `?.` on methods returning basic types:
+- The result is the basic type itself, not wrapped in nullable
+- This makes sense: `?.` handles the null check, the method returns non-null
+- Simplifies the type system significantly
 
-#### 2. Explicit Declarations Are Rejected
-Users cannot declare variables with nullable basic types:
-- Catches at validation layer
-- Clear error messages
-- No runtime surprises
+#### 2. Common Type Inference Validates
+When combining values that would create nullable basic:
+- `[1u32, null]` → `getCommonType` catches this
+- `match x { 0 => 1u32, _ => null }` → `getCommonType` catches this
+- Centralized validation for all expression contexts
 
-#### 3. Type Safety Maintained
-The type system ensures:
-- Nullable basic types can exist temporarily during inference
-- They're consumed by operators (`??`, `!`) before validation
-- Variables never end up with nullable basic types
-- All escape paths are validated (explicit declarations + final types)
+#### 3. Variable Validators Provide Safety Net
+Even if nullable basics escape inference:
+- All variable binding points are validated
+- Catches generic instantiation edge cases
+- Ensures no nullable basics reach actual variable storage
 
 #### 4. Clean Separation of Concerns
-- Factory: Pure construction, no validation logic
-- Provider: Type inference and propagation
-- Validator: Usage context checking
+- **Provider**: Never creates nullable basics from basic types during `?.`
+- **Utility**: Validates when inferring common types
+- **Validator**: Validates at binding points
 
-### Edge Cases Handled
+### Complete Coverage
 
-#### Case 1: Deep Nullable Chains
-```typescript
-let result = obj?.method1()?.method2()?.getValue()
-// Where getValue() returns u32
-// Result type: u32? (correct)
-```
+The solution prevents nullable basic types through multiple layers:
 
-#### Case 2: Multiple Nullish Coalescing
-```typescript
-let x = a?.getValue() ?? b?.getValue() ?? 0u32
-// Intermediate u32? types consumed by ??
-// Final type: u32 (correct)
-```
+**Layer 1: Prevention at Source** (Type Provider)
+- ❌ `v?.get()` where `get()` returns `u32` → returns `u32`, not `u32?`
+- ❌ Optional chaining on basic type returns → no wrapping
+- ✅ Optional chaining on reference types → wrapping allowed
 
-#### Case 3: Generic with Nullable Basic Type Result
-```typescript
-fn wrap<T>(x: T) -> T? = null
-let x = wrap<u32>(42)  // ❌ Error
-// Caught by checkVariableDeclSingle - final type is u32?
+**Layer 2: Inference Validation** (Type Utils)  
+- ❌ `[1u32, null, 3u32]` → `getCommonType` returns error
+- ❌ `match x { 0 => 1u32, _ => null }` → error
+- ❌ Function returns mixing null and basics → error
 
-let y = wrap<Vec>(vec)  // ✅ OK
-// Vec? is allowed for reference types
-```
-
-#### Case 4: Generic Instantiation
-```typescript
-type Option<T> = variant { Some(T), None }
-let x: Option<u32> = ...
-let y = x.unwrap()  // y: u32 (not u32?)
-```
+**Layer 3: Declaration Validation** (Validators)
+- ❌ `let x: u32? = ...` → `checkNullableType`
+- ❌ `let x = test<u32>(1)` → `checkVariableDeclSingle`
+- ❌ `fn foo(x: u32?)` → `checkFunctionParameter`
+- ❌ All other binding contexts → specific validators
 
 ### Testing Strategy
 
 #### Valid Operations (Should Work)
-1. `v?.method()` where method returns basic type (creates temporary `u32?`)
-2. `v?.method() ?? default` with basic type (temporary consumed by `??`)
-3. Chained optional access with basic types
-4. Safe unwrapping with `!` operator: `v?.get()!`
-5. Generics with reference types: `let x = get<Vec>()` where `get<T>() -> T?` ✅
-6. Arrays of reference types with null: `let vecs = [vec1, null, vec2]` → `Vec?[]` ✅
+1. `v?.get()` where `get()` returns `u32` → type is `u32` ✅
+2. `v?.get() ?? 1u32` → type is `u32` ✅
+3. `v?.getData()` where `getData()` returns `Data` (class) → type is `Data?` ✅
+4. `v?.getData() ?? defaultData` → type is `Data` ✅
+5. Chained optional: `v?.getData()?.process()` ✅
 
-#### Invalid Declarations (Should Error)
-1. **Explicit variable annotations**: `let x: u32? = ...` (Validator: `checkNullableType`)
-2. **Return type annotations**: `fn foo() -> bool? { ... }` (Validator: `checkNullableType`)
-3. **Parameter annotations**: `fn foo(x: i32?) { ... }` (Validators: `checkNullableType`, `checkFunctionParameter`)
-4. **Class attributes**: `class C { let x: u32? }` (Validators: `checkNullableType`, `checkClassAttributeDecl`)
-5. **Generic variable instantiation**: `let x = get<u32>()` where `get<T>() -> T?` (Validator: `checkVariableDeclSingle`)
-6. **Generic parameter instantiation**: `fn foo<T>(x: T?) { ... }; foo<u32>(42)` (Validator: `checkFunctionParameter`)
-7. **Iterator types**: `foreach x: u32? in ...` (Validators: `checkNullableType`, `checkIteratorVar`)
-8. **Pattern variables**: In match expressions that bind to nullable basics (Validator: `checkVariablePattern`)
-9. **Array literals with null**: `let nums = [1u32, null, 3u32]` (Caught by: `getCommonType`)
-10. **Match expressions**: `match x { 0 => 1u32, _ => null }` (Caught by: `getCommonType`)
-11. **Function returns**: Multiple returns producing nullable basics (Caught by: `getCommonType`)
+#### Invalid Operations (Should Error)
+1. **Explicit nullable basic**: `let x: u32? = 42` ❌
+2. **Array with null**: `let nums = [1u32, null, 3u32]` ❌
+3. **Match with null**: `match x { 0 => 1u32, _ => null }` ❌
+4. **Generic instantiation**: `let x = wrap<u32>(1)` where `wrap<T>() -> T?` ❌
+5. **Parameter generic**: `fn foo<T>(x: T?) {}; foo<u32>(1)` ❌
 
 ### Benefits
 
-1. **Correctness**: Type inference works naturally for all nullable operations
-2. **Complete Coverage**: Two-checkpoint validation catches all nullable basic type paths
-3. **Safety**: No way for nullable basic types to reach variable declarations
-4. **Clarity**: Clear error messages for both explicit and inferred cases
-5. **Flexibility**: Allows complex nullable chains and operators to work correctly
-6. **Maintainability**: Clean separation makes code easier to understand and modify
+1. **Simplicity**: Optional chaining never creates nullable basics - clean and intuitive
+2. **Correctness**: Type inference works naturally for all null-aware operations
+3. **Complete Coverage**: Three-layer defense (prevention + inference + declaration)
+4. **Efficiency**: Most cases prevented at source, reducing downstream validation
+5. **Clarity**: Clear error messages with proper context
+6. **Type Safety**: No way for nullable basic types to exist in the program
+7. **Maintainability**: Logic is distributed appropriately across layers
+
+### Comparison with TypeScript
+
+TypeScript allows nullable primitives:
+```typescript
+let x: number | null = null;  // OK in TypeScript
+let arr: (number | null)[] = [1, null, 3];  // OK in TypeScript
+```
+
+Type-C is more restrictive:
+```typescript
+let x: u32? = null;  // ❌ Error in Type-C
+let arr: u32?[] = [1, null, 3];  // ❌ Error in Type-C
+```
+
+This design decision:
+- Prevents common null-related bugs
+- Encourages using proper null handling with `??` operator
+- Makes code more explicit about null handling
+- Aligns with the language's focus on type safety
 
 ### Migration Notes
 
 This change is **backward compatible**:
 - Valid code continues to work
+- Optional chaining behavior is clarified (doesn't wrap basics with nullable)
 - Invalid code (explicit nullable basic types) still errors
-- Only difference: better error messages and more consistent behavior
+- Better error messages and more consistent behavior
 
 ### Future Enhancements
 
@@ -449,43 +327,22 @@ Possible future improvements:
 1. **Flow-sensitive typing**: Track null checks to narrow types
 2. **Smart unwrapping**: Automatic unwrapping in safe contexts
 3. **Refined error messages**: Suggest alternatives for common patterns
-4. **Nullability inference**: Infer when values might be null
 
 ## Conclusion
 
-By combining three layers:
+By implementing a "prevent at source" approach:
 
-1. **Factory layer** (`type-factory.ts`):
-   - Allows creation of any nullable type (no validation)
-   - Pure construction, no business logic
+1. **Type Provider Layer**: Never wraps basic types with nullable during `?.` operations
+2. **Type Utility Layer**: `getCommonType` validates when inferring types from multiple values
+3. **Validation Layer**: Safety net validators for all variable binding contexts
 
-2. **Type utility layer** (`type-utils.ts`):
-   - `getCommonType` validates when creating nullable types from multiple values
-   - Catches: array literals, match expressions, function returns
-   - Centralized validation for type inference contexts
+We achieve a clean, efficient solution where:
+- ✅ Optional chaining on basic type methods returns the basic type directly
+- ✅ Nullable wrapper is only used for reference types during `?.`
+- ✅ Array literals, match expressions, etc. are validated in `getCommonType`
+- ✅ Variable declarations are validated as a final safety check
+- ✅ No nullable basic types can exist anywhere in the program
+- ✅ Type system is simpler and more intuitive
+- ✅ Complete type safety maintained
 
-3. **Validation layer** (`type-system-validations.ts`):
-   - 6 specialized validators for variable binding contexts
-   - Each validator targets specific AST node types
-   - Catches: variables, parameters, attributes, iterators, patterns
-
-We achieve:
-- ✅ Nullable basic types as intermediate values during inference (e.g., `v?.get()`)
-- ✅ Natural handling by null-aware operators (`??`, `!`, `?.`)
-- ✅ **Complete rejection** of nullable basic types in **all** persistent contexts:
-  - Variable declarations (all kinds)
-  - Array/match/function expressions (via `getCommonType`)
-  - Function parameters and return types
-  - Class attributes
-- ✅ Clear, context-specific error messages
-- ✅ Type safety without sacrificing expressiveness
-- ✅ Efficient: centralized logic in `getCommonType` + specific validators
-- ✅ Coverage of **all** edge cases including:
-  - Generic instantiation: `get<u32>()` where `get<T>() -> T?`
-  - Array literals: `[1u32, null, 3u32]`
-  - Match expressions: `match x { 0 => 1u32, _ => null }`
-  - Iterator variables from generic collections
-  - Pattern matching with type inference
-  - Function returns with mixed null/basic values
-
-The solution is **comprehensive and efficient**, using centralized validation in `getCommonType` for type inference contexts while maintaining specific validators for variable binding contexts. This achieves complete coverage with minimal code duplication.
+The solution is **clean, efficient, and comprehensive** - preventing nullable basic types at their source during optional chaining while maintaining validation layers for other contexts.

@@ -1,0 +1,22 @@
+// Test that optional chaining with basic type return works when wrapped with ??
+
+type Data = interface {
+    fn getValue() -> u32
+}
+
+type Container = interface {
+    fn getData() -> Data
+}
+
+fn testChaining() {
+    let c: Container? = null
+    
+    // CORRECT: Use ?? to handle the null case from optional chaining
+    let value = c?.getData().getValue() ?? 0u32
+    
+    // Also works with different default value
+    let value2 = c?.getData().getValue() ?? 42u32
+    
+    // For reference types, optional chaining returns nullable type (no ?? required)
+    let data = c?.getData()  // data: Data?
+}

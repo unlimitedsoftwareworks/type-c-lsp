@@ -3004,6 +3004,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
                 });
             }
+            // Check step is unsigned (positive) integer
+            else if (isIntegerType(stepType)) {
+                // Signed integer types (i8, i16, i32, i64) are not allowed as step
+                const signedTypes = [TypeKind.I8, TypeKind.I16, TypeKind.I32, TypeKind.I64];
+                if (signedTypes.includes(stepType.kind)) {
+                    accept('error', `Range step must be a positive integer (unsigned type), but got signed type '${stepType.toString()}'. Use u8, u16, u32, or u64 instead.`, {
+                        node: node.step,
+                        code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                    });
+                }
+            }
         }
 
         // Validate iterator type annotation if specified

@@ -756,6 +756,12 @@ export class TypeCTypeProvider {
             }
         }
 
+        // ForRangeIterator step expression: foreach x in start, end, step { ... }
+        // The step should always be u64 (positive integer)
+        if (parent && ast.isForRangeIterator(parent) && parent.step === node) {
+            return this.typeFactory.createU64Type(node);
+        }
+
         // No expected type found
         return undefined;
     }

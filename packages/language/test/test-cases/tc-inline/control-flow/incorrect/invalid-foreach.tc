@@ -22,4 +22,52 @@ fn test2() {
     foreach x : int in 1, 1, "1" {
 
     }
+    
+}
+
+// Test foreach with ForRangeIterator - step validation
+
+fn testPositiveStep() {
+    // Valid: positive step
+    foreach i in 0, 10, 1 {
+        let x: i32 = i
+    }
+    
+    // Valid: positive step (larger)
+    foreach i in 0, 100, 5 {
+        let x: i32 = i
+    }
+}
+
+fn testInvalidStep() {
+    // @error(Range step must be a positive integer, but got '0'. Step cannot be zero or negative.)
+    foreach i in 0, 10, 0 {
+        let x: i32 = i
+    }
+    
+    /// @Error(TCE120): Range step must be a positive integer
+    foreach i in 0, 10, -1 {
+        let x: i32 = i
+    }
+    
+    /// @Error(TCE120): Range step must be a positive integer
+    foreach i in 10, 0, -5 {
+        let x: i32 = i
+    }
+}
+
+fn testNonLiteralStep() {
+    // These should pass type checking (integer type)
+    // but won't validate the value since they're not literals
+    let step = 1
+    /// @Error(TCE120): Range step must be a positive integer
+    foreach i in 0, 10, step {
+        let x: i32 = i
+    }
+    
+    
+    let negativeStep = -1u64
+    foreach i in 0, 10, 1 {
+        let x: i32 = i
+    }
 }

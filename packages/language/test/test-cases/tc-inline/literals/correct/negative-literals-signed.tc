@@ -1,0 +1,28 @@
+// @tc-expect-no-diagnostics
+// Test: Negative literals with signed type specifiers should work
+
+fn test_negative_signed() {
+    // Negative literals without type specifiers (inferred as signed)
+    let a = -42
+    let b = -0x10
+    let c = -0b101
+    let d = -0o77
+    
+    // Negative literals with explicit signed type specifiers
+    let e = -42i8
+    let f = -42i16
+    let g = -42i32
+    let h = -42i64
+    
+    // Negative hex with signed specifiers
+    let i = -0x10i32
+    let j = -0xFFi16
+    
+    // Negative binary with signed specifiers
+    let k = -0b1010i32
+    let l = -0b11111111i8
+    
+    // Negative octal with signed specifiers
+    let m = -0o77i32
+    let n = -0o377i16
+}

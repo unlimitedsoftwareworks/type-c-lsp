@@ -78,7 +78,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
             ReferenceType: this.checkReferenceType,
-            UnaryExpression: this.checkExpressionForErrors,
+            UnaryExpression: [this.checkNegativeUnsignedLiteral, this.checkExpressionForErrors],
             IndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ReverseIndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             PostfixOp: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
@@ -3144,6 +3144,58 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 node: node,
                 code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
+        }
+    }
+
+    /**
+     * Check unary negation expressions for invalid combinations with unsigned integer literals.
+     *
+     * When using unary negation operator (-) with an unsigned integer literal,
+     * this creates a semantic error as we're trying to negate an unsigned value.
+     *
+     * Rules:
+     * 1. Cannot negate unsigned integer literals (e.g., -42u32)
+     * 2. Can negate signed integer literals (e.g., -42i32)
+     * 3. Can negate literals without type specifiers (e.g., -42, inferred as signed)
+     *
+     * Examples:
+     * - -42        // ✅ OK (inferred as signed)
+     * - -42i32     // ✅ OK (signed type specifier)
+     * - -42u32     // ❌ Error (negating unsigned literal)
+     * - -0x10u32   // ❌ Error (negating unsigned hex literal)
+     * - -(x + 1)   // ✅ OK (negating expression, not literal)
+     */
+    checkNegativeUnsignedLiteral = (node: ast.UnaryExpression, accept: ValidationAcceptor): void => {
+        // Only check negation operator
+        if (node.op !== '-') {
+            return;
+        }
+
+        // Check if the expression being negated is an integer literal
+        if (!ast.isIntegerLiteral(node.expr)) {
+            return;
+        }
+
+        const literal = node.expr;
+        
+        // Extract the type specifier from the value string
+        // The value contains the number and optional type suffix like "42u32" or "0x10i16"
+        const typeSpecifierMatch = literal.value.match(/[ui](8|16|32|64)$/);
+        
+        if (typeSpecifierMatch) {
+            const typeSpecifier = typeSpecifierMatch[0];
+            
+            // Check if it's an unsigned type specifier
+            if (typeSpecifier.startsWith('u')) {
+                const errorCode = ErrorCode.TC_NEGATIVE_LITERAL_WITH_UNSIGNED_TYPE;
+                accept('error',
+                    `Cannot negate unsigned integer literal with type specifier '${typeSpecifier}'. Use a signed type (i8, i16, i32, i64) or remove the type specifier to infer the appropriate signed type.`,
+                    {
+                        node: literal,
+                        code: errorCode
+                    }
+                );
+            }
         }
     }
 

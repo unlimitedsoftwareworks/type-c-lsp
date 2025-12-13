@@ -1,0 +1,33 @@
+// Test: Negative literals with unsigned type specifiers should be errors
+
+fn test_negative_unsigned() {
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let a = -42u32
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let b = -42u8
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let c = -42u16
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let d = -42u64
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let e = -0x10u32
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let f = -0xFFu16
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let g = -0b1010u32
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let h = -0b11111111u8
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let i = -0o77u32
+    
+    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    let j = -0o377u16
+}

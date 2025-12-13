@@ -25,8 +25,8 @@ fn main() {
     // z: {x: u32, y: u32}?
     
     // ✅ Optional chaining with multiple member accesses
-    let nested = v?.method().nested.value
-    // nested: u32?
+    let nested = v?.method().nested.value ?? 1u32
+    // nested: u32
     
     // ✅ Optional chaining with index access
     let arr: u32[]? = null
@@ -39,7 +39,7 @@ fn main() {
     // val: u32?
     
     // ✅ Optional chaining through function calls
-    let result = c?.getVec().method().nested.value
+    let result = c?.getVec().method().nested.value ?? "hiii"
     // result: u32?
     
     // ✅ Type cast in optional chain

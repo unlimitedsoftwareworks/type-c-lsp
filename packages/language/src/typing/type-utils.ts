@@ -11,6 +11,7 @@
 
 import { AstNode, AstUtils } from "langium";
 import * as ast from '../generated/ast.js';
+import { ErrorCode } from "../codes/errors.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
@@ -2342,7 +2343,19 @@ export class TypeCTypeUtils {
             if (isNullableType(commonType)) {
                 return commonType;
             }
-            return this.typeFactory.createNullableType(commonType, types[0].node);
+            const nullableType = this.typeFactory.createNullableType(commonType, types[0].node);
+            
+            // Check if we created a nullable basic type
+            if (isNullableType(nullableType) && this.isTypeBasic(nullableType.baseType)) {
+                return this.typeFactory.createErrorType(
+                    `Cannot create expression with nullable basic type '${nullableType.toString()}'. ` +
+                    `Basic types cannot be nullable. ` +
+                    `Consider using a wrapper type or handling null differently.`,
+                    ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+                );
+            }
+            
+            return nullableType;
         }
 
         return commonType;

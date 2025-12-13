@@ -57,6 +57,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     getChecks(): ValidationChecks<ast.TypeCAstType> {
         return {
             VariableDeclSingle: this.checkVariableDeclSingle,
+            FunctionParameter: this.checkFunctionParameter,
+            ClassAttributeDecl: this.checkClassAttributeDecl,
+            IteratorVar: this.checkIteratorVar,
+            VariablePattern: [this.checkVariablePattern, this.checkExpressionForErrors],
             BinaryExpression: [this.checkBinaryExpression, this.checkExpressionForErrors],
             FunctionCall: [this.checkFunctionCall, this.checkExpressionForErrors],
             ReturnStatement: this.checkReturnStatement,
@@ -93,7 +97,6 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             CoroutineExpression: this.checkExpressionForErrors,
             InstanceCheckExpression: this.checkExpressionForErrors,
             ThisExpression: this.checkExpressionForErrors,
-            VariablePattern: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
             ObjectUpdate: this.checkObjectUpdateFields,
             ForEachIterator: this.checkForEachIterator,
@@ -111,7 +114,49 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * - let x = 42           // ✅ OK (no annotation, inferred)
      */
     checkVariableDeclSingle = (node: ast.VariableDeclSingle, accept: ValidationAcceptor): void => {
-        // Only check if there's both an annotation AND an initializer
+        // Get the final type that will be assigned to this variable
+        // This could be from annotation or inference
+        let finalType: TypeDescription;
+        
+        if (node.annotation) {
+            finalType = this.typeProvider.getType(node.annotation);
+        } else if (node.initializer) {
+            finalType = this.typeProvider.getType(node.initializer);
+            if(isErrorType(finalType)) {
+                accept('error', finalType.message, {
+                    node: node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                })
+            }
+        } else {
+            return; // No type to check
+        }
+        
+        // Resolve references to get the actual type
+        if (isReferenceType(finalType)) {
+            const resolved = this.typeProvider.resolveReference(finalType);
+            if (resolved) finalType = resolved;
+        }
+        
+        // Check if the final variable type is a nullable basic type
+        // This catches cases like:
+        // 1. let x: u32? = ... (explicit annotation)
+        // 2. let x = get<u32>() where get returns T? (inferred from generic)
+        if (isNullableType(finalType) && this.typeUtils.isTypeBasic(finalType.baseType)) {
+            const errorNode = node.annotation || node.initializer || node;
+            accept('error',
+                `Variable '${node.name}' cannot have nullable basic type '${finalType.toString()}'. ` +
+                `Basic types cannot be nullable. ` +
+                `Consider using a reference type or handling null with the ?? operator.`,
+                {
+                    node: errorNode,
+                    code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+                }
+            );
+            return;
+        }
+        
+        // Only check type compatibility if there's both annotation AND initializer
         if (!node.annotation || !node.initializer) {
             return;
         }
@@ -2861,6 +2906,95 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             accept('error', valueVarType.message || 'Cannot infer iterator variable type', {
                 node: node.valueVar,
                 code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        }
+    }
+
+    /**
+     * Helper method to check if a type (after resolution) is a nullable basic type.
+     * Returns error message if it is, undefined otherwise.
+     */
+    private checkForNullableBasicType(type: TypeDescription): string | undefined {
+        // Resolve references to get actual type
+        if (isReferenceType(type)) {
+            const resolved = this.typeProvider.resolveReference(type);
+            if (resolved) type = resolved;
+        }
+        
+        // Check if it's a nullable basic type
+        if (isNullableType(type) && this.typeUtils.isTypeBasic(type.baseType)) {
+            return `Nullable basic type '${type.toString()}' is not allowed. ` +
+                   `Basic types cannot be nullable. ` +
+                   `Consider using a reference type or handling null with the ?? operator.`;
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Check function parameters for nullable basic types.
+     * Catches cases like: fn foo(x: u32?) or fn get<T>(x: T) where T is instantiated with u32 and return type is T?
+     */
+    checkFunctionParameter = (node: ast.FunctionParameter, accept: ValidationAcceptor): void => {
+        if (!node.type) return;
+        
+        const paramType = this.typeProvider.getType(node.type);
+        const errorMsg = this.checkForNullableBasicType(paramType);
+        
+        if (errorMsg) {
+            accept('error', `Parameter '${node.name}' cannot have ${errorMsg}`, {
+                node: node.type,
+                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+            });
+        }
+    }
+
+    /**
+     * Check class attributes for nullable basic types.
+     * Catches cases like: class C { let x: u32? }
+     */
+    checkClassAttributeDecl = (node: ast.ClassAttributeDecl, accept: ValidationAcceptor): void => {
+        if (!node.type) return;
+        
+        const attrType = this.typeProvider.getType(node.type);
+        const errorMsg = this.checkForNullableBasicType(attrType);
+        
+        if (errorMsg) {
+            accept('error', `Attribute '${node.name}' cannot have ${errorMsg}`, {
+                node: node.type,
+                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+            });
+        }
+    }
+
+    /**
+     * Check iterator variables for nullable basic types.
+     * Catches cases like: foreach x: u32? in ... or inferred from collection type
+     */
+    checkIteratorVar = (node: ast.IteratorVar, accept: ValidationAcceptor): void => {
+        const varType = this.typeProvider.getType(node);
+        const errorMsg = this.checkForNullableBasicType(varType);
+        
+        if (errorMsg) {
+            accept('error', `Iterator variable '${node.name}' cannot have ${errorMsg}`, {
+                node: node,
+                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+            });
+        }
+    }
+
+    /**
+     * Check variable patterns (in match expressions) for nullable basic types.
+     * Catches cases like match patterns that bind to nullable basic types
+     */
+    checkVariablePattern = (node: ast.VariablePattern, accept: ValidationAcceptor): void => {
+        const varType = this.typeProvider.getType(node);
+        const errorMsg = this.checkForNullableBasicType(varType);
+        
+        if (errorMsg) {
+            accept('error', `Pattern variable '${node.name}' cannot have ${errorMsg}`, {
+                node: node,
+                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
         }
     }

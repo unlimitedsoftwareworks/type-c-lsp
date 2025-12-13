@@ -1,18 +1,17 @@
-// @test: Test correct optional chaining behavior
-// Tests TypeScript-compliant optional chaining propagation
-
-type Vec = interface {
-    fn set(vec: {x: u32, y: i32}?) -> void
-    fn set(vec: null) -> void
-    fn get() -> {data: {f: fn() -> {x: u32, y: u32}}}
-    fn method() -> {nested: {value: u32}}
+fn main1() {
+    
+    /// @Error(TCE170): Basic types cannot be nullables
+    let nums1: u32?[] = 
+        /// @Error(TCE120): Nullable basic types are not allowed
+        [1u32, null, 3u32]
+    
 }
 
-type Container = interface {
-    fn getValue() -> u32
-    fn getVec() -> Vec
+fn test<T>(x: T) -> T? {
+    return x
 }
 
-fn main() {
-    let v: Vec? = null
-    let c: Container? = null
+fn main2() {
+    /// @Error(TCE170): Basic types cannot be nullable
+    let z = test(1)
+}

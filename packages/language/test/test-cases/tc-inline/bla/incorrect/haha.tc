@@ -1,9 +1,7 @@
 fn main1() {
     
-    /// @Error(TCE170): Basic types cannot be nullables
-    let nums1: u32?[] = 
-        /// @Error(TCE120): Nullable basic types are not allowed
-        [1u32, null, 3u32]
+    /// @Error(TCE120): Basic types cannot be nullable
+    let nums1 = [1u32, null, 3u32]
     
 }
 
@@ -12,6 +10,6 @@ fn test<T>(x: T) -> T? {
 }
 
 fn main2() {
-    /// @Error(TCE120): Nullable basic types are not allowed
+    /// @Error(TCE170): Basic types cannot be nullable.
     let z = test(1)
 }

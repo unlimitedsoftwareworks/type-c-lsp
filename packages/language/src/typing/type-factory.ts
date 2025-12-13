@@ -5,62 +5,60 @@
  * All type creation should go through these factories to ensure consistency.
  */
 
-import * as ast from "../generated/ast.js";
 import { AstNode } from "langium";
-import { ErrorCode } from "../codes/errors.js";
+import * as ast from "../generated/ast.js";
 import type { TypeCServices } from "../type-c-module.js";
+import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
-    TypeDescription,
-    TypeKind,
-    IntegerTypeDescription,
-    FloatTypeDescription,
-    BoolTypeDescription,
-    VoidTypeDescription,
-    StringTypeDescription,
-    StringLiteralTypeDescription,
-    NullTypeDescription,
+    AnyTypeDescription,
     ArrayTypeDescription,
-    NullableTypeDescription,
-    UnionTypeDescription,
+    AttributeType,
+    BoolTypeDescription,
+    ClassTypeDescription,
+    CoroutineTypeDescription,
+    EnumCaseType,
+    EnumTypeDescription,
+    ErrorTypeDescription,
+    FFITypeDescription,
+    FloatTypeDescription,
+    FunctionParameterType,
+    FunctionTypeDescription,
+    GenericTypeDescription,
+    ImplementationTypeDescription,
+    IntegerTypeDescription,
+    InterfaceTypeDescription,
     JoinTypeDescription,
-    TupleTypeDescription,
-    StructTypeDescription,
+    MetaClassTypeDescription,
+    MetaEnumTypeDescription,
+    MetaVariantConstructorTypeDescription,
+    MetaVariantTypeDescription,
+    MethodType,
+    NamespaceTypeDescription,
+    NeverTypeDescription,
+    NullTypeDescription,
+    NullableTypeDescription,
+    PrototypeMethodType,
+    PrototypeTypeDescription,
+    ReferenceTypeDescription,
+    ReturnTypeDescription,
+    StringEnumTypeDescription,
+    StringLiteralTypeDescription,
+    StringTypeDescription,
     StructFieldType,
-    VariantTypeDescription,
+    StructTypeDescription,
+    TupleTypeDescription,
+    TypeDescription,
+    TypeGuardTypeDescription,
+    TypeKind,
+    UnionTypeDescription,
+    UnsetTypeDescription,
     VariantConstructorType,
     VariantConstructorTypeDescription,
-    EnumTypeDescription,
-    EnumCaseType,
-    StringEnumTypeDescription,
-    InterfaceTypeDescription,
-    ClassTypeDescription,
-    ImplementationTypeDescription,
-    FunctionTypeDescription,
-    FunctionParameterType,
-    CoroutineTypeDescription,
-    ReturnTypeDescription,
-    ReferenceTypeDescription,
-    GenericTypeDescription,
-    PrototypeTypeDescription,
-    PrototypeMethodType,
-    NamespaceTypeDescription,
-    FFITypeDescription,
-    ErrorTypeDescription,
-    NeverTypeDescription,
-    AnyTypeDescription,
-    UnsetTypeDescription,
-    MethodType,
-    AttributeType,
-    MetaVariantTypeDescription,
-    MetaVariantConstructorTypeDescription,
-    MetaEnumTypeDescription,
-    MetaClassTypeDescription,
-    TypeGuardTypeDescription,
+    VariantTypeDescription,
+    VoidTypeDescription,
     isReferenceType,
 } from "./type-c-types.js";
 import { serializer } from "./type-serialization.js";
-import { TypeCTypeProvider } from "./type-c-type-provider.js";
-import { TypeCTypeUtils } from "./type-utils.js";
 
 // ============================================================================
 // Primitive Types
@@ -819,17 +817,29 @@ function createPrimitiveTypeFromAST(astType: ast.PrimitiveType): TypeDescription
 /**
  * Type Factory Service
  *
- * This service wraps the factory functions and provides additional validation.
- * It can access the TypeProvider to resolve type references when needed.
+ * This service wraps the factory functions and provides a consistent API.
+ * 
+ * IMPORTANT: The factory does NOT validate usage contexts - it only creates types.
+ * Validation of inappropriate type usage (e.g., nullable basic types in variable declarations)
+ * happens at the validation layer, not during type creation. This separation allows:
+ * 
+ * 1. Intermediate nullable basic types to exist during type inference
+ *    Example: `v?.get()` where get() returns `u32` creates temporary `u32?`
+ * 
+ * 2. These intermediate types to be consumed by null-handling operators
+ *    Example: `v?.get() ?? 1u32` - the `??` consumes the `u32?` and produces `u32`
+ * 
+ * 3. Only explicit declarations to be validated
+ *    Example: `let x: u32? = ...` is caught by validation, not factory
  */
 export class TypeCTypeFactory {
     private readonly typeProvider: () => TypeCTypeProvider;
-    private readonly typeUtils: () => TypeCTypeUtils;
+    //private readonly typeUtils: () => TypeCTypeUtils;
 
     constructor(services: TypeCServices) {
         // Use lazy getter to avoid circular dependency
         this.typeProvider = () => services.typing.TypeProvider;
-        this.typeUtils = () => services.typing.TypeUtils;
+        //this.typeUtils = () => services.typing.TypeUtils;
     }
 
     /**
@@ -862,19 +872,25 @@ export class TypeCTypeFactory {
     }
 
     /**
-     * Creates a nullable type with validation
-     * Returns an error if trying to make a basic type nullable
+     * Creates a nullable type.
+     * 
+     * IMPORTANT: This factory method does NOT validate whether creating a nullable basic type
+     * is appropriate for the usage context. It simply creates the type description.
+     * 
+     * Validation happens at the validation layer (checkNullableType in type-system-validations.ts),
+     * which checks explicit type declarations like `let x: u32?` and reports them as errors.
+     * 
+     * This design allows nullable basic types to exist temporarily during type inference
+     * (e.g., from optional chaining like `v?.get()` where get() returns u32) and be consumed
+     * by null-handling operators like `??` or `!` before reaching validation points.
+     * 
+     * Examples:
+     * - `v?.get() ?? 1u32` - Creates temporary `u32?`, then `??` unwraps it to `u32` ✅
+     * - `let x: u32? = ...` - Caught by validation, not factory ❌
      */
     createNullableType(baseType: TypeDescription, node?: AstNode): TypeDescription {
-        // Check if baseType is a basic type (or resolves to one)
-        if (this.typeUtils().isTypeBasic(baseType)) {
-            return createErrorType(
-                `Cannot create nullable type from basic type '${baseType.toString()}'. Nullable basic types are not allowed.`,
-                ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE,
-                node
-            );
-        }
-
+        // No validation here - just create the type
+        // Validation of inappropriate usage happens at the validation layer
         return createNullableType(baseType, node);
     }
 
@@ -934,4 +950,3 @@ export class TypeCTypeFactory {
     createFloatTypeFromString = createFloatTypeFromString;
     createPrimitiveTypeFromAST = createPrimitiveTypeFromAST;
 }
-

@@ -28,6 +28,7 @@ import {
     isFFIType,
     isFunctionType,
     isGenericType,
+    isIntegerType,
     isJoinType,
     isMetaClassType,
     isMetaEnumType,
@@ -2286,10 +2287,28 @@ export class TypeCTypeProvider {
             return this.typeFactory.createBoolType(node);
         }
 
-        // Check for operator overloads on classes/interfaces
+        // Check for operator overloads on classes/interfaces BEFORE checking for errors
         const operatorOverload = this.resolveOperatorOverload(exprType, node.op, [], node);
         if (operatorOverload) {
             return operatorOverload;
+        }
+
+        // Check if unary minus is being applied to unsigned integer type
+        if (node.op === '-') {
+            // Resolve reference types to get the actual type
+            const resolvedType = isReferenceType(exprType) ? this.resolveReference(exprType) : exprType;
+            
+            // Check if it's an unsigned integer type (u8, u16, u32, u64)
+            // Use the type guard properly to narrow the type
+            if (isIntegerType(resolvedType)) {
+                if (!resolvedType.signed) {
+                    return this.typeFactory.createErrorType(
+                        `Cannot apply unary minus to unsigned type '${resolvedType.toString()}'. Use explicit cast to signed type if negation is intended: -(x as i${resolvedType.bits})`,
+                        undefined,
+                        node
+                    );
+                }
+            }
         }
 
         // Other unary operators preserve the type

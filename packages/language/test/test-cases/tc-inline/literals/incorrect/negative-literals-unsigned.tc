@@ -1,33 +1,36 @@
 // Test: Negative literals with unsigned type specifiers should be errors
 
 fn test_negative_unsigned() {
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let a = -42u32
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let b = -42u8
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let c = -42u16
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let d = -42u64
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let e = -0x10u32
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let f = -0xFFu16
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let g = -0b1010u32
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let h = -0b11111111u8
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let i = -0o77u32
     
-    /// @Error(TCE112): Cannot negate unsigned integer literal with type specifier
+    /// @Error(TCE120): Cannot apply unary minus to unsigned type
     let j = -0o377u16
+
 }
+
+type int = u32

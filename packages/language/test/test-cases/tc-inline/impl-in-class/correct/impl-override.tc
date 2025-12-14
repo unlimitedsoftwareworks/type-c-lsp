@@ -41,11 +41,11 @@ fn main() -> u32 {
     let mesh = new CustomMesh(new Vec3(1.0f, 2.0f, 3.0f), 42u32)
     
     // Should call the overridden method, returning Vec3 with x + 10
-    // @type: Vec3
+    // @Type(p): Vec3
     let p = mesh.getPosition()
     
     // Should call the impl method (not overridden)
-    // @type: Vec3
+    // @Type(r): Vec3
     let r = mesh.getRotation()
     
     return 0u32

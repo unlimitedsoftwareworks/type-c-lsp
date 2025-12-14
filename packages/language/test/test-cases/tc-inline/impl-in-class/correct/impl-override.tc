@@ -1,0 +1,59 @@
+// @test: impl-override
+// Tests that class methods can override implementation methods
+
+type Vec3 = class {
+    let x: f32, y: f32, z: f32
+
+    fn init(x: f32, y: f32, z: f32) {
+        this.x = x
+        this.y = y
+        this.z = z
+    }
+}
+
+type Default3DPropsAccessImpl = impl (
+    pos: Vec3,
+    rot: Vec3,
+    scl: Vec3
+) {
+    fn getPosition() -> Vec3 = this.pos
+    fn getRotation() -> Vec3 = this.rot
+    fn getScale() -> Vec3 = this.scl
+}
+
+type CustomMesh = class {
+    let position: Vec3
+    let rotation: Vec3
+    let scale: Vec3
+    let customData: u32
+
+    impl Default3DPropsAccessImpl(position, rotation, scale)
+
+    fn init(mut pos: Vec3, mut customData: u32) {
+        this.position = pos
+        this.rotation = new Vec3(0.0f, 0.0f, 0.0f)
+        this.scale = new Vec3(1.0f, 1.0f, 1.0f)
+        this.customData = customData
+    }
+
+    // Override the implementation's getPosition method
+    override fn getPosition() -> Vec3 {
+        // @type: u32
+        let data = this.customData
+        return new Vec3(this.position.x + 10.0f, this.position.y, this.position.z)
+    }
+}
+
+fn main() -> u32 {
+    let mesh = new CustomMesh(new Vec3(1.0f, 2.0f, 3.0f), 42u32)
+    
+    // Should call the overridden method, returning Vec3 with x + 10
+    // @type: Vec3
+    let p = mesh.getPosition()
+    
+    // Should call the impl method (not overridden)
+    // @type: Vec3
+    let r = mesh.getRotation()
+    
+    return 0u32
+}

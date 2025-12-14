@@ -1,0 +1,32 @@
+type vec3 = struct {
+    x: f32, y: f32, z: f32
+}
+
+type Object3D  = interface {
+    fn getPos() -> vec3
+    fn getScale() -> vec3
+    fn getRotation() -> vec3
+}
+
+type Default3DImpl = impl for Object3D (
+    position: vec3,
+    scale: vec3,
+    rotation: vec3
+) {
+    fn getPos() -> {x: f32, y: f32, z: f32} = this.position
+    fn getScale() -> vec3 = this.scale
+    fn getRotation() -> vec3 = this.rotation
+}
+
+type Mesh = class {
+    let pos: vec3
+    let scale: vec3
+    let rot: vec3
+
+    impl Default3DImpl(pos, scale, rot)
+}
+
+fn main() {
+    let m: Object3D = new Mesh()
+    let z = m.getPos()
+}

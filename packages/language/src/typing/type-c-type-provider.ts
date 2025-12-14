@@ -28,6 +28,7 @@ import {
     isFFIType,
     isFunctionType,
     isGenericType,
+    isImplementationType,
     isIntegerType,
     isJoinType,
     isMetaClassType,
@@ -53,8 +54,8 @@ import {
     TypeKind,
     VariantConstructorTypeDescription
 } from './type-c-types.js';
-import { TypeCTypeUtils } from './type-utils.js';
 import { TypeCTypeFactory } from './type-factory.js';
+import { TypeCTypeUtils } from './type-utils.js';
 
 /**
  * Main type provider service.
@@ -72,7 +73,7 @@ export class TypeCTypeProvider {
 
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
-    
+
     /** Type Factory service */
     private readonly typeFactory: TypeCTypeFactory;
     /**
@@ -161,7 +162,7 @@ export class TypeCTypeProvider {
         }
 
         const documentUri = AstUtils.getDocument(node).uri;
-        
+
         // Get from cache or compute if not cached
         return this.typeCache.get(documentUri, node, () => this.computeType(node));
     }
@@ -236,7 +237,7 @@ export class TypeCTypeProvider {
      */
     getExpectedType(node: AstNode): TypeDescription | undefined {
         const documentUri = AstUtils.getDocument(node).uri;
-        
+
         // Get from cache or compute if not cached
         return this.expectedTypeCache.get(documentUri, node, () => this.computeExpectedType(node));
     }
@@ -288,23 +289,23 @@ export class TypeCTypeProvider {
         // foo(expr)
         if (ast.isFunctionCall(parent)) {
             let fnType = this.inferExpression(parent.expr);
-            
+
             // Resolve reference types first
             fnType = this.typeUtils.resolveIfReference(fnType);
-            
+
             // Handle variant constructor calls (e.g., Result.Ok(42) where Result<u32, string> is expected)
             // This enables contextual typing for constructor arguments
             // Variant constructors are FunctionTypes with VariantConstructorType as return type
             if (isFunctionType(fnType) && isVariantConstructorType(fnType.returnType)) {
                 const constructorType = fnType.returnType;
-                
+
                 // Get the expected type for the whole call (e.g., Result<u32, string>)
                 const expectedCallType = this.getExpectedType(parent);
-                
+
                 if (expectedCallType) {
                     // Extract generic substitutions from the expected type
                     let substitutions: Map<string, TypeDescription> | undefined;
-                    
+
                     if (isReferenceType(expectedCallType) && expectedCallType.genericArgs.length > 0) {
                         // Build substitution map from the expected type's generic args
                         const variantDecl = constructorType.variantDeclaration;
@@ -317,51 +318,51 @@ export class TypeCTypeProvider {
                             });
                         }
                     }
-                    
+
                     // Find the parameter type for this argument
                     const argIndex = parent.args?.findIndex(arg => arg === node);
                     if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
                         // Get the parameter type from the function (which has generic types like T)
                         let paramType = fnType.parameters[argIndex].type;
-                        
+
                         // Apply generic substitutions if we have them
                         if (substitutions && substitutions.size > 0) {
                             paramType = this.typeUtils.substituteGenerics(paramType, substitutions);
                         }
-                        
+
                         return paramType;
                     }
                 }
             }
-            
+
             if (isFunctionType(fnType)) {
                 // Find which argument position this is
                 const argIndex = parent.args?.findIndex(arg => arg === node);
                 if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
                     let expectedParamType = fnType.parameters[argIndex].type;
-                    
+
                     // If the function has generic parameters and we're inferring an expression that needs context,
                     // perform iterative partial generic inference from other arguments
                     const genericParams = fnType.genericParameters || [];
                     const needsContext = ast.isExpression(node) && this.expressionNeedsContextualTyping(node);
-                    
+
                     if (genericParams.length > 0 && needsContext) {
                         const args = parent.args || [];
                         const parameterTypes = fnType.parameters.map(p => p.type);
                         const genericParamNames = genericParams.map(p => p.name);
-                        
+
                         // Iterative inference: keep trying to infer more generics until we can't make progress
                         let substitutions = new Map<string, TypeDescription>();
                         let madeProgress = true;
                         let maxIterations = args.length; // Prevent infinite loops
                         let iteration = 0;
-                        
+
                         while (madeProgress && iteration < maxIterations) {
                             madeProgress = false;
                             iteration++;
-                            
+
                             const argumentTypes: TypeDescription[] = [];
-                            
+
                             // Collect types of arguments, using current substitutions
                             for (let i = 0; i < args.length; i++) {
                                 if (i === argIndex) {
@@ -374,7 +375,7 @@ export class TypeCTypeProvider {
                                         parameterTypes[i],
                                         substitutions
                                     );
-                                    
+
                                     // For lambdas, only check if PARAMETER types have unresolved generics
                                     // Return type generics are fine - they'll be inferred from the lambda body
                                     let hasUnresolvedGenerics: boolean;
@@ -387,7 +388,7 @@ export class TypeCTypeProvider {
                                         // For non-function types, check the entire type
                                         hasUnresolvedGenerics = this.typeContainsGenerics(paramTypeWithSubs, genericParamNames);
                                     }
-                                    
+
                                     if (hasUnresolvedGenerics) {
                                         // Still has unresolved generics - skip for now
                                         argumentTypes.push(this.typeFactory.createErrorType('__contextual_placeholder__', undefined, args[i]));
@@ -396,7 +397,7 @@ export class TypeCTypeProvider {
                                         // Temporarily set the expected type for contextual expressions
                                         const argType = this.inferExpressionWithContext(args[i], paramTypeWithSubs);
                                         argumentTypes.push(argType);
-                                        
+
                                         // If we successfully inferred a non-error type, we made progress
                                         if (!isErrorType(argType) || !argType.message.includes('placeholder')) {
                                             madeProgress = true;
@@ -407,14 +408,14 @@ export class TypeCTypeProvider {
                                     argumentTypes.push(this.inferExpression(args[i]));
                                 }
                             }
-                            
+
                             // Infer generics from current argument types
                             const newSubstitutions = this.inferGenericsFromArguments(
                                 genericParamNames,
                                 parameterTypes,
                                 argumentTypes
                             );
-                            
+
                             // Check if we learned anything new
                             for (const [key, value] of newSubstitutions) {
                                 const existing = substitutions.get(key);
@@ -426,11 +427,11 @@ export class TypeCTypeProvider {
                                 }
                             }
                         }
-                        
+
                         // Apply final substitutions to the expected parameter type
                         expectedParamType = this.typeUtils.substituteGenerics(expectedParamType, substitutions);
                     }
-                    
+
                     return expectedParamType;
                 }
             }
@@ -451,13 +452,13 @@ export class TypeCTypeProvider {
                 // If no expected type, return undefined (do expressions without context)
                 return undefined;
             }
-            
+
             // Find the containing function
             const fn = AstUtils.getContainerOfType(parent, ast.isFunctionDeclaration);
             if (fn && fn.header.returnType) {
                 return this.getType(fn.header.returnType);
             }
-            
+
             // Also check for class methods
             const classMethod = AstUtils.getContainerOfType(parent, ast.isClassMethod);
             if (classMethod && classMethod.method?.header?.returnType) {
@@ -495,7 +496,7 @@ export class TypeCTypeProvider {
                     const otherType = this.inferExpression(otherOperand);
                     // Resolve references to check for class/interface types
                     const resolvedOtherType = this.typeUtils.resolveIfReference(otherType);
-                    
+
                     // Only use as context if it's a primitive type (not class/interface with operator overloads)
                     if (!isClassType(resolvedOtherType) && !this.typeUtils.asInterfaceType(resolvedOtherType)) {
                         return otherType;
@@ -544,7 +545,7 @@ export class TypeCTypeProvider {
             if (isExpr) {
                 const isThenExpr = parent.thens?.some(thenExpr => thenExpr === node);
                 const isElseExpr = parent.elseExpr === node;
-                
+
                 if (isThenExpr || isElseExpr) {
                     const expectedCondType = this.getExpectedType(parent);
                     if (expectedCondType) {
@@ -565,7 +566,7 @@ export class TypeCTypeProvider {
                     const resolvedExpected = isReferenceType(expectedStructType)
                         ? this.resolveReference(expectedStructType)
                         : expectedStructType;
-                    
+
                     // Get the struct type (handles both direct structs and join types)
                     const structType = this.typeUtils.asStructType(resolvedExpected);
                     if (structType) {
@@ -588,7 +589,7 @@ export class TypeCTypeProvider {
                 const resolvedExpected = isReferenceType(expectedStructType)
                     ? this.resolveReference(expectedStructType)
                     : expectedStructType;
-                
+
                 // Get the struct type
                 const structType = this.typeUtils.asStructType(resolvedExpected);
                 if (structType && ast.isExpression(node)) {
@@ -631,12 +632,12 @@ export class TypeCTypeProvider {
             if (argIndex >= 0 && parent.instanceType) {
                 // Get the class type being instantiated
                 const classRefType = this.getType(parent.instanceType);
-                
+
                 // Resolve reference types to get the actual class
                 const resolvedClassType = isReferenceType(classRefType)
                     ? this.resolveReference(classRefType)
                     : classRefType;
-                
+
                 // Check if it's a class type - if not, return error for validation
                 if (!isClassType(resolvedClassType)) {
                     // Return error type that will be caught by validations
@@ -647,14 +648,14 @@ export class TypeCTypeProvider {
                         parent
                     );
                 }
-                
+
                 // Look for init methods
                 const initMethods = resolvedClassType.methods.filter(m => m.names.includes('init'));
-                
+
                 // Filter by argument count to find matching candidates
                 const argCount = parent.args.length;
                 const candidates = initMethods.filter(m => m.parameters.length === argCount);
-                
+
                 // Context-driven inference strategy:
                 // - If exactly 1 candidate: use expected type from that candidate's parameters
                 // - If 0 or 2+ candidates: don't provide expected type (infer without context)
@@ -662,7 +663,7 @@ export class TypeCTypeProvider {
                     const initMethod = candidates[0];
                     if (argIndex < initMethod.parameters.length) {
                         let paramType = initMethod.parameters[argIndex].type;
-                        
+
                         // Apply generic substitutions if we have them
                         if (isReferenceType(classRefType) && classRefType.genericArgs.length > 0) {
                             const substitutions = this.buildGenericSubstitutions(classRefType);
@@ -670,11 +671,11 @@ export class TypeCTypeProvider {
                                 paramType = this.typeUtils.substituteGenerics(paramType, substitutions);
                             }
                         }
-                        
+
                         return paramType;
                     }
                 }
-                
+
                 // If we have 0 or 2+ candidates, don't provide expected type
                 // This allows arguments to be inferred without context first,
                 // then we can resolve overloads based on inferred types
@@ -713,7 +714,7 @@ export class TypeCTypeProvider {
                 // For coroutines, returnType is actually the yield type
                 return this.getType(containingFn.header.returnType);
             }
-            
+
             const containingLambda = AstUtils.getContainerOfType(parent, ast.isLambdaExpression);
             if (containingLambda && containingLambda.fnType === 'cfn' && containingLambda.header.returnType) {
                 // For coroutine lambdas, returnType is actually the yield type
@@ -738,17 +739,17 @@ export class TypeCTypeProvider {
             const objectUpdate = parent.$container;
             if (objectUpdate && ast.isObjectUpdate(objectUpdate)) {
                 let baseType = this.getType(objectUpdate.expr);
-                
+
                 // Resolve reference types
                 if (isReferenceType(baseType)) {
                     baseType = this.resolveReference(baseType);
                 }
-                
+
                 // Unwrap nullable types
                 if (isNullableType(baseType)) {
                     baseType = baseType.baseType;
                 }
-                
+
                 // Get field/attribute type using the helper
                 const fieldType = this.getFieldType(baseType, parent.name);
                 if (fieldType) {
@@ -866,11 +867,18 @@ export class TypeCTypeProvider {
                 nodes.push(...type.node.methods.filter(m => !m.isStatic));
             }
 
-            // A class must implement all methods of its super types
-            // Therefor supertypes will not be added to the nodes list.
-            /*for(const superType of type.superTypes) {
-                nodes.push(...this.getIdentifiableFields(superType));
-            }*/
+            // Add impl method nodes for auto-completion (excluding shadowed methods)
+            for (const implDecl of type.node.implementations ?? []) {
+                let implType = this.getType(implDecl.type);
+                if (isReferenceType(implType)) {
+                    implType = this.resolveReference(implType)
+                }
+                if (isImplementationType(implType) && implType.node && ast.isImplementationType(implType.node)) {
+                    for (const implMethod of implType.node.methods ?? []) {
+                        nodes.push(implMethod);
+                    }
+                }
+            }
 
             return nodes;
         }
@@ -880,6 +888,25 @@ export class TypeCTypeProvider {
                 nodes.push(...(classNode.attributes.filter(a => a.isStatic) ?? []));
                 nodes.push(...(classNode.methods.filter(m => m.isStatic) ?? []));
             }
+            return nodes;
+        }
+
+        // Implementation type members (attributes and methods)
+        // Similar to classes, impl types have attributes and methods that can be accessed via `this`
+        if (isImplementationType(type) && type.node && ast.isImplementationType(type.node)) {
+            // Get attributes from the implementation type
+            if (type.node.attributes) {
+                nodes.push(...type.node.attributes);
+            }
+            // Get methods from the implementation type
+            if (type.node.methods) {
+                nodes.push(...type.node.methods);
+            }
+
+            for(const superType of type.targetTypes) {
+                nodes.push(...this.getIdentifiableFields(superType))
+            }
+            // Get methods from supertypes
             return nodes;
         }
 
@@ -901,7 +928,7 @@ export class TypeCTypeProvider {
         if (interfaceType) {
             const filtered: MethodType[] = interfaceType.methods.filter(m => m.node !== undefined);
             nodes.push(...filtered.map(m => m.node!));
-            for(const superType of interfaceType.superTypes) {
+            for (const superType of interfaceType.superTypes) {
                 nodes.push(...this.getIdentifiableFields(superType))
             }
         }
@@ -950,18 +977,19 @@ export class TypeCTypeProvider {
         if (ast.isFunctionDeclaration(node)) return this.inferFunctionDeclaration(node);
         if (ast.isVariableDeclaration(node)) return this.inferVariableDeclaration(node);
         if (ast.isClassAttributeDecl(node)) return this.getType(node.type);
+        if (ast.isImplementationAttributeDecl(node)) return this.getType(node.type);
         if (ast.isFunctionParameter(node)) {
             // If parameter has explicit type annotation, use it
             if (node.type) {
                 return this.getType(node.type);
             }
-            
+
             // Otherwise, try to infer from context (lambda passed to function expecting specific function type)
             const expectedType = this.getExpectedType(node);
             if (expectedType) {
                 return expectedType;
             }
-            
+
             // If we can't infer type from context, return error
             return this.typeFactory.createErrorType(
                 `Parameter '${node.name}' requires type annotation or must be in a context where type can be inferred`,
@@ -1120,23 +1148,23 @@ export class TypeCTypeProvider {
         if (!paramRef) {
             return this.typeFactory.createErrorType('Unresolved type guard parameter reference', undefined, node);
         }
-        
+
         const parameterName = paramRef.name;
-        
+
         // Get the parameter index from the AST
         // The parameter should have a $containerIndex property that gives its position
         const parameterIndex = paramRef.$containerIndex ?? -1;
-        
+
         if (parameterIndex === -1) {
             return this.typeFactory.createErrorType('Could not determine parameter index for type guard', undefined, node);
         }
-        
+
         const guardedType = this.getType(node.type);
 
-        if(!parameterName) {
+        if (!parameterName) {
             return this.typeFactory.createErrorType("Cannot guard parameter without a name");
         }
-        
+
         return this.typeFactory.createTypeGuardType(parameterName, parameterIndex, guardedType, node);
     }
 
@@ -1270,69 +1298,70 @@ export class TypeCTypeProvider {
                 )
             ) ?? [];
 
+            // Infer class-defined methods (these can override impl methods)
             const methods = node.methods?.map(m => {
-            const methodHeader = m.method;
-            const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
-            const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                arg.name,
-                this.getType(arg.type),
-                arg.isMut
-            )) ?? [];
+                const methodHeader = m.method;
+                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
+                    arg.name,
+                    this.getType(arg.type),
+                    arg.isMut
+                )) ?? [];
 
-            // Check if we're already inferring this method (cycle detection)
-            // This prevents infinite recursion when method body accesses class members
-            if (this.inferringMethods.has(m)) {
-                // Return a placeholder method with void return type to break the cycle
-                // The actual return type will be inferred later if needed
-                return {
-                    names: methodHeader.names,
-                    parameters: params,
-                    returnType: this.typeFactory.createVoidType(m),
-                    node: methodHeader,
-                    genericParameters: genericParams,
-                    isStatic: m.isStatic ?? false,
-                    isOverride: m.isOverride ?? false,
-                    isLocal: m.isLocal ?? false
-                };
-            }
-
-            // Mark this method as being inferred
-            this.inferringMethods.set(m, node);
-
-            try {
-                // Infer return type - check if explicit, otherwise infer from body/expression
-                let returnType: TypeDescription;
-                if (methodHeader.header?.returnType) {
-                    // Explicit return type provided
-                    returnType = this.getType(methodHeader.header.returnType);
-                } else {
-                    // Infer return type from method body or expression
-                    if (m.expr) {
-                        // Expression-body method: fn foo() = expr
-                        returnType = this.getType(m.expr);
-                    } else if (m.body) {
-                        // Block-body method: fn foo() { ... }
-                        returnType = this.inferReturnTypeFromBody(m.body);
-                    } else {
-                        // No body or expression (abstract method or interface method)
-                        returnType = this.typeFactory.createVoidType(m);
-                    }
+                // Check if we're already inferring this method (cycle detection)
+                // This prevents infinite recursion when method body accesses class members
+                if (this.inferringMethods.has(m)) {
+                    // Return a placeholder method with void return type to break the cycle
+                    // The actual return type will be inferred later if needed
+                    return {
+                        names: methodHeader.names,
+                        parameters: params,
+                        returnType: this.typeFactory.createVoidType(m),
+                        node: methodHeader,
+                        genericParameters: genericParams,
+                        isStatic: m.isStatic ?? false,
+                        isOverride: m.isOverride ?? false,
+                        isLocal: m.isLocal ?? false
+                    };
                 }
 
-                return {
-                    names: methodHeader.names,
-                    parameters: params,
-                    returnType: returnType,
-                    node: methodHeader,
-                    genericParameters: genericParams,
-                    isStatic: m.isStatic ?? false,
-                    isOverride: m.isOverride ?? false,
-                    isLocal: m.isLocal ?? false
-                };
-            } finally {
-                // Always remove from the set, even if inference fails
-                this.inferringMethods.delete(m);
-            }
+                // Mark this method as being inferred
+                this.inferringMethods.set(m, node);
+
+                try {
+                    // Infer return type - check if explicit, otherwise infer from body/expression
+                    let returnType: TypeDescription;
+                    if (methodHeader.header?.returnType) {
+                        // Explicit return type provided
+                        returnType = this.getType(methodHeader.header.returnType);
+                    } else {
+                        // Infer return type from method body or expression
+                        if (m.expr) {
+                            // Expression-body method: fn foo() = expr
+                            returnType = this.getType(m.expr);
+                        } else if (m.body) {
+                            // Block-body method: fn foo() { ... }
+                            returnType = this.inferReturnTypeFromBody(m.body);
+                        } else {
+                            // No body or expression (abstract method or interface method)
+                            returnType = this.typeFactory.createVoidType(m);
+                        }
+                    }
+
+                    return {
+                        names: methodHeader.names,
+                        parameters: params,
+                        returnType: returnType,
+                        node: methodHeader,
+                        genericParameters: genericParams,
+                        isStatic: m.isStatic ?? false,
+                        isOverride: m.isOverride ?? false,
+                        isLocal: m.isLocal ?? false
+                    };
+                } finally {
+                    // Always remove from the set, even if inference fails
+                    this.inferringMethods.delete(m);
+                }
             }) ?? [];
 
             const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
@@ -1365,9 +1394,9 @@ export class TypeCTypeProvider {
             };
         }) ?? [];
 
-        const targetType = node.superType ? this.getType(node.superType) : undefined;
+        const targetTypes = node.superTypes ? node.superTypes.map(st => this.getType(st)) : [];
 
-        return this.typeFactory.createImplementationType(attributes, methods, targetType, node);
+        return this.typeFactory.createImplementationType(attributes, methods, targetTypes, node);
     }
 
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
@@ -1428,7 +1457,7 @@ export class TypeCTypeProvider {
             } else {
                 // Infer return type from method body or expression
                 // Note: Methods cannot be coroutines directly, but method headers can specify coroutine types
-                
+
                 if (node.expr) {
                     // Expression-body method: fn foo() = expr
                     returnType = this.getType(node.expr);
@@ -1464,7 +1493,7 @@ export class TypeCTypeProvider {
         if (node.$container && ast.isClassMethod(node.$container)) {
             return this.inferClassMethod(node.$container);
         }
-        
+
         // Otherwise, use the MethodHeader directly (for interfaces, etc.)
         const methodType = this.inferMethodHeader(node);
         return this.typeFactory.createFunctionType(
@@ -1754,7 +1783,7 @@ export class TypeCTypeProvider {
 
         try {
             let returnType: TypeDescription;
-            
+
             if (node.header?.returnType) {
                 // Explicit return/yield type provided
                 returnType = this.getType(node.header.returnType);
@@ -2008,16 +2037,16 @@ export class TypeCTypeProvider {
             const stringValue = node.value.startsWith('"') && node.value.endsWith('"')
                 ? node.value.substring(1, node.value.length - 1)
                 : node.value;
-            
+
             // Use contextual typing to determine if we should keep as literal or widen to string
             let expectedType = this.getExpectedType(node);
             expectedType = expectedType ? this.typeUtils.resolveIfReference(expectedType) : expectedType;
-            
+
             // If expected type is a string enum, keep as literal for validation
             if (expectedType && isStringEnumType(expectedType)) {
                 return this.typeFactory.createStringLiteralType(stringValue, node);
             }
-            
+
             // Otherwise, widen to string type (for better compatibility with generic inference)
             // This includes: expected type is string, expected type is generic, or no expected type
             return this.typeFactory.createStringType(node);
@@ -2073,7 +2102,7 @@ export class TypeCTypeProvider {
         if (ast.isWildcardExpression(node)) return this.typeFactory.createAnyType(node);
         if (ast.isDestructuringElement(node)) return this.inferDestructuringElement(node);
 
-        if(node == undefined) {
+        if (node == undefined) {
             console.log("undefined node")
         }
         return this.typeFactory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
@@ -2180,7 +2209,7 @@ export class TypeCTypeProvider {
         }
         let type = this.getType(refNode);
         const originalType = type;
-        if(isReferenceType(type)) {
+        if (isReferenceType(type)) {
             type = this.resolveReference(type);
         }
 
@@ -2190,7 +2219,7 @@ export class TypeCTypeProvider {
             // Only function types can be generically instantiated in this context
             if (isFunctionType(type)) {
                 const genericParams = type.genericParameters || [];
-                
+
                 if (genericParams.length !== node.genericArgs.length) {
                     return this.typeFactory.createErrorType(
                         `Generic argument count mismatch: expected ${genericParams.length}, got ${node.genericArgs.length}`,
@@ -2198,18 +2227,18 @@ export class TypeCTypeProvider {
                         node
                     );
                 }
-                
+
                 // Build substitution map: generic parameter name -> concrete type
                 const substitutions = new Map<string, TypeDescription>();
                 genericParams.forEach((param, index) => {
                     const concreteType = this.getType(node.genericArgs[index]);
                     substitutions.set(param.name, concreteType);
                 });
-                
+
                 // Apply substitutions to the function type
                 return this.typeUtils.substituteGenerics(type, substitutions);
             }
-            
+
             // If not a function type, having generic args is an error
             return this.typeFactory.createErrorType(
                 `Cannot apply generic arguments to non-generic type '${type.toString()}'`,
@@ -2223,11 +2252,11 @@ export class TypeCTypeProvider {
             return this.typeFactory.createMetaVariantType(type, [], node);
         }
 
-        if(isEnumType(type) && ast.isTypeDeclaration(node.reference.ref)) {
+        if (isEnumType(type) && ast.isTypeDeclaration(node.reference.ref)) {
             return this.typeFactory.createMetaEnumType(type, node);
         }
 
-        if(isClassType(type) && ast.isTypeDeclaration(node.reference.ref)) {
+        if (isClassType(type) && ast.isTypeDeclaration(node.reference.ref)) {
             return this.typeFactory.createMetaClassType(type, node);
         }
 
@@ -2297,7 +2326,7 @@ export class TypeCTypeProvider {
         if (node.op === '-') {
             // Resolve reference types to get the actual type
             const resolvedType = this.typeUtils.resolveIfReference(exprType);
-            
+
             // Check if it's an unsigned integer type (u8, u16, u32, u64)
             // Use the type guard properly to narrow the type
             if (isIntegerType(resolvedType)) {
@@ -2351,7 +2380,7 @@ export class TypeCTypeProvider {
     ): TypeDescription | undefined {
         // Resolve reference types first
         let resolvedLhs = this.typeUtils.resolveIfReference(lhsType);
-        
+
         // Unwrap nullable types
         if (isNullableType(resolvedLhs)) {
             resolvedLhs = resolvedLhs.baseType;
@@ -2374,7 +2403,7 @@ export class TypeCTypeProvider {
 
         // Collect all methods with the operator name
         const methods: MethodType[] = [];
-        
+
         if (classType) {
             for (const method of classType.methods) {
                 if (method.names.includes(operator)) {
@@ -2382,7 +2411,7 @@ export class TypeCTypeProvider {
                 }
             }
         }
-        
+
         if (interfaceType) {
             for (const method of interfaceType.methods) {
                 if (method.names.includes(operator)) {
@@ -2421,12 +2450,12 @@ export class TypeCTypeProvider {
         for (const method of argBasedCandidates) {
             if (method.parameters.every((param, index) => this.typeUtils.areTypesEqual(rhsTypes[index], param.type).success)) {
                 let returnType = method.returnType;
-                
+
                 // Apply generic substitutions if we have them
                 if (genericSubstitutions && genericSubstitutions.size > 0) {
                     returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
                 }
-                
+
                 return returnType;
             }
         }
@@ -2435,12 +2464,12 @@ export class TypeCTypeProvider {
         for (const method of argBasedCandidates) {
             if (method.parameters.every((param, index) => this.typeUtils.isAssignable(rhsTypes[index], param.type).success)) {
                 let returnType = method.returnType;
-                
+
                 // Apply generic substitutions if we have them
                 if (genericSubstitutions && genericSubstitutions.size > 0) {
                     returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
                 }
-                
+
                 return returnType;
             }
         }
@@ -2509,7 +2538,7 @@ export class TypeCTypeProvider {
         // Track if the base is nullable (for optional chaining propagation)
         // In TypeScript, a?.b.c.e means all accesses after a?. are nullable
         let baseIsNullable = false;
-        
+
         // If base type is nullable, unwrap it for member lookup
         if (isNullableType(baseType)) {
             baseIsNullable = true;
@@ -2535,14 +2564,14 @@ export class TypeCTypeProvider {
                     if (isClassType(partialClassType)) {
                         // Build generic substitutions for the partial type
                         genericSubstitutions = this.buildGenericSubstitutions(baseType);
-                        
+
                         // Apply substitutions to the partial class type
                         if (genericSubstitutions && genericSubstitutions.size > 0) {
                             baseType = this.typeUtils.substituteGenerics(partialClassType, genericSubstitutions);
                         } else {
                             baseType = partialClassType;
                         }
-                        
+
                         // Now continue with member lookup on the partial type
                         // This will use the stub methods, preventing the cycle
                     }
@@ -2581,11 +2610,11 @@ export class TypeCTypeProvider {
         // This prevents Langium's linker cycle detection when accessing class members
         // during method inference. For normal cases, we use Langium's ref which handles overloads correctly.
         const isInMethodInferenceContext = this.inferringMethods.size > 0;
-        
+
         if (isClassType(baseType) && isInMethodInferenceContext) {
             // We're accessing a member of a class type while inferring ANY class
             // Resolve directly from the type to avoid Langium's cycle detection
-            
+
             // Check attributes first
             const attribute = baseType.attributes.find(a => a.name === memberName);
             if (attribute) {
@@ -2603,7 +2632,7 @@ export class TypeCTypeProvider {
                 }
                 return memberType;
             }
-            
+
             // Check methods - note: may return stub methods during inference
             const method = baseType.methods.find(m => m.names.includes(memberName));
             if (method) {
@@ -2628,7 +2657,7 @@ export class TypeCTypeProvider {
                 }
                 return memberType;
             }
-            
+
             // Member not found in the class type
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
@@ -2681,7 +2710,7 @@ export class TypeCTypeProvider {
                 if (method) {
                     return method;
                 }
-                
+
                 // Then check supertypes recursively
                 for (const superType of iface.superTypes) {
                     // If superType is a ReferenceType with generic args, resolve and substitute
@@ -2689,7 +2718,7 @@ export class TypeCTypeProvider {
                     const resolvedSuperType = (isReferenceType(superType) && superType.genericArgs.length > 0)
                         ? this.resolveAndSubstituteReference(superType)
                         : superType;
-                    
+
                     // Convert resolved supertype to interface and search recursively
                     const superInterface = this.typeUtils.asInterfaceType(resolvedSuperType);
                     if (superInterface) {
@@ -2749,7 +2778,7 @@ export class TypeCTypeProvider {
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain: a?.b.c → c is nullable)
         // BUT: Don't wrap basic types - they can't be nullable
-        if(node.isNullable || baseIsNullable) {
+        if (node.isNullable || baseIsNullable) {
             if (!this.typeUtils.isTypeBasic(memberType)) {
                 memberType = this.typeFactory.createNullableType(memberType, node);
             }
@@ -2770,7 +2799,7 @@ export class TypeCTypeProvider {
             // Check if optional chaining was used anywhere in the chain
             // e.g., a?.b.c() should work (a?.b uses ?.)
             const isFromOptionalChaining = this.hasOptionalChaining(node.expr);
-            
+
             if (isFromOptionalChaining) {
                 isOptionalCall = true;
                 fnType = fnType.baseType;
@@ -2866,18 +2895,18 @@ export class TypeCTypeProvider {
         // Only check this if fnType is a class or interface, not if it's already a function
         const baseClassType = isClassType(fnType) ? fnType : undefined;
         const baseInterfaceType = this.typeUtils.asInterfaceType(fnType);
-        
+
         if (baseClassType || baseInterfaceType) {
             // Use operator overload resolution for () operator
             // This handles multiple overloads correctly
             const args = node.args || [];
             const argTypes = args.map(arg => this.inferExpression(arg));
-            
+
             const operatorOverload = this.resolveOperatorOverload(fnType, '()', argTypes, node);
             if (operatorOverload) {
                 return isOptionalCall ? this.typeFactory.createNullableType(operatorOverload, node) : operatorOverload;
             }
-            
+
             // If no call operator found, this is an error
             const typeName = baseClassType ? 'Class' : 'Interface';
             return this.typeFactory.createErrorType(
@@ -2963,7 +2992,7 @@ export class TypeCTypeProvider {
         const constructorParams = constructorDef.parameters;
 
 
-        if(callNode.genericArgs && callNode.genericArgs.length > 0) {
+        if (callNode.genericArgs && callNode.genericArgs.length > 0) {
             // Build substitution map: generic parameter name -> concrete type
             genericParamNames.forEach((param, index) => {
                 const concreteType = this.getType(callNode.genericArgs[index]);
@@ -3014,7 +3043,7 @@ export class TypeCTypeProvider {
 
     private inferIndexAccess(node: ast.IndexAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
-        if(isReferenceType(baseType)) {
+        if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
 
@@ -3034,7 +3063,7 @@ export class TypeCTypeProvider {
 
     private inferIndexSet(node: ast.IndexSet): TypeDescription {
         let baseType = this.inferExpression(node.expr);
-        if(isReferenceType(baseType)) {
+        if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
 
@@ -3043,7 +3072,7 @@ export class TypeCTypeProvider {
         const indexTypes = node.indexes?.map(idx => this.inferExpression(idx)) ?? [];
         const valueType = this.inferExpression(node.value);
         const allArgTypes = [...indexTypes, valueType];
-        
+
         const operatorOverload = this.resolveOperatorOverload(baseType, '[]=', allArgTypes, node);
         if (operatorOverload) {
             return operatorOverload;
@@ -3055,7 +3084,7 @@ export class TypeCTypeProvider {
 
     private inferReverseIndexAccess(node: ast.ReverseIndexAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
-        if(isReferenceType(baseType)) {
+        if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
 
@@ -3075,7 +3104,7 @@ export class TypeCTypeProvider {
 
     private inferReverseIndexSet(node: ast.ReverseIndexSet): TypeDescription {
         let baseType = this.inferExpression(node.expr);
-        if(isReferenceType(baseType)) {
+        if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
 
@@ -3083,7 +3112,7 @@ export class TypeCTypeProvider {
         // [-]= operator takes index type + value type as parameters
         const indexType = this.inferExpression(node.index);
         const valueType = this.inferExpression(node.value);
-        
+
         const operatorOverload = this.resolveOperatorOverload(baseType, '[-]=', [indexType, valueType], node);
         if (operatorOverload) {
             return operatorOverload;
@@ -3121,20 +3150,20 @@ export class TypeCTypeProvider {
      */
     private inferObjectUpdate(node: ast.ObjectUpdate): TypeDescription {
         let baseType = this.inferExpression(node.expr);
-        
+
         // Track if the base is nullable (for optional chaining propagation)
         let baseIsNullable = false;
-        
+
         // If base type is nullable, unwrap it for member lookup
         if (isNullableType(baseType)) {
             baseIsNullable = true;
             baseType = baseType.baseType;
         }
-        
+
         // The result type is the same as the base type
         // (the expression updates fields and returns the updated object)
         let resultType = baseType;
-        
+
         // Wrap in nullable if:
         // 1. Current node uses optional chaining (?.)
         // 2. OR base was nullable (propagate nullability through chain)
@@ -3144,7 +3173,7 @@ export class TypeCTypeProvider {
                 resultType = this.typeFactory.createNullableType(resultType, node);
             }
         }
-        
+
         return resultType;
     }
 
@@ -3186,12 +3215,12 @@ export class TypeCTypeProvider {
             if (ast.isArraySpreadExpression(v)) {
                 // Infer the type of the spread expression
                 const spreadType = this.inferExpression(v.expr);
-                
+
                 // The spread expression should be an array - extract its element type
                 if (isArrayType(spreadType)) {
                     return spreadType.elementType;
                 }
-                
+
                 // If not an array, return an error type (will be validated separately)
                 return this.typeFactory.createErrorType(
                     `Array spread requires an array type, but got '${spreadType.toString()}'`,
@@ -3199,19 +3228,19 @@ export class TypeCTypeProvider {
                     v
                 );
             }
-            
+
             // Regular expression element
             return this.inferExpression(v.expr);
         });
-        
+
         const commonType = this.typeUtils.getCommonType(elementTypes);
-        
+
         // If getCommonType returns an error, return it directly instead of wrapping in array
         // This ensures type errors are properly propagated to validation
         if (isErrorType(commonType)) {
             return commonType;
         }
-        
+
         return this.typeFactory.createArrayType(commonType, node);
     }
 
@@ -3223,18 +3252,18 @@ export class TypeCTypeProvider {
             // Handle struct spread: {...base}
             if (ast.isStructSpreadExpression(f)) {
                 const spreadType = this.inferExpression(f.expression);
-                
+
                 // Resolve reference types to get the actual struct
                 let resolvedType = this.typeUtils.resolveIfReference(spreadType);
-                
+
                 // Get struct type (handles both direct structs and join types)
                 const structType = this.typeUtils.asStructType(resolvedType);
-                
+
                 if (structType) {
                     // Return all fields from the spread struct
                     return structType.fields;
                 }
-                
+
                 // If spread expression is not a struct, return empty (validation will catch this error)
                 return [];
             }
@@ -3247,20 +3276,20 @@ export class TypeCTypeProvider {
     private inferAnonymousStructConstruction(node: ast.AnonymousStructConstructionExpression): TypeDescription {
         // Get the expected type from context
         const expectedType = this.getExpectedType(node);
-        
+
         // Resolve reference types if needed
         let resolvedExpectedType = expectedType;
         if (expectedType && isReferenceType(expectedType)) {
             resolvedExpectedType = this.resolveReference(expectedType);
         }
-        
+
         // Check if expected type is a struct (could be a struct or join type resolving to struct)
         const expectedStruct = resolvedExpectedType ? this.typeUtils.asStructType(resolvedExpectedType) : undefined;
-        
+
         if (expectedStruct) {
             // Infer as anonymous struct based on expected type
             const expressions = node.expressions ?? [];
-            
+
             // Check if the number of expressions matches the number of fields
             if (expressions.length !== expectedStruct.fields.length) {
                 return this.typeFactory.createErrorType(
@@ -3269,22 +3298,22 @@ export class TypeCTypeProvider {
                     node
                 );
             }
-            
+
             // Map expressions to struct fields in order
             const fields = expressions.map((expr, index) => {
                 const expectedField = expectedStruct.fields[index];
                 const inferredType = this.inferExpression(expr);
-                
+
                 return this.typeFactory.createStructField(
                     expectedField.name,  // Use expected field name
                     inferredType,        // Use inferred type (will be validated later)
                     expr                 // Use expression as node
                 );
             });
-            
+
             return this.typeFactory.createStructType(fields, true, node);
         }
-        
+
         // No expected type or not a struct - cannot infer
         return this.typeFactory.createErrorType(
             `Cannot infer type of anonymous struct literal {${node.expressions?.length ?? 0} values}. ` +
@@ -3306,10 +3335,10 @@ export class TypeCTypeProvider {
         // Get expected lambda type for parameter inference
         const expectedLambdaType = this.getExpectedType(node);
         const expectedFnType = expectedLambdaType && isFunctionType(expectedLambdaType) ? expectedLambdaType : undefined;
-        
+
         const params = node.header.args?.map((arg, index) => {
             let paramType: TypeDescription;
-            
+
             if (arg.type) {
                 // Explicit type annotation
                 paramType = this.getType(arg.type);
@@ -3324,16 +3353,16 @@ export class TypeCTypeProvider {
                     arg
                 );
             }
-            
+
             return this.typeFactory.createFunctionParameterType(
                 arg.name,
                 paramType,
                 arg.isMut
             );
         }) ?? [];
-        
+
         const isCoroutine = node.fnType === 'cfn';
-        
+
         let returnType: TypeDescription;
         if (node.header.returnType) {
             // Explicit return/yield type provided
@@ -3436,32 +3465,32 @@ export class TypeCTypeProvider {
         // Similar to function return type inference, but only for this do block
         if (node.body) {
             const returnStatements = this.collectReturnStatementsFromDo(node.body);
-            
+
             if (returnStatements.length === 0) {
                 return this.typeFactory.createVoidType(node);
             }
-            
+
             // Get types of all return expressions
             const allReturnTypes = returnStatements
                 .map(stmt => stmt.expr ? this.getType(stmt.expr) : this.typeFactory.createVoidType());
-            
+
             if (allReturnTypes.length === 0) {
                 return this.typeFactory.createVoidType(node);
             }
-            
+
             // Find common type
             return this.typeUtils.getCommonType(allReturnTypes);
         }
-        
+
         return this.typeFactory.createVoidType(node);
     }
 
     private inferTypeCastExpression(node: ast.TypeCastExpression): TypeDescription {
         const type = this.getType(node.destType);
 
-        if(node.castType === "as?") {
+        if (node.castType === "as?") {
             let rtype = this.typeUtils.resolveIfReference(type);
-            if(!isNullableType(rtype)){
+            if (!isNullableType(rtype)) {
                 return this.typeFactory.createNullableType(rtype);
             }
         }
@@ -3476,7 +3505,13 @@ export class TypeCTypeProvider {
             return this.getType(classNode);
         }
 
-        return this.typeFactory.createErrorType('this outside of class', undefined, node);
+        // Find enclosing implementation type
+        const implNode = AstUtils.getContainerOfType(node, ast.isImplementationType);
+        if (implNode) {
+            return this.getType(implNode);
+        }
+
+        return this.typeFactory.createErrorType('this outside of class or impl', undefined, node);
     }
 
     private inferYieldExpression(node: ast.YieldExpression): TypeDescription {
@@ -3606,7 +3641,7 @@ export class TypeCTypeProvider {
     private inferStructField(node: ast.StructField): TypeDescription {
         return this.getType(node.type);
     }
-    
+
     /**
      * Helper method to get the type of a field/attribute from a class or struct type.
      *
@@ -3624,17 +3659,17 @@ export class TypeCTypeProvider {
             const attribute = baseType.attributes.find(a => a.name === fieldName);
             return attribute?.type;
         }
-        
+
         // For structs: get field type
         const structType = this.typeUtils.asStructType(baseType);
         if (structType) {
             const field = structType.fields.find(f => f.name === fieldName);
             return field?.type;
         }
-        
+
         return undefined;
     }
-    
+
     /**
      * Infers the type of a KeyValuePair in object update expressions.
      * Returns the type of the field/attribute being updated.
@@ -3649,32 +3684,32 @@ export class TypeCTypeProvider {
         if (!objectUpdate || !ast.isObjectUpdate(objectUpdate)) {
             return this.typeFactory.createErrorType('KeyValuePair outside ObjectUpdate', undefined, node);
         }
-        
+
         // Get the base type being updated
         let baseType = this.getType(objectUpdate.expr);
-        
+
         // Resolve reference types
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
-        
+
         // Unwrap nullable types
         if (isNullableType(baseType)) {
             baseType = baseType.baseType;
         }
-        
+
         // Get field/attribute type using the helper
         const fieldType = this.getFieldType(baseType, node.name);
         if (fieldType) {
             return fieldType;
         }
-        
+
         // Field not found - return error with appropriate message
         const isClass = isClassType(baseType);
         const fieldKind = isClass ? 'Attribute' : 'Field';
         return this.typeFactory.createErrorType(`${fieldKind} '${node.name}' not found in ${baseType.toString()}`, undefined, node);
     }
-    
+
     private inferFFIMethodHeader(node: ast.FFIMethodHeader): TypeDescription {
         return this.typeFactory.createFunctionType(
             node.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
@@ -3708,13 +3743,13 @@ export class TypeCTypeProvider {
         }
 
         // Infer the collection type
-        if(ast.isForRangeIterator(foreachStmt)) {
+        if (ast.isForRangeIterator(foreachStmt)) {
             // It is a for .. in A, B
-            if(foreachStmt.iterType) {
+            if (foreachStmt.iterType) {
                 return this.getType(foreachStmt.iterType)
             }
 
-            if(!foreachStmt.start || !foreachStmt.end){
+            if (!foreachStmt.start || !foreachStmt.end) {
                 return this.typeFactory.createErrorType('Unable to infer iterator variable type when no bounds are defined')
             }
 
@@ -3723,14 +3758,14 @@ export class TypeCTypeProvider {
             return startType;
         }
 
-        if(!ast.isForEachIterator(foreachStmt)) {
+        if (!ast.isForEachIterator(foreachStmt)) {
             return this.typeFactory.createErrorType('Unknown foreach statement');
         }
         const collectionType = this.inferExpression(foreachStmt.collection);
-        
+
         // Determine if this is the index or value variable
         const isIndexVar = foreachStmt.indexVar === node;
-        
+
         // Handle arrays: index is u64, value is element type
         if (isArrayType(collectionType)) {
             if (isIndexVar) {
@@ -3739,7 +3774,7 @@ export class TypeCTypeProvider {
                 return collectionType.elementType;
             }
         }
-        
+
         // Handle Iterable<U, V> - extract generics U and V
         const iterableInfo = this.extractIterableInterface(collectionType);
         if (iterableInfo) {
@@ -3750,7 +3785,7 @@ export class TypeCTypeProvider {
                 return iterableInfo.valueType; // V
             }
         }
-        
+
         return this.typeFactory.createErrorType(
             `Type '${collectionType.toString()}' is not iterable. ` +
             `Expected array type or type implementing Iterable<U, V>`,
@@ -3798,8 +3833,8 @@ export class TypeCTypeProvider {
 
         // Keep climbing while our container is NOT a MatchCaseExpression/Statement
         while (rootPattern.$container &&
-               !ast.isMatchCaseExpression(rootPattern.$container) &&
-               !ast.isMatchCaseStatement(rootPattern.$container)) {
+            !ast.isMatchCaseExpression(rootPattern.$container) &&
+            !ast.isMatchCaseStatement(rootPattern.$container)) {
             rootPattern = rootPattern.$container;
         }
 
@@ -3893,7 +3928,7 @@ export class TypeCTypeProvider {
         if (!isArrayType(resolvedType)) {
             // Store validation error for the pattern itself
             this.setPatternValidationError(pattern, `Pattern expects array type, but got '${contextType.toString()}'`);
-            
+
             // Still infer types for sub-patterns to avoid cascading errors
             // Use a placeholder error type that won't create additional validation errors
             const errorType = this.typeFactory.createErrorType(
@@ -3938,7 +3973,7 @@ export class TypeCTypeProvider {
         if (!structType) {
             // Store validation error for the pattern itself
             this.setPatternValidationError(pattern, `Pattern expects struct type, but got '${contextType.toString()}'`);
-            
+
             // Still infer types for sub-patterns to avoid cascading errors
             const errorType = this.typeFactory.createErrorType(
                 `Pattern expects struct type, but got '${contextType.toString()}'`,
@@ -3958,7 +3993,7 @@ export class TypeCTypeProvider {
         for (const fieldPattern of pattern.fields ?? []) {
             const fieldName = fieldPattern.name;
             const structField = structType.fields.find(f => f.name === fieldName);
-            
+
             if (structField) {
                 this.inferPatternTypes(fieldPattern.pattern, structField.type, depth + 1);
             } else {
@@ -4002,7 +4037,7 @@ export class TypeCTypeProvider {
         const hasTypeProperty = (obj: unknown): obj is { type: ast.DataType } => {
             return typeof obj === 'object' && obj !== null && 'type' in obj;
         };
-        
+
         if (!hasTypeProperty(pattern)) {
             // No type specified - error
             const errorType = this.typeFactory.createErrorType(
@@ -4010,14 +4045,14 @@ export class TypeCTypeProvider {
                 undefined,
                 pattern
             );
-            
+
             for (const param of pattern.params ?? []) {
                 this.inferPatternTypes(param, errorType);
             }
 
             return;
         }
-        
+
         const patternType = this.getType(pattern.type);
 
         // Handle different forms of variant constructor types
@@ -4104,12 +4139,12 @@ export class TypeCTypeProvider {
         for (let i = 0; i < params.length; i++) {
             if (i < constructor.parameters.length) {
                 let paramType = constructor.parameters[i].type;
-                
+
                 // Apply generic substitutions (T → concrete type)
                 if (genericSubstitutions.size > 0) {
                     paramType = this.typeUtils.substituteGenerics(paramType, genericSubstitutions);
                 }
-                
+
                 this.inferPatternTypes(params[i], paramType, depth + 1);
             } else {
                 // Too many parameters in pattern
@@ -4184,11 +4219,10 @@ export class TypeCTypeProvider {
      * Returns {indexType: U, valueType: V} if the type has a getIterator() method
      * that returns Iterator<U, V>.
      */
-    private extractIterableInterface(type: TypeDescription):
-        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
-    
-    let resolvedType = this.typeUtils.resolveIfReference(type);
-        
+    private extractIterableInterface(type: TypeDescription): { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+
+        let resolvedType = this.typeUtils.resolveIfReference(type);
+
         // For classes: check if they have getIterator() method
         if (isClassType(resolvedType)) {
             const getIteratorMethod = resolvedType.methods.find(m => m.names.includes('getIterator'));
@@ -4196,28 +4230,27 @@ export class TypeCTypeProvider {
                 return this.extractIteratorTypes(getIteratorMethod.returnType);
             }
         }
-        
+
         // For interfaces: check methods (including inherited)
         const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
         if (interfaceType) {
             return this.extractIterableFromInterface(interfaceType);
         }
-        
+
         return undefined;
     }
 
     /**
      * Recursively searches for getIterator() method in interface hierarchy.
      */
-    private extractIterableFromInterface(interfaceType: InterfaceTypeDescription):
-        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
-        
+    private extractIterableFromInterface(interfaceType: InterfaceTypeDescription): { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+
         // Find getIterator() in this interface
         const getIteratorMethod = interfaceType.methods.find(m => m.names.includes('getIterator'));
         if (getIteratorMethod) {
             return this.extractIteratorTypes(getIteratorMethod.returnType);
         }
-        
+
         // Check supertypes recursively
         for (const superType of interfaceType.superTypes) {
             const resolvedSuper = this.typeUtils.resolveIfReference(superType);
@@ -4227,7 +4260,7 @@ export class TypeCTypeProvider {
                 if (result) return result;
             }
         }
-        
+
         return undefined;
     }
 
@@ -4235,9 +4268,8 @@ export class TypeCTypeProvider {
      * Extracts index and value types from Iterator<U, V> return type.
      * Supports both nominal (Iterator<U, V>) and structural (has next() -> (U, V)) approaches.
      */
-    private extractIteratorTypes(iteratorType: TypeDescription):
-        { indexType: TypeDescription; valueType: TypeDescription } | undefined {
-        
+    private extractIteratorTypes(iteratorType: TypeDescription): { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+
         // If it's a reference to Iterator<U, V>, extract generics directly
         if (isReferenceType(iteratorType) && iteratorType.genericArgs.length === 2) {
             return {
@@ -4245,7 +4277,7 @@ export class TypeCTypeProvider {
                 valueType: iteratorType.genericArgs[1]
             };
         }
-        
+
         // Structural approach: check if it has next() -> (U, V)
         let resolvedType = this.typeUtils.resolveIfReference(iteratorType);
         const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
@@ -4258,7 +4290,7 @@ export class TypeCTypeProvider {
                 };
             }
         }
-        
+
         return undefined;
     }
 
@@ -4489,10 +4521,10 @@ export class TypeCTypeProvider {
         if (isErrorType(resolvedParameterType) || isErrorType(resolvedArgumentType)) {
             return;
         }
-        
+
         const paramStruct = this.services.typing.TypeUtils.asStructType(resolvedParameterType);
         const argStruct = this.services.typing.TypeUtils.asStructType(resolvedArgumentType);
-        
+
         if (paramStruct && argStruct) {
             for (const field of paramStruct.fields) {
                 const fieldInArgumentType = argStruct.fields.find(f => f.name === field.name);
@@ -4506,11 +4538,11 @@ export class TypeCTypeProvider {
             this.extractGenericArgsFromTypeDescription(resolvedParameterType.elementType, resolvedArgumentType.elementType, genericMap);
         }
 
-        if(isNullableType(resolvedParameterType) && isNullableType(resolvedArgumentType)) {
+        if (isNullableType(resolvedParameterType) && isNullableType(resolvedArgumentType)) {
             this.extractGenericArgsFromTypeDescription(resolvedParameterType.baseType, resolvedArgumentType.baseType, genericMap);
         }
 
-        if(isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {
+        if (isFunctionType(resolvedParameterType) && isFunctionType(resolvedArgumentType)) {
             for (let i = 0; i < Math.min(resolvedParameterType.parameters.length, resolvedArgumentType.parameters.length); i++) {
                 this.extractGenericArgsFromTypeDescription(resolvedParameterType.parameters[i].type, resolvedArgumentType.parameters[i].type, genericMap);
             }
@@ -4524,7 +4556,7 @@ export class TypeCTypeProvider {
             // Match constructors by name and extract generics from their parameters
             for (const paramConstructor of resolvedParameterType.constructors) {
                 const argConstructor = resolvedArgumentType.constructors.find(c => c.name === paramConstructor.name);
-                
+
                 if (argConstructor) {
                     // Extract from each parameter
                     const numParams = Math.min(paramConstructor.parameters.length, argConstructor.parameters.length);
@@ -4596,11 +4628,11 @@ export class TypeCTypeProvider {
     private resolveAndSubstituteReference(refType: ReferenceTypeDescription): TypeDescription {
         const substitutions = this.buildGenericSubstitutions(refType);
         const resolved = this.resolveReference(refType);
-        
+
         if (substitutions && substitutions.size > 0) {
             return this.typeUtils.substituteGenerics(resolved, substitutions);
         }
-        
+
         return resolved;
     }
 
@@ -4639,52 +4671,52 @@ export class TypeCTypeProvider {
             }
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ✅ PROPAGATE: Function calls - a?.b().c
         if (ast.isFunctionCall(expr)) {
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ✅ PROPAGATE: Index access - a?.b[0].c
         if (ast.isIndexAccess(expr)) {
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ✅ PROPAGATE: Reverse index access (Type-C specific) - a?.b[-1].c
         if (ast.isReverseIndexAccess(expr)) {
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ✅ PROPAGATE: Type casts - (a?.b as T).c
         // Transforms type but continues with same value chain
         if (ast.isTypeCastExpression(expr)) {
             return this.hasOptionalChaining(expr.left);
         }
-        
+
         // ✅ PROPAGATE: Postfix operators - (a?.b++).c
         // Can return object via operator overloading
         if (ast.isPostfixOp(expr)) {
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ✅ PROPAGATE: Unary operators - (!a?.b).c
         // Can return object via operator overloading
         if (ast.isUnaryExpression(expr)) {
             return this.hasOptionalChaining(expr.expr);
         }
-        
+
         // ❌ STOP: Index/Reverse index assignments - return assigned value, not container
         // (a?.b[0] = x) returns x, not a?.b
         // No recursion needed
-        
+
         // ❌ STOP: Instance checks - return boolean, not object
         // (a?.b is T) returns bool, chain ends
         // No recursion needed
-        
+
         // ❌ STOP: Denull operator - explicitly exits optional safety
         // a?.b! asserts non-null, subsequent accesses are non-optional
         // No recursion needed
-        
+
         return false;
     }
 
@@ -4709,19 +4741,19 @@ export class TypeCTypeProvider {
                 return true;
             }
         }
-        
+
         // Empty array literals always need context
         if (ast.isArrayConstructionExpression(expr)) {
             if (!expr.values || expr.values.length === 0) {
                 return true;
             }
         }
-        
+
         // Anonymous struct literals always need context
         if (ast.isAnonymousStructConstructionExpression(expr)) {
             return true;
         }
-        
+
         return false;
     }
 
@@ -4737,14 +4769,14 @@ export class TypeCTypeProvider {
                 return this.inferExpression(expr);
             }
         }
-        
+
         // For arrays, we can use expected element type
         if (ast.isArrayConstructionExpression(expr)) {
             if (isArrayType(expectedType)) {
                 return this.inferExpression(expr);
             }
         }
-        
+
         // For anonymous structs, use expected struct type
         if (ast.isAnonymousStructConstructionExpression(expr)) {
             const structType = this.typeUtils.asStructType(expectedType);
@@ -4752,7 +4784,7 @@ export class TypeCTypeProvider {
                 return this.inferExpression(expr);
             }
         }
-        
+
         // Default: try to infer normally
         return this.inferExpression(expr);
     }
@@ -4765,15 +4797,15 @@ export class TypeCTypeProvider {
         if (isGenericType(type)) {
             return genericNames.includes(type.name);
         }
-        
+
         if (isArrayType(type)) {
             return this.typeContainsGenerics(type.elementType, genericNames);
         }
-        
+
         if (isNullableType(type)) {
             return this.typeContainsGenerics(type.baseType, genericNames);
         }
-        
+
         if (isFunctionType(type)) {
             // Check parameters and return type
             for (const param of type.parameters) {
@@ -4783,21 +4815,21 @@ export class TypeCTypeProvider {
             }
             return this.typeContainsGenerics(type.returnType, genericNames);
         }
-        
+
         if (isTupleType(type)) {
             return type.elementTypes.some(t => this.typeContainsGenerics(t, genericNames));
         }
-        
+
         const structType = this.typeUtils.asStructType(type);
         if (structType) {
             return structType.fields.some(f => this.typeContainsGenerics(f.type, genericNames));
         }
-        
+
         if (isReferenceType(type)) {
             // Check generic arguments
             return type.genericArgs.some(arg => this.typeContainsGenerics(arg, genericNames));
         }
-        
+
         // Other types don't contain generics
         return false;
     }

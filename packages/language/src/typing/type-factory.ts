@@ -471,17 +471,17 @@ function createMetaClassType(
 function createImplementationType(
     attributes: readonly AttributeType[],
     methods: readonly MethodType[],
-    targetType?: TypeDescription,
+    targetTypes: TypeDescription[],
     node?: AstNode
 ): ImplementationTypeDescription {
     return {
         kind: TypeKind.Implementation,
         attributes,
         methods,
-        targetType,
+        targetTypes,
         node,
         toString: () => {
-            const forStr = targetType ? ` for ${targetType.toString()}` : '';
+            const forStr = targetTypes.length ? ` for ${targetTypes.map(e => e.toString()).join(", ")}` : '';
             return `impl${forStr} { ... }`;
         }
     };

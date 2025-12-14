@@ -10,8 +10,8 @@
  */
 
 import { AstNode, AstUtils } from "langium";
-import * as ast from '../generated/ast.js';
 import { ErrorCode } from "../codes/errors.js";
+import * as ast from '../generated/ast.js';
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
@@ -30,6 +30,7 @@ import {
     isFloatType,
     isFunctionType,
     isGenericType,
+    isImplementationType,
     isIntegerType,
     isInterfaceType,
     isJoinType,
@@ -903,8 +904,15 @@ export class TypeCTypeUtils {
     isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
         // All interface methods must be implemented by the class
         for (const method of to.methods) {
+            const classMethods = [...from.methods, ...from.implementations.map(e => {
+                const impl = this.typeProvider().resolveReference(e);
+                if(isImplementationType(impl)) {
+                    return impl.methods
+                }
+                return []
+            }).flat()]
             // Find all class methods with matching names (to handle overloads)
-            const candidateMethods = from.methods.filter(m => m.names.some(name => method.names.includes(name)));
+            const candidateMethods = classMethods.filter(m => m.names.some(name => method.names.includes(name)));
 
             if (candidateMethods.length === 0) {
                 return failure(`class does not implement required method '${method.names[0]}'`);

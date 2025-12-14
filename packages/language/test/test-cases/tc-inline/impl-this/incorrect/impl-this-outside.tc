@@ -1,0 +1,11 @@
+// @test: impl-this-outside
+// Tests that 'this' is not allowed outside of class or impl
+
+fn standaloneFunction() -> u32 {
+    // @error: this outside of class or impl
+    return this.value
+}
+
+fn main() -> u32 {
+    return 0u32
+}

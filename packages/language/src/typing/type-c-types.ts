@@ -307,7 +307,7 @@ export interface ImplementationTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Implementation;
     readonly attributes: readonly AttributeType[];
     readonly methods: readonly MethodType[];
-    readonly targetType?: TypeDescription; // The type this impl is for
+    readonly targetTypes: TypeDescription[]; // The type this impl is for
 }
 
 // ============================================================================

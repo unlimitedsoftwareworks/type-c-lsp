@@ -18,7 +18,8 @@ type ReferencableSymbol =
     ast.MethodHeader |
     ast.VariantConstructor |
     ast.IteratorVar |
-    ast.VariablePattern;
+    ast.VariablePattern |
+    ast.ImplementationAttributeDecl;
 
 
 export function isMemberResolution(container: AstNode, context: ReferenceInfo): boolean {
@@ -152,6 +153,13 @@ export function getDeclarationsFromContainer(container: AstNode): ReferencableSy
         declarations.push(container?.valueVar)
     }
     else if (ast.isClassType(container)) {
+        // Add class attributes and methods
+        declarations.push(...container?.attributes ?? []);
+        // Push ClassMethod nodes (not MethodHeader) because ClassMethod is in IdentifiableReference
+        // but MethodHeader is not, so Langium's reference type filtering will work correctly
+        declarations.push(...container?.methods ?? []);
+    }
+    else if (ast.isImplementationType(container)){
         // Add class attributes and methods
         declarations.push(...container?.attributes ?? []);
         // Push ClassMethod nodes (not MethodHeader) because ClassMethod is in IdentifiableReference

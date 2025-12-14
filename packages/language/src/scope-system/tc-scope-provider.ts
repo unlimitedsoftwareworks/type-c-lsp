@@ -176,6 +176,12 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                     descriptions.push(this.descriptions.createDescription(node, name));
                 }
             }
+            // Handle ImplementationMethodDecl - methods can have multiple names (operator overloading)
+            else if (ast.isImplementationMethodDecl(node) && node.method) {
+                for (const name of node.method.names) {
+                    descriptions.push(this.descriptions.createDescription(node, name));
+                }
+            }
             // Handle MethodHeader directly (for interfaces)
             else if (ast.isMethodHeader(node)) {
                 for (const name of node.names) {

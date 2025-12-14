@@ -1,0 +1,60 @@
+// @test: impl-in-class-basic
+// Tests that implementation methods are accessible in classes
+
+type Vec3 = class {
+    let x: f32, y: f32, z: f32
+
+    fn init(x: f32, y: f32, z: f32) {
+        this.x = x
+        this.y = y
+        this.z = z
+    }
+}
+
+// Implementation providing position/rotation/scale accessors
+type Default3DPropsAccessImpl = impl (
+    pos: Vec3,
+    rot: Vec3,
+    scl: Vec3
+) {
+    fn getPosition() -> Vec3 = this.pos
+    fn getRotation() -> Vec3 = this.rot
+    fn getScale() -> Vec3 = this.scl
+    
+    fn setPosition(mut newPos: Vec3) -> void {
+        this.pos = newPos
+    }
+}
+
+type StaticMesh = class {
+    let position: Vec3
+    let rotation: Vec3
+    let scale: Vec3
+
+    impl Default3DPropsAccessImpl(position, rotation, scale)
+
+    fn init(mut pos: Vec3, mut rot: Vec3, mut scl: Vec3) {
+        this.position = pos
+        this.rotation = rot
+        this.scale = scl
+    }
+}
+
+fn main() -> u32 {
+    let mesh = new StaticMesh(
+        new Vec3(1.0f, 2.0f, 3.0f),
+        new Vec3(0.0f, 0.0f, 0.0f),
+        new Vec3(1.0f, 1.0f, 1.0f)
+    )
+    
+    // @type: Vec3
+    let p = mesh.getPosition()
+    
+    // @type: Vec3
+    let r = mesh.getRotation()
+    
+    // Should work - impl method is accessible
+    mesh.setPosition(new Vec3(5.0f, 6.0f, 7.0f))
+    
+    return 0u32
+}

@@ -1,0 +1,54 @@
+// @test: impl-this-basic
+// Tests that 'this' keyword works in implementation types with attributes and methods
+
+type Vec3 = class {
+    let x: f32, y: f32, z: f32
+
+    fn init(x: f32, y: f32, z: f32) {
+        this.x = x
+        this.y = y
+        this.z = z
+    }
+}
+
+// Implementation type with 'this' accessing attributes
+type VecOperations = impl (
+    vec: Vec3
+) {
+    fn getLength() -> f32 {
+        // @type: f32
+        return this.vec.x
+    }
+
+    fn scale(factor: f32) -> void {
+        // @type: Vec3
+        this.vec.x = this.vec.x * factor
+        this.vec.y = this.vec.y * factor
+        this.vec.z = this.vec.z * factor
+    }
+}
+
+// Another implementation with multiple attributes
+type Container<T> = impl (
+    value: T,
+    count: u32
+) {
+    fn getValue() -> T {
+        // @type: T
+        return this.value
+    }
+    
+    fn getCount() -> u32 {
+        // @type: u32
+        return this.count
+    }
+    
+    fn increment() -> void {
+        // @type: u32
+        this.count = this.count + 1u32
+    }
+}
+
+fn main() -> u32 {
+    return 0u32
+}

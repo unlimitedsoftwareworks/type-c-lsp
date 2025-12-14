@@ -290,7 +290,7 @@ export class TypeCTypeProvider {
             let fnType = this.inferExpression(parent.expr);
             
             // Resolve reference types first
-            fnType = isReferenceType(fnType) ? this.resolveReference(fnType) : fnType;
+            fnType = this.typeUtils.resolveIfReference(fnType);
             
             // Handle variant constructor calls (e.g., Result.Ok(42) where Result<u32, string> is expected)
             // This enables contextual typing for constructor arguments
@@ -494,7 +494,7 @@ export class TypeCTypeProvider {
                 if (!ast.isIntegerLiteral(otherOperand) && !ast.isFloatingPointLiteral(otherOperand)) {
                     const otherType = this.inferExpression(otherOperand);
                     // Resolve references to check for class/interface types
-                    const resolvedOtherType = isReferenceType(otherType) ? this.resolveReference(otherType) : otherType;
+                    const resolvedOtherType = this.typeUtils.resolveIfReference(otherType);
                     
                     // Only use as context if it's a primitive type (not class/interface with operator overloads)
                     if (!isClassType(resolvedOtherType) && !this.typeUtils.asInterfaceType(resolvedOtherType)) {
@@ -2011,7 +2011,7 @@ export class TypeCTypeProvider {
             
             // Use contextual typing to determine if we should keep as literal or widen to string
             let expectedType = this.getExpectedType(node);
-            expectedType = expectedType && isReferenceType(expectedType)? this.resolveReference(expectedType) : expectedType;
+            expectedType = expectedType ? this.typeUtils.resolveIfReference(expectedType) : expectedType;
             
             // If expected type is a string enum, keep as literal for validation
             if (expectedType && isStringEnumType(expectedType)) {
@@ -2296,7 +2296,7 @@ export class TypeCTypeProvider {
         // Check if unary minus is being applied to unsigned integer type
         if (node.op === '-') {
             // Resolve reference types to get the actual type
-            const resolvedType = isReferenceType(exprType) ? this.resolveReference(exprType) : exprType;
+            const resolvedType = this.typeUtils.resolveIfReference(exprType);
             
             // Check if it's an unsigned integer type (u8, u16, u32, u64)
             // Use the type guard properly to narrow the type
@@ -2350,7 +2350,7 @@ export class TypeCTypeProvider {
         node: AstNode
     ): TypeDescription | undefined {
         // Resolve reference types first
-        let resolvedLhs = isReferenceType(lhsType) ? this.resolveReference(lhsType) : lhsType;
+        let resolvedLhs = this.typeUtils.resolveIfReference(lhsType);
         
         // Unwrap nullable types
         if (isNullableType(resolvedLhs)) {
@@ -2761,7 +2761,7 @@ export class TypeCTypeProvider {
         let fnType = this.inferExpression(node.expr);
 
         // Resolve reference types first
-        fnType = isReferenceType(fnType) ? this.resolveReference(fnType) : fnType;
+        fnType = this.typeUtils.resolveIfReference(fnType);
 
         // Only unwrap nullable function types if they come from optional chaining
         // Check if ANY part of the expression chain uses optional chaining (?.)
@@ -3225,7 +3225,7 @@ export class TypeCTypeProvider {
                 const spreadType = this.inferExpression(f.expression);
                 
                 // Resolve reference types to get the actual struct
-                let resolvedType = isReferenceType(spreadType) ? this.resolveReference(spreadType) : spreadType;
+                let resolvedType = this.typeUtils.resolveIfReference(spreadType);
                 
                 // Get struct type (handles both direct structs and join types)
                 const structType = this.typeUtils.asStructType(resolvedType);
@@ -3460,7 +3460,7 @@ export class TypeCTypeProvider {
         const type = this.getType(node.destType);
 
         if(node.castType === "as?") {
-            let rtype = isReferenceType(type)?this.resolveReference(type):type;
+            let rtype = this.typeUtils.resolveIfReference(type);
             if(!isNullableType(rtype)){
                 return this.typeFactory.createNullableType(rtype);
             }
@@ -3888,7 +3888,7 @@ export class TypeCTypeProvider {
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         // Resolve reference types to get actual type
-        const resolvedType = isReferenceType(contextType) ? this.resolveReference(contextType) : contextType;
+        const resolvedType = this.typeUtils.resolveIfReference(contextType);
 
         if (!isArrayType(resolvedType)) {
             // Store validation error for the pattern itself
@@ -3932,7 +3932,7 @@ export class TypeCTypeProvider {
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         // Resolve reference types to get actual type
-        const resolvedType = isReferenceType(contextType) ? this.resolveReference(contextType) : contextType;
+        const resolvedType = this.typeUtils.resolveIfReference(contextType);
 
         const structType = this.typeUtils.asStructType(resolvedType);
         if (!structType) {
@@ -4186,8 +4186,8 @@ export class TypeCTypeProvider {
      */
     private extractIterableInterface(type: TypeDescription):
         { indexType: TypeDescription; valueType: TypeDescription } | undefined {
-        
-        let resolvedType = isReferenceType(type) ? this.resolveReference(type) : type;
+    
+    let resolvedType = this.typeUtils.resolveIfReference(type);
         
         // For classes: check if they have getIterator() method
         if (isClassType(resolvedType)) {
@@ -4220,7 +4220,7 @@ export class TypeCTypeProvider {
         
         // Check supertypes recursively
         for (const superType of interfaceType.superTypes) {
-            const resolvedSuper = isReferenceType(superType) ? this.resolveReference(superType) : superType;
+            const resolvedSuper = this.typeUtils.resolveIfReference(superType);
             const superInterface = this.typeUtils.asInterfaceType(resolvedSuper);
             if (superInterface) {
                 const result = this.extractIterableFromInterface(superInterface);
@@ -4247,7 +4247,7 @@ export class TypeCTypeProvider {
         }
         
         // Structural approach: check if it has next() -> (U, V)
-        let resolvedType = isReferenceType(iteratorType) ? this.resolveReference(iteratorType) : iteratorType;
+        let resolvedType = this.typeUtils.resolveIfReference(iteratorType);
         const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
         if (interfaceType) {
             const nextMethod = interfaceType.methods.find(m => m.names.includes('next'));
@@ -4482,8 +4482,8 @@ export class TypeCTypeProvider {
             }
         }
 
-        const resolvedParameterType = isReferenceType(parameterType) ? this.resolveReference(parameterType) : parameterType;
-        const resolvedArgumentType = isReferenceType(argumentType) ? this.resolveReference(argumentType) : argumentType;
+        const resolvedParameterType = this.typeUtils.resolveIfReference(parameterType);
+        const resolvedArgumentType = this.typeUtils.resolveIfReference(argumentType);
 
         // Ignore error types
         if (isErrorType(resolvedParameterType) || isErrorType(resolvedArgumentType)) {

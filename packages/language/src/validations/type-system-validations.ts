@@ -133,10 +133,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         // Resolve references to get the actual type
-        if (isReferenceType(finalType)) {
-            const resolved = this.typeProvider.resolveReference(finalType);
-            if (resolved) finalType = resolved;
-        }
+        finalType = this.typeUtils.resolveIfReference(finalType);
         
         // Check if the final variable type is a nullable basic type
         // This catches cases like:
@@ -165,14 +162,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let inferredType = this.typeProvider.getType(node.initializer);
 
         // Resolve type references
-        if (isReferenceType(expectedType)) {
-            const resolved = this.typeProvider.resolveReference(expectedType);
-            if (resolved) expectedType = resolved;
-        }
-        if (isReferenceType(inferredType)) {
-            const resolved = this.typeProvider.resolveReference(inferredType);
-            if (resolved) inferredType = resolved;
-        }
+        expectedType = this.typeUtils.resolveIfReference(expectedType);
+        inferredType = this.typeUtils.resolveIfReference(inferredType);
 
         // Check compatibility using the centralized type compatibility checker
         // This handles all cases including interface compatibility
@@ -263,15 +254,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let rightType = this.typeProvider.getType(node.right);
 
         // Resolve references to check for class types
-        if (isReferenceType(leftType)) {
-            const resolved = this.typeProvider.resolveReference(leftType);
-            if (resolved) leftType = resolved;
-        }
-
-        if(isReferenceType(rightType)) {
-            const resolved = this.typeProvider.resolveReference(rightType);
-            if (resolved) rightType = resolved;
-        }
+        leftType = this.typeUtils.resolveIfReference(leftType);
+        rightType = this.typeUtils.resolveIfReference(rightType);
 
         // Check nullish coalescing operator for nullable basic types
         // The ?? operator should not be used with nullable basic types
@@ -420,9 +404,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let fnType = this.typeProvider.getType(node.expr);
 
         // Resolve reference types first
-        if (isReferenceType(fnType)) {
-            fnType = this.typeProvider.resolveReference(fnType);
-        }
+        fnType = this.typeUtils.resolveIfReference(fnType);
 
         // Only unwrap nullable function types if they come from optional chaining
         // Check if ANY part of the expression chain uses optional chaining (?.)
@@ -1276,10 +1258,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let baseType = this.typeProvider.getType(node.expr);
 
         // Resolve reference types
-        if (isReferenceType(baseType)) {
-            const resolved = this.typeProvider.resolveReference(baseType);
-            if (resolved) baseType = resolved;
-        }
+        baseType = this.typeUtils.resolveIfReference(baseType);
 
         const valueType = this.typeProvider.getType(node.value);
 
@@ -1330,10 +1309,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let baseType = this.typeProvider.getType(node.expr);
 
         // Resolve reference types
-        if (isReferenceType(baseType)) {
-            const resolved = this.typeProvider.resolveReference(baseType);
-            if (resolved) baseType = resolved;
-        }
+        baseType = this.typeUtils.resolveIfReference(baseType);
 
         const valueType = this.typeProvider.getType(node.value);
 
@@ -1392,8 +1368,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const rightType = this.typeProvider.getType(node.right);
 
         // Resolve references
-        const resolvedLeft = isReferenceType(leftType) ? this.typeProvider.resolveReference(leftType) : leftType;
-        const resolvedRight = isReferenceType(rightType) ? this.typeProvider.resolveReference(rightType) : rightType;
+        const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
+        const resolvedRight = this.typeUtils.resolveIfReference(rightType);
 
         // Collect all types from nested joins
         const allTypes: TypeDescription[] = [];
@@ -1996,8 +1972,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Returns the detailed error message if types are incompatible.
      */
     private isTypeCompatible(actual_: TypeDescription, expected_: TypeDescription): { success: boolean; message?: string } {
-        const actual = isReferenceType(actual_) ? this.typeProvider.resolveReference(actual_) : actual_;
-        const expected = isReferenceType(expected_) ? this.typeProvider.resolveReference(expected_) : expected_;
+       const actual = this.typeUtils.resolveIfReference(actual_);
+       const expected = this.typeUtils.resolveIfReference(expected_);
 
         // Use the centralized assignability check from type-utils
         // This handles:
@@ -2118,13 +2094,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 const spreadType = this.typeProvider.getType(field.expression);
                 
                 // Resolve reference types
-                let resolvedType = spreadType;
-                if (isReferenceType(spreadType)) {
-                    const resolved = this.typeProvider.resolveReference(spreadType);
-                    if (resolved) {
-                        resolvedType = resolved;
-                    }
-                }
+                let resolvedType = this.typeUtils.resolveIfReference(spreadType);
                 
                 // If it's a struct type, collect its fields
                 if (isStructType(resolvedType)) {
@@ -2181,13 +2151,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const spreadType = this.typeProvider.getType(node.expr);
         
         // Resolve reference types
-        let resolvedType = spreadType;
-        if (isReferenceType(spreadType)) {
-            const resolved = this.typeProvider.resolveReference(spreadType);
-            if (resolved) {
-                resolvedType = resolved;
-            }
-        }
+        let resolvedType = this.typeUtils.resolveIfReference(spreadType);
         
         // Check if it's an array type
         if (!isArrayType(resolvedType)) {
@@ -2235,13 +2199,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const instanceType = this.typeProvider.getType(node.instanceType);
 
         // Resolve reference types to get the actual type
-        let resolvedType = instanceType;
-        if (isReferenceType(instanceType)) {
-            const resolved = this.typeProvider.resolveReference(instanceType);
-            if (resolved) {
-                resolvedType = resolved;
-            }
-        }
+        let resolvedType = this.typeUtils.resolveIfReference(instanceType);
 
         // Check if it's a class type (the only valid type for `new`)
         if (!isClassType(resolvedType) && !isMetaClassType(resolvedType)) {
@@ -2581,7 +2539,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      */
     checkObjectUpdateFields(node: ast.ObjectUpdate, accept: ValidationAcceptor) {
         const baseType = this.typeProvider.getType(node.expr);
-        const resolvedType = isReferenceType(baseType) ? this.typeProvider.resolveReference(baseType) : baseType;
+        const resolvedType = this.typeUtils.resolveIfReference(baseType);
         
         // Validate base type is struct or class
         const isClass = isClassType(resolvedType);
@@ -2733,8 +2691,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const targetType = this.typeProvider.getType(node.destType);
 
         // Resolve reference types
-        const resolvedSource = isReferenceType(sourceType) ? this.typeProvider.resolveReference(sourceType) : sourceType;
-        const resolvedTarget = isReferenceType(targetType) ? this.typeProvider.resolveReference(targetType) : targetType;
+        const resolvedSource = this.typeUtils.resolveIfReference(sourceType);
+        const resolvedTarget = this.typeUtils.resolveIfReference(targetType);
 
         // Skip validation if either is an error type
         if (isErrorType(resolvedSource) || isErrorType(resolvedTarget)) {
@@ -2882,7 +2840,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const refType = this.typeProvider.getType(ref);
         
         // Resolve reference types to get the actual type
-        const resolvedType = isReferenceType(refType) ? this.typeProvider.resolveReference(refType) : refType;
+        const resolvedType = this.typeUtils.resolveIfReference(refType);
 
         // Get the provided generic arguments
         const providedGenericArgs = node.genericArgs ?? [];
@@ -2964,18 +2922,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let stepType = this.typeProvider.getType(node.step);
 
         // Resolve reference types (e.g., type aliases)
-        if (isReferenceType(startType)) {
-            const resolved = this.typeProvider.resolveReference(startType);
-            if (resolved) startType = resolved;
-        }
-        if (isReferenceType(endType)) {
-            const resolved = this.typeProvider.resolveReference(endType);
-            if (resolved) endType = resolved;
-        }
-        if (isReferenceType(stepType)) {
-            const resolved = this.typeProvider.resolveReference(stepType);
-            if (resolved) stepType = resolved;
-        }
+        startType = this.typeUtils.resolveIfReference(startType);
+        endType = this.typeUtils.resolveIfReference(endType);
+        stepType = this.typeUtils.resolveIfReference(stepType);
 
         // Skip validation if any type is already an error (will be reported elsewhere)
         const hasError = isErrorType(startType) || isErrorType(endType) || isErrorType(stepType);
@@ -3022,10 +2971,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             let iterType = this.typeProvider.getType(node.iterType);
             
             // Resolve reference types (e.g., type aliases)
-            if (isReferenceType(iterType)) {
-                const resolved = this.typeProvider.resolveReference(iterType);
-                if (resolved) iterType = resolved;
-            }
+            iterType = this.typeUtils.resolveIfReference(iterType);
             
             if (!isIntegerType(iterType) && !isErrorType(iterType) && iterType.kind !== TypeKind.Never) {
                 accept('error', `Range iterator type must be a non-floating point integer, but got '${iterType.toString()}'`, {
@@ -3053,10 +2999,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      */
     private checkForNullableBasicType(type: TypeDescription): string | undefined {
         // Resolve references to get actual type
-        if (isReferenceType(type)) {
-            const resolved = this.typeProvider.resolveReference(type);
-            if (resolved) type = resolved;
-        }
+        type = this.typeUtils.resolveIfReference(type);
         
         // Check if it's a nullable basic type
         if (isNullableType(type) && this.typeUtils.isTypeBasic(type.baseType)) {

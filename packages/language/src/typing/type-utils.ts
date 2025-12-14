@@ -105,6 +105,24 @@ export class TypeCTypeUtils {
         this.typeFactory = services.typing.TypeFactory;
     }
 
+    // ============================================================================
+    // Type Resolution Helper
+    // ============================================================================
+
+    /**
+     * Resolves a type if it's a reference type, otherwise returns the type as-is.
+     * This is a convenience helper to avoid the common pattern:
+     * `isReferenceType(type) ? this.typeProvider().resolveReference(type) : type`
+     *
+     * Note: When reporting errors, use the original type for better error messages
+     * (avoids printing large resolved structs instead of the original type name).
+     *
+     * @param type The type to potentially resolve
+     * @returns The resolved type if it was a reference, otherwise the original type
+     */
+    resolveIfReference(type: TypeDescription): TypeDescription {
+        return isReferenceType(type) ? this.typeProvider().resolveReference(type) : type;
+    }
 
     // ============================================================================
     // Pending Type Checks (for handling circular references)
@@ -636,9 +654,9 @@ export class TypeCTypeUtils {
         // Function assignability (contravariant in parameters, covariant in return type)
         // Handle both direct function types and references to function types
         const fromFunc = isFunctionType(from) ? from :
-                        (isReferenceType(from) ? this.typeProvider().resolveReference(from) : null);
+                        this.resolveIfReference(from);
         const toFunc = isFunctionType(to) ? to :
-                      (isReferenceType(to) ? this.typeProvider().resolveReference(to) : null);
+                      this.resolveIfReference(to);
         
         if (fromFunc && isFunctionType(fromFunc) && toFunc && isFunctionType(toFunc)) {
             return this.isFunctionAssignable(fromFunc, toFunc);
@@ -1352,8 +1370,8 @@ export class TypeCTypeUtils {
         }
 
         // Resolve reference types before checking
-        const resolvedFrom = isReferenceType(from) ? this.typeProvider().resolveReference(from) : from;
-        const resolvedTo = isReferenceType(to) ? this.typeProvider().resolveReference(to) : to;
+        const resolvedFrom = this.resolveIfReference(from);
+        const resolvedTo = this.resolveIfReference(to);
 
         // Primitive types - allow all primitive-to-primitive casts (numeric conversions, etc.)
         // This includes: u32 to i32, i32 to f32, etc.
@@ -1767,9 +1785,7 @@ export class TypeCTypeUtils {
         }
 
         // Resolve reference types to get actual struct/interface definitions
-        const resolvedTypes = flatTypes.map(t =>
-            isReferenceType(t) ? this.typeProvider().resolveReference(t) : t
-        );
+        const resolvedTypes = flatTypes.map(t => this.resolveIfReference(t));
 
         // Check if all types are structs - if so, merge them into a single struct
         const allStructs = resolvedTypes.every(t => isStructType(t));
@@ -2136,13 +2152,11 @@ export class TypeCTypeUtils {
             // This allows [fn() -> Result.Ok<i32, never>, fn() -> Result.Err<never, string>] to unify
             // CRITICAL FIX: Resolve reference types to handle type aliases like StringGuard
             else if (nonNullTypes.every(t => {
-                const resolved = isReferenceType(t) ? this.typeProvider().resolveReference(t) : t;
+                const resolved = this.resolveIfReference(t);
                 return isFunctionType(resolved);
             })) {
                 // Resolve any references to get actual function types
-                const functionTypes = nonNullTypes.map(t =>
-                    isReferenceType(t) ? this.typeProvider().resolveReference(t) : t
-                ).filter(isFunctionType);
+                const functionTypes = nonNullTypes.map(t => this.resolveIfReference(t)).filter(isFunctionType);
                 
                 // Check if all functions have the same parameter count
                 const firstFunc = functionTypes[0];

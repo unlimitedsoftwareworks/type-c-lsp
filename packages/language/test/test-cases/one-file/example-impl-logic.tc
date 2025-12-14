@@ -8,7 +8,7 @@ type Object3D  = interface {
     fn getRotation() -> vec3
 }
 
-type Default3DImpl<T> = impl for Object3D (
+type Default3DImpl<T> = impl Object3D (
     position: T,
     scale: T,
     rot: T

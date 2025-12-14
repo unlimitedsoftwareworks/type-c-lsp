@@ -14,6 +14,7 @@ import {
     isFloatType,
     isFunctionType,
     isGenericType,
+    isImplementationType,
     isIntegerType,
     isInterfaceType,
     isJoinType,
@@ -73,6 +74,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
             ClassType: this.checkClassImplementation,
+            ClassImplementationMethodDecl: this.checkClassImplDeclaration,
             MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
@@ -3088,6 +3090,137 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
         }
+    }
+
+    /**
+     * Check class implementation declarations for proper argument passing.
+     *
+     * When a class uses an impl like `impl Default3DImpl<vec3>(pos, scale, rot)`,
+     * this validates:
+     * 1. The number of arguments matches the impl's expected attributes
+     * 2. Each argument's type is compatible with the corresponding impl attribute type
+     *
+     * Examples:
+     * ```tc
+     * type Default3DImpl<T> = impl Object3D (
+     *     position: T,
+     *     scale: T,
+     *     rotation: T
+     * ) { ... }
+     *
+     * class Mesh {
+     *     let pos: vec3
+     *     let scale: vec3
+     *     let rot: vec3
+     *     impl Default3DImpl<vec3>(pos, scale, rot)  // ✅ OK - 3 args, all vec3
+     * }
+     *
+     * class BadMesh {
+     *     let pos: vec3
+     *     impl Default3DImpl<vec3>(pos)  // ❌ Error - needs 3 args
+     * }
+     *
+     * class BadMesh2 {
+     *     let pos: u32
+     *     let scale: vec3
+     *     let rot: vec3
+     *     impl Default3DImpl<vec3>(pos, scale, rot)  // ❌ Error - pos is u32, not vec3
+     * }
+     * ```
+     */
+    checkClassImplDeclaration = (node: ast.ClassImplementationMethodDecl, accept: ValidationAcceptor): void => {
+        // Get the impl type being referenced
+        const implRefType = this.typeProvider.getType(node.type);
+        
+        // Resolve the reference to get the actual implementation type
+        let resolvedImplType = isReferenceType(implRefType)
+            ? this.typeProvider.resolveReference(implRefType)
+            : implRefType;
+        
+        // Resolve again if still a reference (nested references)
+        resolvedImplType = this.typeUtils.resolveIfReference(resolvedImplType);
+        
+        // Verify it's an implementation type
+        if (!isImplementationType(resolvedImplType)) {
+            return; // Not an impl type, will be caught elsewhere
+        }
+
+        // Get the expected attributes from the impl type
+        const expectedAttributes = resolvedImplType.attributes;
+        
+        // Get the provided arguments
+        const providedArgs = node.args || [];
+        
+        // Check 1: Argument count must match
+        if (providedArgs.length !== expectedAttributes.length) {
+            const errorCode = ErrorCode.TC_IMPL_ARG_COUNT_MISMATCH;
+            accept('error',
+                `Implementation argument count mismatch: ` +
+                `'${this.getImplName(node.type)}' expects ${expectedAttributes.length} argument(s), ` +
+                `but got ${providedArgs.length}`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+
+        // Check 2: Each argument type must match the expected attribute type
+        // Build generic substitutions from the impl reference if it has generic args
+        let substitutions: Map<string, TypeDescription> | undefined;
+        if (isReferenceType(implRefType) && implRefType.genericArgs.length > 0 && implRefType.declaration.genericParameters) {
+            substitutions = new Map<string, TypeDescription>();
+            implRefType.declaration.genericParameters.forEach((param, i) => {
+                if (i < implRefType.genericArgs.length) {
+                    substitutions!.set(param.name, implRefType.genericArgs[i]);
+                }
+            });
+        }
+
+        for (let i = 0; i < providedArgs.length; i++) {
+            const argRef = providedArgs[i].ref;
+            if (!argRef || !ast.isClassAttributeDecl(argRef)) {
+                continue; // Unresolved reference, will be caught elsewhere
+            }
+
+            // Get the actual type of the provided argument (the class attribute)
+            const argType = this.typeProvider.getType(argRef.type);
+            
+            // Get the expected type from the impl attribute
+            let expectedType = expectedAttributes[i].type;
+            
+            // Apply generic substitutions if we have them
+            if (substitutions && substitutions.size > 0) {
+                expectedType = this.typeUtils.substituteGenerics(expectedType, substitutions);
+            }
+
+            // Check type compatibility
+            const compatResult = this.isTypeCompatible(argType, expectedType);
+            if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_IMPL_ARG_TYPE_MISMATCH;
+                const errorMsg = `Implementation argument ${i + 1} ('${argRef.name}') type mismatch: ` +
+                      `Expected '${expectedType.toString()}', but got '${argType.toString()}'`;
+                accept('error', errorMsg, {
+                    node,
+                    code: errorCode
+                });
+            }
+        }
+    }
+
+    /**
+     * Helper method to get a display name for an impl type reference.
+     */
+    private getImplName(typeRef: ast.ReferenceType): string {
+        if (typeRef.field?.ref && ast.isTypeDeclaration(typeRef.field.ref)) {
+            const decl = typeRef.field.ref;
+            if (typeRef.genericArgs && typeRef.genericArgs.length > 0) {
+                return `${decl.name}<${typeRef.genericArgs.map(g => g.$cstNode?.text || '?').join(', ')}>`;
+            }
+            return decl.name;
+        }
+        return typeRef.$cstNode?.text || 'unknown';
     }
 
     /**

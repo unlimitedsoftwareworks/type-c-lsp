@@ -23,11 +23,23 @@ type Mesh = class {
     let scale: vec3
     let rot: vec3
 
-    impl Default3DImpl<vec3>(pos, scale, rot)
+    impl Default3DImpl<vec3>(pos, scale, rot) // Valid: all args are vec3
+}
 
-    fn getPos() -> u32 {
-        return 0
-    }
+type BadMesh1 = class {
+    let pos: vec3
+    let scale: vec3
+    let rot: vec3
+
+    impl Default3DImpl<vec3>(pos, scale) // Error: Wrong argument count (needs 3, got 2)
+}
+
+type BadMesh2 = class {
+    let pos: u32  // Wrong type
+    let scale: vec3
+    let rot: vec3
+
+    impl Default3DImpl<vec3>(pos, scale, rot) // Error: pos is u32, expected vec3
 }
 
 fn main() {

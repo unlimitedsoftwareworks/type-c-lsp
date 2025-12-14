@@ -35,13 +35,6 @@ type CustomMesh = class {
         this.scale = new Vec3(1.0f, 1.0f, 1.0f)
         this.customData = customData
     }
-
-    // Override the implementation's getPosition method
-    override fn getPosition() -> Vec3 {
-        // @type: u32
-        let data = this.customData
-        return new Vec3(this.position.x + 10.0f, this.position.y, this.position.z)
-    }
 }
 
 fn main() -> u32 {

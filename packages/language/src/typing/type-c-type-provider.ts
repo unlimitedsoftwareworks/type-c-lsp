@@ -2747,7 +2747,49 @@ export class TypeCTypeProvider {
 
         // If we didn't find it in the interface, fall back to getting from AST
         if (!memberType) {
-            const targetType = this.getType(targetRef);
+            let targetType = this.getType(targetRef);
+
+            // Check if this method comes from an impl block and apply impl generic substitutions
+            // This handles cases like: impl Default3DImpl<vec3>(pos, scale, rot)
+            // where methods should have T substituted with vec3
+            if (ast.isClassMethod(targetRef) && isClassType(baseType)) {
+                const methodNode = targetRef;
+                const implTypeNode = methodNode.$container;
+                
+                // Check if this method is from an impl block (not directly in a class)
+                if (implTypeNode && ast.isImplementationType(implTypeNode)) {
+                    const classNode = baseType.node;
+                    if (classNode && ast.isClassType(classNode)) {
+                        // Find the ClassImplementationMethodDecl that references this impl
+                        for (const implDecl of classNode.implementations ?? []) {
+                            const implRefType = this.getType(implDecl.type);
+                            
+                            // Check if this impl reference points to our impl type
+                            if (isReferenceType(implRefType)) {
+                                const resolvedImplType = this.resolveReference(implRefType);
+                                if (isImplementationType(resolvedImplType) && resolvedImplType.node === implTypeNode) {
+                                    // Found the matching impl declaration in the class!
+                                    // Build substitutions from the impl's generic arguments
+                                    const implSubstitutions = this.buildGenericSubstitutions(implRefType);
+                                    
+                                    // Merge impl substitutions with existing substitutions
+                                    if (implSubstitutions && implSubstitutions.size > 0) {
+                                        if (!genericSubstitutions) {
+                                            genericSubstitutions = implSubstitutions;
+                                        } else {
+                                            // Merge the maps - impl substitutions take precedence
+                                            for (const [key, value] of implSubstitutions) {
+                                                genericSubstitutions.set(key, value);
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Apply generic substitutions if we have them (e.g., T -> u32 in Array<u32>)
             if (genericSubstitutions) {

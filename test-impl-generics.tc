@@ -24,6 +24,10 @@ type Mesh = class {
     let rot: vec3
 
     impl Default3DImpl<vec3>(pos, scale, rot)
+
+    fn getPos() -> u32 {
+        return 0
+    }
 }
 
 fn main() {

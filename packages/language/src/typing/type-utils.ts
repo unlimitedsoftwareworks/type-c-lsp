@@ -904,10 +904,35 @@ export class TypeCTypeUtils {
     isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
         // All interface methods must be implemented by the class
         for (const method of to.methods) {
-            const classMethods = [...from.methods, ...from.implementations.map(e => {
-                const impl = this.typeProvider().resolveReference(e);
+            // Collect class methods and impl methods with generic substitutions applied
+            const classMethods = [...from.methods, ...from.implementations.map(implRef => {
+                // Build substitutions from the impl reference (e.g., Default3DImpl<vec3>)
+                let implSubstitutions: Map<string, TypeDescription> | undefined;
+                if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
+                    implSubstitutions = new Map<string, TypeDescription>();
+                    implRef.declaration.genericParameters.forEach((param, i) => {
+                        if (i < implRef.genericArgs.length) {
+                            implSubstitutions!.set(param.name, implRef.genericArgs[i]);
+                        }
+                    });
+                }
+                
+                // Resolve the impl type
+                const impl = this.typeProvider().resolveReference(implRef);
                 if(isImplementationType(impl)) {
-                    return impl.methods
+                    // Apply generic substitutions to each method
+                    if (implSubstitutions && implSubstitutions.size > 0) {
+                        return impl.methods.map(m => ({
+                            ...m,
+                            parameters: m.parameters.map(p => ({
+                                name: p.name,
+                                type: this.substituteGenerics(p.type, implSubstitutions!),
+                                isMut: p.isMut
+                            })),
+                            returnType: this.substituteGenerics(m.returnType, implSubstitutions!)
+                        }));
+                    }
+                    return impl.methods;
                 }
                 return []
             }).flat()]

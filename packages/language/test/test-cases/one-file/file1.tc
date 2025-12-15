@@ -36,11 +36,20 @@ type Default3DImpl<T> = impl Object3D (
     }
 }
 
+type RandomImp = impl  {
+    fn randomFn() -> vec3 = {1.0f, 2.0f, 3.0f}
+    fn getPos() -> vec3 = randomFn()
+}
+
 // Test with a class using the impl
 type MyObject = class {
     let pos: vec3
 
     impl Default3DImpl<vec3>(pos, pos, pos)
+    impl RandomImp()
+    
+    // When we override a duplicate method, only one is seen
+    override fn getPos() -> vec3 = getAllPositions()
     
     fn init(pos: vec3) {
         // This should work - accessing impl methods
@@ -48,6 +57,8 @@ type MyObject = class {
         let s = this.getScale()
         
         // This should work - accessing non-shadowed interface method
+
+        /// @Type(rand): vec3
         let rand = this.useRandomFn()
     }
 }

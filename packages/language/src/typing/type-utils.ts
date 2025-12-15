@@ -15,7 +15,6 @@ import * as ast from '../generated/ast.js';
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
-    ArrayTypeDescription,
     ClassTypeDescription,
     FloatTypeDescription,
     FunctionTypeDescription,
@@ -54,7 +53,6 @@ import {
     StringEnumTypeDescription,
     StructFieldType,
     StructTypeDescription,
-    TupleTypeDescription,
     TypeDescription,
     TypeGuardTypeDescription,
     TypeKind,
@@ -1534,223 +1532,179 @@ export class TypeCTypeUtils {
 
         // Recursively substitute in composite types
         if (isArrayType(type)) {
-            const arrayType: ArrayTypeDescription = {
-                kind: type.kind,
-                elementType: this.substituteGenerics(type.elementType, substitutions),
-                node: type.node,
-                toString: () => `${this.substituteGenerics(type.elementType, substitutions).toString()}[]`
-            };
-            return arrayType;
+            return this.typeFactory.createArrayType(
+                this.substituteGenerics(type.elementType, substitutions),
+                type.node
+            );
         }
 
         if (isNullableType(type)) {
-            return this.typeFactory.createNullableType(this.substituteGenerics(type.baseType, substitutions));
+            return this.typeFactory.createNullableType(
+                this.substituteGenerics(type.baseType, substitutions),
+                type.node
+            );
         }
 
         if (isUnionType(type)) {
             const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions));
-            const unionType: UnionTypeDescription = {
-                kind: type.kind,
-                types: substitutedTypes,
-                node: type.node,
-                toString: () => substitutedTypes.map(t => t.toString()).join(' | ')
-            };
-            return unionType;
+            return this.typeFactory.createUnionType(substitutedTypes, type.node);
         }
 
         if (isJoinType(type)) {
             const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions));
-            const joinType: JoinTypeDescription = {
-                kind: type.kind,
-                types: substitutedTypes,
-                node: type.node,
-                toString: () => substitutedTypes.map(t => t.toString()).join(' & ')
-            };
-            return joinType;
+            return this.typeFactory.createJoinType(substitutedTypes, type.node);
         }
 
         if (isTupleType(type)) {
             const substitutedTypes = type.elementTypes.map(t => this.substituteGenerics(t, substitutions));
-            const tupleType: TupleTypeDescription = {
-                kind: type.kind,
-                elementTypes: substitutedTypes,
-                node: type.node,
-                toString: () => `(${substitutedTypes.map(t => t.toString()).join(', ')})`
-            };
-            return tupleType;
+            return this.typeFactory.createTupleType(substitutedTypes, type.node);
         }
 
         if (isStructType(type)) {
-            const substitutedFields = type.fields.map(f => ({
-                name: f.name,
-                type: this.substituteGenerics(f.type, substitutions),
-                node: f.node
-            }));
-            const structType: StructTypeDescription = {
-                kind: type.kind,
-                fields: substitutedFields,
-                isAnonymous: type.isAnonymous,
-                node: type.node,
-                toString: () => {
-                    const fieldStrs = substitutedFields.map(f => `${f.name}: ${f.type.toString()}`).join(', ');
-                    return `${type.isAnonymous ? '' : 'struct '}{ ${fieldStrs} }`;
-                }
-            };
-            return structType;
+            const substitutedFields = type.fields.map(f =>
+                this.typeFactory.createStructField(
+                    f.name,
+                    this.substituteGenerics(f.type, substitutions),
+                    f.node
+                )
+            );
+            return this.typeFactory.createStructType(substitutedFields, type.isAnonymous, type.node);
         }
 
         if (isFunctionType(type)) {
-            const substitutedParams = type.parameters.map(p => ({
-                name: p.name,
-                type: this.substituteGenerics(p.type, substitutions),
-                isMut: p.isMut
-            }));
+            const substitutedParams = type.parameters.map(p =>
+                this.typeFactory.createFunctionParameterType(
+                    p.name,
+                    this.substituteGenerics(p.type, substitutions),
+                    p.isMut
+                )
+            );
             const substitutedReturn = this.substituteGenerics(type.returnType, substitutions);
-            const functionType: FunctionTypeDescription = {
-                kind: type.kind,
-                fnType: type.fnType,
-                parameters: substitutedParams,
-                returnType: substitutedReturn,
-                genericParameters: type.genericParameters,
-                node: type.node,
-                toString: () => {
-                    const paramStrs = substitutedParams.map(p =>
-                        `${p.isMut ? 'mut ' : ''}${p.name}: ${p.type.toString()}`
-                    ).join(', ');
-                    return `${type.fnType}(${paramStrs}) -> ${substitutedReturn.toString()}`;
-                }
-            };
-            return functionType;
+            
+            // Filter out generic parameters that have been substituted
+            const remainingGenerics = type.genericParameters?.filter(g => !substitutions.has(g.name)) ?? [];
+            
+            return this.typeFactory.createFunctionType(
+                substitutedParams,
+                substitutedReturn,
+                type.fnType,
+                remainingGenerics,
+                type.node
+            );
         }
 
         if (isReferenceType(type) && type.genericArgs.length > 0) {
             const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions));
-            const refType: ReferenceTypeDescription = {
-                kind: type.kind,
-                declaration: type.declaration,
-                genericArgs: substitutedArgs,
-                actualType: type.actualType,
-                node: type.node,
-                toString: () => {
-                    const argsStr = substitutedArgs.length > 0
-                        ? `<${substitutedArgs.map(a => a.toString()).join(', ')}>`
-                        : '';
-                    return `${type.declaration.name}${argsStr}`;
-                }
-            };
-            return refType;
+            return this.typeFactory.createReferenceType(
+                type.declaration,
+                substitutedArgs,
+                type.node
+            );
         }
 
         if (isVariantConstructorType(type) && type.genericArgs.length > 0) {
             const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions));
-            const variantConstructorType: VariantConstructorTypeDescription = {
-                kind: type.kind,
-                baseVariant: type.baseVariant,
-                variantDeclaration: type.variantDeclaration,
-                constructorName: type.constructorName,
-                genericArgs: substitutedArgs,
-                parentConstructor: type.parentConstructor,
-                node: type.node,
-                toString: () => {
-                    const variantName = type.variantDeclaration?.name ?? 'Variant';
-                    const argsStr = substitutedArgs.length > 0
-                        ? `<${substitutedArgs.map(a => a.toString()).join(', ')}>`
-                        : '';
-                    return `${variantName}.${type.constructorName}${argsStr}`;
-                }
-            };
-            return variantConstructorType;
+            return this.typeFactory.createVariantConstructorType(
+                type.baseVariant,
+                type.constructorName,
+                type.parentConstructor,
+                substitutedArgs,
+                type.node,
+                type.variantDeclaration
+            );
         }
 
         // Substitute generics in variant types
         if (isVariantType(type)) {
-            const substitutedConstructors = type.constructors.map(constructor => ({
-                name: constructor.name,
-                parameters: constructor.parameters.map(param => {
-                    const substitutedParamType = this.substituteGenerics(param.type, substitutions);
-                    return {
-                        name: param.name,
-                        type: substitutedParamType,
-                        node: param.node
-                    };
-                })
-            }));
-            const variantType: VariantTypeDescription = {
-                kind: type.kind,
-                constructors: substitutedConstructors,
-                node: type.node,
-                toString: () => {
-                    const constructorStrs = substitutedConstructors.map(c => {
-                        if (c.parameters.length === 0) {
-                            return c.name;
-                        }
-                        const paramStrs = c.parameters.map(p =>
-                            `${p.name}: ${p.type.toString()}`
-                        ).join(', ');
-                        return `${c.name}(${paramStrs})`;
-                    }).join(', ');
-                    return `variant { ${constructorStrs} }`;
-                }
-            };
-            return variantType;
+            const substitutedConstructors = type.constructors.map(constructor =>
+                this.typeFactory.createVariantConstructor(
+                    constructor.name,
+                    constructor.parameters.map(param =>
+                        this.typeFactory.createStructField(
+                            param.name,
+                            this.substituteGenerics(param.type, substitutions),
+                            param.node
+                        )
+                    )
+                )
+            );
+            return this.typeFactory.createVariantType(substitutedConstructors, type.node);
         }
         if (isClassType(type)) {
-            const substitutedAttributes = type.attributes.map(a => ({
-                name: a.name,
-                type: this.substituteGenerics(a.type, substitutions),
-                isStatic: a.isStatic,
-                isConst: a.isConst,
-                isLocal: a.isLocal
-            }));
-            const substitutedMethods = type.methods.filter(m => !m.isStatic).map(m => ({
-                ...m,
-                parameters: m.parameters.map(p => ({
-                    name: p.name,
-                    type: this.substituteGenerics(p.type, substitutions),
-                    isMut: p.isMut
-                })),
-                returnType: this.substituteGenerics(m.returnType, substitutions)
-            }));
-            const substitutedImplementations = type.implementations.map(i => this.substituteGenerics(i, substitutions));
-            const substitutedSuperTypes = type.superTypes.map(t => this.substituteGenerics(t, substitutions));
-            const classType: ClassTypeDescription = {
-                kind: type.kind,
-                attributes: substitutedAttributes,
-                methods: substitutedMethods,
-                superTypes: substitutedSuperTypes,
-                implementations: substitutedImplementations,
-                node: type.node,
-                toString: () => {
-                    const attributeStrs = substitutedAttributes.map(a => `${a.name}: ${a.type.toString()}`).join(', ');
-                    const methodStrs = substitutedMethods.map(m => `${m.names}(${m.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${m.returnType.toString()}`).join(', ');
-                    const implementationStrs = substitutedImplementations.map(i => i.toString()).join(', ');
-                    const superTypeStrs = substitutedSuperTypes.map(t => t.toString()).join(', ');
-                    return `class { ${attributeStrs} } { ${methodStrs} } implements ${implementationStrs} super { ${superTypeStrs} }`;
-                }
-            };
-            return classType;
+            const substitutedAttributes = type.attributes.map(a =>
+                this.typeFactory.createAttributeType(
+                    a.name,
+                    this.substituteGenerics(a.type, substitutions),
+                    a.isStatic,
+                    a.isConst,
+                    a.isLocal
+                )
+            );
+            const substitutedMethods = type.methods.filter(m => !m.isStatic).map(m =>
+                this.typeFactory.createMethodType(
+                    m.names,
+                    m.parameters.map(p =>
+                        this.typeFactory.createFunctionParameterType(
+                            p.name,
+                            this.substituteGenerics(p.type, substitutions),
+                            p.isMut
+                        )
+                    ),
+                    this.substituteGenerics(m.returnType, substitutions),
+                    m.node,
+                    m.genericParameters,
+                    m.isStatic,
+                    m.isOverride,
+                    m.isLocal
+                )
+            );
+            const substitutedImplementations = type.implementations.map(i =>
+                this.substituteGenerics(i, substitutions) as TypeDescription
+            );
+            const substitutedSuperTypes = type.superTypes.map(t =>
+                this.substituteGenerics(t, substitutions)
+            );
+            return this.typeFactory.createClassType(
+                substitutedAttributes,
+                substitutedMethods,
+                substitutedSuperTypes,
+                substitutedImplementations,
+                type.node
+            );
         }
-        if (isInterfaceType(type)) {
-            const substitutedMethods = type.methods.map(m => this.typeFactory.createMethodType(m.names, m.parameters.map(p => ({
-                name: p.name,
-                type: this.substituteGenerics(p.type, substitutions),
-                isMut: p.isMut
-            })), this.substituteGenerics(m.returnType, substitutions), m.node, m.genericParameters, m.isStatic, m.isOverride, m.isLocal));
 
-            return this.typeFactory.createInterfaceType(substitutedMethods, type.superTypes.map(t => this.substituteGenerics(t, substitutions)), type.node);
+        if (isInterfaceType(type)) {
+            const substitutedMethods = type.methods.map(m =>
+                this.typeFactory.createMethodType(
+                    m.names,
+                    m.parameters.map(p =>
+                        this.typeFactory.createFunctionParameterType(
+                            p.name,
+                            this.substituteGenerics(p.type, substitutions),
+                            p.isMut
+                        )
+                    ),
+                    this.substituteGenerics(m.returnType, substitutions),
+                    m.node,
+                    m.genericParameters,
+                    m.isStatic,
+                    m.isOverride,
+                    m.isLocal
+                )
+            );
+            const substitutedSuperTypes = type.superTypes.map(t =>
+                this.substituteGenerics(t, substitutions)
+            );
+            return this.typeFactory.createInterfaceType(substitutedMethods, substitutedSuperTypes, type.node);
         }
 
         if (isTypeGuardType(type)) {
-            const substitutedGuardedType = this.substituteGenerics(type.guardedType, substitutions);
-            const typeGuardType: TypeGuardTypeDescription = {
-                kind: type.kind,
-                parameterName: type.parameterName,
-                parameterIndex: type.parameterIndex,
-                guardedType: substitutedGuardedType,
-                node: type.node,
-                toString: () => `${type.parameterName} is ${substitutedGuardedType.toString()}`
-            };
-            return typeGuardType;
+            return this.typeFactory.createTypeGuardType(
+                type.parameterName,
+                type.parameterIndex,
+                this.substituteGenerics(type.guardedType, substitutions),
+                type.node
+            );
         }
 
         // For other types, return as-is

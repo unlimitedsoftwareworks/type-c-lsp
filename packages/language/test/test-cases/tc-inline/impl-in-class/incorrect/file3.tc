@@ -38,7 +38,7 @@ type Default3DImpl<T> = impl Object3D (
 
 type RandomImp = impl  {
     fn randomFn() -> vec3 = {1.0f, 2.0f, 3.0f}
-    fn getPos() -> vec3 = randomFn()
+    fn getPos() -> vec3 = randomFn() 
 }
 
 // Test with a class using the impl
@@ -49,6 +49,11 @@ type MyObject = class {
     impl RandomImp()
     
     // When we override a duplicate method, only one is seen
+    override fn getPos() -> vec3 = this.getAllPositions()
+
+    // Duplicate override!
+
+    /// @Error(TCE061): Duplicate class method
     override fn getPos() -> vec3 = this.getAllPositions()
     
     fn init(pos: vec3) {

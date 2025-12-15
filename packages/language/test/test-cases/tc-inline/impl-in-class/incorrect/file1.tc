@@ -36,12 +36,19 @@ type Default3DImpl<T> = impl Object3D (
     }
 }
 
+type Dupl = impl {
+    fn getPos() -> vec3 = {1.0f, 1.0f, 1.0f}
+}
+
 // Test with a class using the impl
 type MyObject = class {
     let pos: vec3
 
     /// @Errpr(TCE105): Class must implement interface method
     impl Default3DImpl<vec3>(pos, pos, pos)
+
+    /// @Error(TCE061): Duplicate class method
+    impl Dupl
     
     fn init(pos: vec3) {
         // This should work - accessing impl methods

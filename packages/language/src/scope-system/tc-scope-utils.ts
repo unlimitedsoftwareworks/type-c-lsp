@@ -22,6 +22,11 @@ type ReferencableSymbol =
     ast.ImplementationAttributeDecl;
 
 
+export function isWithinClass(container: AstNode): boolean {
+    const parentClass = AstUtils.getContainerOfType(container, ast.isClassType);
+    return parentClass !== null;
+}
+
 export function isMemberResolution(container: AstNode, context: ReferenceInfo): boolean {
     // Check if we're resolving a member/method in any form
     if (ast.isMemberAccess(container) && (context.property === 'element')) {

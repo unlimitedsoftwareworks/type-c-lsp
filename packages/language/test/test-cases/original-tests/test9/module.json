@@ -1,0 +1,11 @@
+{
+    "name": "Type-C Sample",
+    "version": "1.0.0",
+    "author": "praisethemoon",
+    "dependencies": [],
+    "description": "Tests pattern matching",
+    "compiler": {
+        "target": "runnable",
+        "entry": "test.tc"
+    }
+}

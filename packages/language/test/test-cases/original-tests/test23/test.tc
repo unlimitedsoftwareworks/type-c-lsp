@@ -1,0 +1,136 @@
+from std.unit.test import TestUnit, UnitSet
+from std.collections.array import Array, StdArray
+
+fn test_case_1(rn: TestUnit) {
+    let arr_1: f32[] = [1.0f, 2.0f, 3.0f, 4.0f, 6.0f]
+    let arr_1_idx: u64[] = [0, 1, 2, 3, 4]
+
+    foreach i, v in arr_1 {
+        rn.assert_eq(v, arr_1[i])
+        rn.assert_eq(i, arr_1_idx[i])
+    }
+
+    let counter = 0
+    foreach v in arr_1 {
+        rn.assert_eq(v, arr_1[counter])
+        counter += 1
+    }
+
+    let arr_2 = StdArray.create<String>(["hi", "hello", "world"])
+    let arr_2_idx: u64[] = [0, 1, 2]
+
+    foreach i, v in arr_2 {
+        rn.assert_obj_eq(v, arr_2[i])
+        rn.assert_eq(i, arr_2_idx[i])
+    }
+
+    // reset counter
+    counter = 0
+    foreach v in arr_2 {
+        rn.assert_obj_eq(v, arr_2[counter])
+        counter += 1
+    }
+
+
+    let arr_3: Array<String> = StdArray.create<String>(["hi", "hello", "world"])
+    let arr_3_idx: u64[] = [0, 1, 2]
+
+    foreach i, v in arr_3 {
+        rn.assert_obj_eq(v, arr_3[i])
+        rn.assert_eq(i, arr_3_idx[i])
+    }
+
+    // reset counter
+    counter = 0
+    foreach v in arr_3 {
+        rn.assert_obj_eq(v, arr_3[counter])
+        counter += 1
+    }
+
+    let nestedArray: String[][] = [["le", "lo"], ["hi", "hello", "world"], ["ho", "ho .. ", "HO!"]]
+    let arr_4 = StdArray.create<Array<String>>([
+        StdArray.create<String>(["le", "lo"]),
+        StdArray.create<String>(["hi", "hello", "world"]),
+        StdArray.create<String>(["ho", "ho .. ", "HO!"])
+    ])
+
+    foreach i, v in arr_4 {
+        foreach j, w in v {
+            rn.assert_obj_eq(w, nestedArray[i][j])
+        }
+    }
+}
+
+fn test_case_2(rn: TestUnit) {
+    // tests matrix multiplication
+    let a = StdArray.create<Array<f32>>([
+        StdArray.create<f32>([1.0f, 2.0f, 3.0f]),
+        StdArray.create<f32>([4.0f, 5.0f, 6.0f]),
+        StdArray.create<f32>([7.0f, 8.0f, 9.0f])
+    ])
+
+    let b = StdArray.create<Array<f32>>([
+        StdArray.create<f32>([1.0f, 2.0f, 3.0f]),
+        StdArray.create<f32>([4.0f, 5.0f, 6.0f]),
+        StdArray.create<f32>([7.0f, 8.0f, 9.0f])
+    ])
+
+    let gt = StdArray.create<Array<f32>>([
+        StdArray.create<f32>([30.0f, 36.0f, 42.0f]),
+        StdArray.create<f32>([66.0f, 81.0f, 96.0f]),
+        StdArray.create<f32>([102.0f, 126.0f, 150.0f])
+    ])
+
+    let res = StdArray.create<Array<f32>>([
+        StdArray.create<f32>([0.0f, 0.0f, 0.0f]),
+        StdArray.create<f32>([0.0f, 0.0f, 0.0f]),
+        StdArray.create<f32>([0.0f, 0.0f, 0.0f])
+    ])
+
+    foreach i, v in a {
+        foreach j, w in b {
+            // intended to be a nested loop
+            let compute = fn() {
+                let sum = 0.0f
+                foreach k, x in v {
+                    sum += a[i][k] * b[k][j]
+                }
+                res[i][j] = sum
+            }
+
+            compute()
+        }
+    }
+
+    foreach i, v in res {
+        foreach j, w in v {
+            rn.assert_eq(w, gt[i][j])
+        }
+    }
+
+    foreach i, v in a {
+        foreach j, w in b {
+            let sum = 0.0f
+            foreach k, x in v {
+                sum += a[i][k] * b[k][j]
+            }
+            res[i][j] = sum
+        }
+    }
+
+    foreach i, v in res {
+        foreach j, w in v {
+            rn.assert_eq(w, gt[i][j])
+        }
+    }
+}
+
+fn main() {
+    let test_1 = new TestUnit("Foreach", "tests foreach regular and nested", test_case_1)
+    let test_2 = new TestUnit("Foreach Matmul", "tests matrix multiplication", test_case_2)
+
+    let set = new UnitSet("STD Test 23", "Tests foreach on basic arrays and abstract array", [test_1, test_2])
+    return set.run()
+}
+
+

@@ -1,0 +1,18 @@
+from std.string import String
+from std.io import println
+from std.collections.array import StdArray, Array
+
+fn main() -> u32 {
+    let a1: Array<{x: u32}>? = new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) 
+    let a3 = a1!
+    let a2: interface { fn pop() -> {x: u32} } = a3
+
+    // issue with clone method id 74?
+    let a4 = a2 as? Array<{x: u32}>
+
+    if a4 == null {
+        println("a4 is null")
+    }
+
+    return 0
+}

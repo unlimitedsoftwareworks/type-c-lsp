@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2023-present Soulaymen Chouri
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+ /**
+  * @file test.c
+  * Tests Pipe Operator
+  */
+
+from std.unit.test import TestUnit, UnitSet
+import std.collections.array 
+
+fn test_case_1(rn: TestUnit) {
+    // test 1, no short-circuit, direct access
+    let length = StdArray.create<u32>([1,2,3]) |> .length()
+    rn.assert_eq(length, 3)
+    rn.assert_eq(StdArray.create<u32>([1,2,3]) |> pop(), 3)
+
+    // test 2, no short-circuit, nullable access
+    let e1 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>? |> ?. pop()
+    rn.assert_eq(e1!.x ?? 10, 3)
+
+    // test 3, short-circuit, direct access
+    let length2 = StdArray.create<u32>([1,2,3,4])  |> length()
+    rn.assert_eq(length2, 4)
+
+    // test 4, short-circuit, nullable access
+    let e2 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>? |>? pop()
+    rn.assert_eq(e2?.x ?? 10, 3)
+}
+
+fn test_case_2(rn: TestUnit) {
+    let e1 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) |> pop() |> x
+    rn.assert_eq(e1, 3)
+    let e2 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) |> [0] |> x
+    rn.assert_eq(e2, 1)
+}
+
+fn main() {
+    let test_1 = new TestUnit("Test 1", "tests pipe operator", test_case_1)
+    let test_2 = new TestUnit("Test 2", "tests pipe operator chaining", test_case_2)
+    let set = new UnitSet("STD Test 26", "Tests pipe Operator", [test_1, test_2])
+    return set.run()
+}

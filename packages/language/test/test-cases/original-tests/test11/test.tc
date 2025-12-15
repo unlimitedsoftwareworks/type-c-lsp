@@ -1,0 +1,141 @@
+from std.string import String
+from std.unit.test import TestUnit, UnitSet
+from std.io import println
+fn doStuff(x: u32) -> (u32, u32) = (x+1, x+2)
+fn doStuff2<T>(x: T) = (x+1, x+2)
+fn doStuff3<T>(x: T) -> (T, T) { return doStuff2<T>(x) }
+fn get() -> (u32, u32) = (0, 1)
+
+type Z<T> = class {
+    let x: T
+
+    fn init(x: T) {
+        this.x = x
+    }
+
+    fn add(y: T) -> (T, T) {
+        return (this.x, this.x+y)
+    }
+
+    static fn callme(x: u32, y: u32) -> (u32, u32) {
+        return (x+1, y+5)
+    }
+
+    static fn callme2<T>(x: T, y: T) -> (T, T) {
+        return (x+2, y+3)
+    }
+
+    static fn haha() = (1, "oupsy")
+}
+
+
+fn test_case_1(rn: TestUnit) {
+    let arr: u32[] = [1, 2, 3, 4]
+    let [x, y,...rest] = arr
+
+    rn.assert_eq<u32>(x, 1)
+    rn.assert_eq<u32>(y, 2)
+    
+    match rest {
+        [3, 4] { rn.assert_reachable() }
+        _ { rn.assert_unreachable() }
+    }
+}
+
+fn test_case_2(rn: TestUnit) {
+
+    let user = {name: "John", age: 30, is_student: true}
+
+    let {name, ...res} = user
+
+    rn.assert_obj_eq<String>(name, "John")
+    rn.assert_eq<bool>(res.is_student, true)
+    rn.assert_eq<u8>(res.age, 30)
+}
+
+
+fn test_case_3(rn: TestUnit) {
+
+    let (aa, bb) = Z.haha()
+
+    rn.assert_eq<u32>(aa, 1)
+    rn.assert_obj_eq<String>(bb, "oupsy")
+
+    let (cc, dd) = Z.callme(3, 4)
+
+    rn.assert_eq<u32>(cc, 4)
+    rn.assert_eq<u32>(dd, 9)
+
+    let (ee, ff) = Z.callme2(cc, dd)
+
+    rn.assert_eq<u32>(ee, 6)
+    rn.assert_eq<u32>(ff, 12)
+
+    let (gg, hh) = doStuff(10)
+
+    rn.assert_eq<u32>(gg, 11)
+    rn.assert_eq<u32>(hh, 12)
+
+    let (ii, jj) = doStuff2<u32>(10)
+
+    rn.assert_eq<u32>(ii, 11)
+    rn.assert_eq<u32>(jj, 12)
+
+    let (kk, ll) = doStuff2<String>("hello")
+
+    // addition changes the string, so +1 then +2 -> "hello12"
+    rn.assert_obj_eq<String>(kk, "hello1")
+    rn.assert_obj_eq<String>(ll, "hello2")
+
+    let (mm, nn) = doStuff2(10)
+
+    rn.assert_eq<u8>(mm, 11)
+    rn.assert_eq<u8>(nn, 12)
+
+    let (oo, pp) = doStuff3<u8>(10)
+    
+    rn.assert_eq(oo, 11)
+    rn.assert_eq(pp, 12)
+
+
+    // Test with different types
+    let (qq, rr) = doStuff3<u16>(1000)
+    rn.assert_eq(qq, 1001)
+    rn.assert_eq(rr, 1002)
+
+    let (ss, tt) = doStuff3<i32>(-5)
+    rn.assert_eq(ss, -4)
+    rn.assert_eq(tt, -3)
+
+    // Test with edge cases
+    let (uu, vv) = doStuff3<u8>(255)  // Test overflow
+    rn.assert_eq(uu, 0)  // 255 + 1 = 0 (overflow)
+    rn.assert_eq(vv, 1)  // 255 + 2 = 1 (overflow)
+
+    let (ww, xx) = doStuff3(-100)  // Test underflow
+    rn.assert_eq(ww, -99)
+    rn.assert_eq(xx, -98)
+
+    // Test with floating point numbers
+    let (yy, zz) = doStuff3<f32>(3.14f)
+    rn.assert_f32_eq_pre(yy, 4.14f, 0.0001f)
+    rn.assert_f32_eq_pre(zz, 5.14f, 0.0001f)
+
+    let (value_1, value_2) = get()
+    rn.assert_eq(value_1, 0)
+    rn.assert_eq(value_2, 1)
+
+    let (_, value_22) = get()
+    rn.assert_eq(value_22, 1)
+
+    let (value_11, _) = get()
+    rn.assert_eq(value_11, 0)
+}
+
+fn main() {
+    let test_1 = new TestUnit("test 1", "Array destructuring", test_case_1)
+    let test_2 = new TestUnit("test 2", "Struct destructuring", test_case_2)
+    let test_3 = new TestUnit("test 3", "Tuple destructuring", test_case_3)
+    let set = new UnitSet("STD Test 11", "Tests destructuring", [test_1, test_2, test_3])
+    return set.run()
+}

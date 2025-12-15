@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2023-present Soulaymen Chouri
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+ /**
+  * @file test.tc
+  * Tests nullable variable declarations
+  */
+
+from std.unit.test import TestUnit, UnitSet
+
+type Point = {
+    xAndY: {
+        x: f32,
+        y: f32
+    },
+    z: f32
+}
+
+fn getPoints() -> (Point, Point) = ({xAndY: {x: 1.0f, y: 2.0f}, z: 3.0f}, {xAndY: {x: 4.0f, y: 5.0f}, z: 6.0f})
+
+fn test_case_1(rn: TestUnit) {
+    // tests regular nullable var decl
+    let p? = {a: 1.0f, b: 2.0f, c: 3.0f}
+    rn.assert_obj_not_null(p)
+
+    // tests nullable var decl with struct deconstruction
+    let p1 = {xAndY: {x: 1.0f, y: 2.0f}, z: 3.0f}
+    
+    let {xAndY?, z} = p1
+    rn.assert_obj_not_null(xAndY)
+
+    let {xAndY: xy?, z: z2} = p1
+    rn.assert_obj_not_null(xy)
+
+    // tests nullable var decl with array deconstruction
+    let arr = [{x: 1.0f, y: 2.0f}, {x: 3.0f, y: 4.0f}, {x: 5.0f, y: 6.0f}]
+    let [p2?, p3?, ...p4?] = arr
+
+    rn.assert_obj_not_null(p2)
+    rn.assert_obj_not_null(p3)
+    rn.assert_obj_not_null(p4)
+
+    let (p5?, p6?) = getPoints()
+    rn.assert_obj_not_null(p5)
+    rn.assert_obj_not_null(p6)
+}
+
+fn main() {
+    let test_1 = new TestUnit("Test 1", "tests nullable var decl", test_case_1)
+    let set = new UnitSet("STD Test 25", "Tests nullable variable declarations", [test_1])
+    return set.run()
+}
+

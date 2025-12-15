@@ -28,7 +28,7 @@ type Default3DImpl<T> = impl Object3D (
     }
     
     // This method should have access to its own methods
-    fn getAllPositions() -> T {
+    fn getAllPositions() -> vec3 {
         let p = this.getPos()
         let s = this.getScale()
         let r = this.getRotation()
@@ -38,16 +38,14 @@ type Default3DImpl<T> = impl Object3D (
 
 // Test with a class using the impl
 type MyObject = class {
-    let pos: vec3
-
-    impl Default3DImpl<vec3>(pos, pos, pos)
+    let obj: Default3DImpl<vec3>
     
     fn init(pos: vec3) {
         // This should work - accessing impl methods
-        let p = this.getPos()
-        let s = this.getScale()
+        let p = this.obj.getPos()
+        let s = this.obj.getScale()
         
         // This should work - accessing non-shadowed interface method
-        let rand = this.useRandomFn()
+        let rand = this.obj.randomFn()
     }
 }

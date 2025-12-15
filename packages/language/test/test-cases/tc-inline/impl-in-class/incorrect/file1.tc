@@ -48,6 +48,8 @@ type MyObject = class {
         let s = this.getScale()
         
         // This should work - accessing non-shadowed interface method
+
+        /// @Type(rand): vec3
         let rand = this.useRandomFn()
     }
 }

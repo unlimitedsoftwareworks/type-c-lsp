@@ -931,10 +931,36 @@ export class TypeCTypeProvider {
                 nodes.push(...type.node.methods);
             }
 
-            for(const superType of type.targetTypes) {
-                nodes.push(...this.getIdentifiableFields(superType))
+            // Add non-shadowed interface methods
+            // When an impl extends an interface, the interface methods should be accessible
+            // unless they're shadowed by impl methods with the same signature
+            for (const superType of type.targetTypes) {
+                // Resolve reference types first
+                const resolvedSuperType = this.typeUtils.resolveIfReference(superType);
+                const interfaceType = this.typeUtils.asInterfaceType(resolvedSuperType);
+                
+                if (interfaceType) {
+                    // Get all interface methods
+                    for (const interfaceMethod of interfaceType.methods) {
+                        // Check if this interface method is shadowed by an impl method
+                        const isShadowed = this.isInterfaceMethodShadowedByImpl(
+                            interfaceMethod,
+                            type.methods
+                        );
+                        
+                        // Only add non-shadowed interface methods
+                        if (!isShadowed && interfaceMethod.node) {
+                            nodes.push(interfaceMethod.node);
+                        }
+                    }
+                    
+                    // Also recursively add methods from interface supertypes
+                    for (const ifaceSuperType of interfaceType.superTypes) {
+                        nodes.push(...this.getIdentifiableFields(ifaceSuperType));
+                    }
+                }
             }
-            // Get methods from supertypes
+            
             return nodes;
         }
 
@@ -2887,8 +2913,132 @@ export class TypeCTypeProvider {
                 return memberType;
             }
 
-            // Member not found in the impl type
+            // Check interface methods from target types
+            // When an impl extends an interface, interface methods should be accessible
+            // unless they're shadowed by impl methods with the same signature
+            for (const targetType of baseType.targetTypes) {
+                // Resolve reference types first - use provider's resolveReference for consistency
+                let resolvedTargetType = targetType;
+                if (isReferenceType(targetType)) {
+                    resolvedTargetType = this.resolveReference(targetType);
+                }
+                const interfaceType = this.typeUtils.asInterfaceType(resolvedTargetType);
+                
+                if (interfaceType) {
+                    // Find the method in the interface
+                    const interfaceMethod = interfaceType.methods.find(m => m.names.includes(memberName));
+                    if (interfaceMethod) {
+                        // Check if this interface method is shadowed by an impl method
+                        const isShadowed = this.isInterfaceMethodShadowedByImpl(
+                            interfaceMethod,
+                            baseType.methods
+                        );
+                        
+                        if (!isShadowed) {
+                            // Convert interface method to function type
+                            memberType = this.typeFactory.createFunctionType(
+                                interfaceMethod.parameters,
+                                interfaceMethod.returnType,
+                                'fn',
+                                interfaceMethod.genericParameters,
+                                interfaceMethod.node
+                            );
+                            // Apply generic substitutions if we have them
+                            if (genericSubstitutions && genericSubstitutions.size > 0) {
+                                memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                            }
+                            // Wrap in nullable if using optional chaining
+                            if (node.isNullable || baseIsNullable) {
+                                if (!this.typeUtils.isTypeBasic(memberType)) {
+                                    memberType = this.typeFactory.createNullableType(memberType, node);
+                                }
+                            }
+                            return memberType;
+                        }
+                    }
+                    
+                    // Also check interface supertypes recursively
+                    for (const ifaceSuperType of interfaceType.superTypes) {
+                        const resolvedSuperType = this.typeUtils.resolveIfReference(ifaceSuperType);
+                        const superInterface = this.typeUtils.asInterfaceType(resolvedSuperType);
+                        if (superInterface) {
+                            const superMethod = superInterface.methods.find(m => m.names.includes(memberName));
+                            if (superMethod) {
+                                const isShadowed = this.isInterfaceMethodShadowedByImpl(
+                                    superMethod,
+                                    baseType.methods
+                                );
+                                
+                                if (!isShadowed) {
+                                    memberType = this.typeFactory.createFunctionType(
+                                        superMethod.parameters,
+                                        superMethod.returnType,
+                                        'fn',
+                                        superMethod.genericParameters,
+                                        superMethod.node
+                                    );
+                                    if (genericSubstitutions && genericSubstitutions.size > 0) {
+                                        memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                                    }
+                                    if (node.isNullable || baseIsNullable) {
+                                        if (!this.typeUtils.isTypeBasic(memberType)) {
+                                            memberType = this.typeFactory.createNullableType(memberType, node);
+                                        }
+                                    }
+                                    return memberType;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Member not found in the impl type or its interfaces
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
+        }
+
+        // For impl types (even outside method inference context), check interface methods
+        // This handles the case where we access interface methods from impl instances
+        if (isImplementationType(baseType)) {
+            for (const targetType of baseType.targetTypes) {
+                // Resolve reference types first
+                let resolvedTargetType = targetType;
+                if (isReferenceType(targetType)) {
+                    resolvedTargetType = this.resolveReference(targetType);
+                }
+                const interfaceType = this.typeUtils.asInterfaceType(resolvedTargetType);
+                
+                if (interfaceType) {
+                    // Find the method in the interface
+                    const interfaceMethod = interfaceType.methods.find(m => m.names.includes(memberName));
+                    if (interfaceMethod) {
+                        // Check if this interface method is shadowed by an impl method
+                        const isShadowed = this.isInterfaceMethodShadowedByImpl(
+                            interfaceMethod,
+                            baseType.methods
+                        );
+                        
+                        if (!isShadowed && interfaceMethod.node) {
+                            // Use the interface method node
+                            const targetRef = interfaceMethod.node;
+                            memberType = this.getType(targetRef);
+                            
+                            // Apply generic substitutions if we have them
+                            if (genericSubstitutions && genericSubstitutions.size > 0) {
+                                memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                            }
+                            
+                            // Wrap in nullable if using optional chaining
+                            if (node.isNullable || baseIsNullable) {
+                                if (!this.typeUtils.isTypeBasic(memberType)) {
+                                    memberType = this.typeFactory.createNullableType(memberType, node);
+                                }
+                            }
+                            return memberType;
+                        }
+                    }
+                }
+            }
         }
 
         // Normal case: Get the target node via Langium's linker (handles overload resolution)
@@ -5173,6 +5323,55 @@ export class TypeCTypeProvider {
         }
 
         return returns;
+    }
+
+    /**
+     * Check if an interface method is shadowed by an impl method.
+     * A method is shadowed when an impl method has the same name and signature.
+     *
+     * @param interfaceMethod The method from an interface
+     * @param implMethods The impl methods to check against
+     * @returns true if the interface method is shadowed by an impl method
+     */
+    private isInterfaceMethodShadowedByImpl(
+        interfaceMethod: MethodType,
+        implMethods: readonly MethodType[]
+    ): boolean {
+        for (const implMethod of implMethods) {
+            // Check if methods share any common name
+            const hasCommonName = interfaceMethod.names.some(ifaceName =>
+                implMethod.names.includes(ifaceName)
+            );
+            
+            if (!hasCommonName) {
+                continue;
+            }
+            
+            // Check if signatures match (same parameter count and types)
+            // Different parameter counts -> not equal
+            if (interfaceMethod.parameters.length !== implMethod.parameters.length) {
+                continue;
+            }
+            
+            // Check each parameter type
+            let allParamsMatch = true;
+            for (let i = 0; i < interfaceMethod.parameters.length; i++) {
+                const ifaceParamType = interfaceMethod.parameters[i].type;
+                const implParamType = implMethod.parameters[i].type;
+                
+                // Use type equality check
+                if (!this.typeUtils.areTypesEqual(ifaceParamType, implParamType).success) {
+                    allParamsMatch = false;
+                    break;
+                }
+            }
+            
+            if (allParamsMatch) {
+                return true;  // This interface method is shadowed
+            }
+        }
+        
+        return false;  // Not shadowed
     }
 
     /**

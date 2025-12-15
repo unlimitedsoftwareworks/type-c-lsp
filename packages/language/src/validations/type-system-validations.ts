@@ -75,6 +75,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             JoinType: this.checkJoinType,
             InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
             ClassType: this.checkClassImplementation,
+            ImplementationType: this.checkImplementaiton,
             ClassImplementationMethodDecl: this.checkClassImplDeclaration,
             MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
@@ -1768,6 +1769,18 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
     }
 
+    checkImplementaiton(node: ast.ImplementationType, accept: ValidationAcceptor): void {
+        const supertypes = (node?.superTypes ?? []).map(e => this.typeUtils.resolveIfReference(this.typeProvider.getType(e)));
+        for (const [i, v] of supertypes.entries()) {
+            if(!isInterfaceType(v)) {
+                accept('error', `Implementation requirement is not an interface`, {
+                    code: ErrorCode.TC_IMPL_REQUIREMENT_NOT_INTERFACE,
+                    node: supertypes[i].node!
+                })
+            }
+        }
+    }
+
     /**
      * Check member access for proper usage of optional chaining.
      *
@@ -3143,7 +3156,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         
         // Verify it's an implementation type
         if (!isImplementationType(resolvedImplType)) {
-            return; // Not an impl type, will be caught elsewhere
+            accept('error', `Expected implementation reference, instead got ${resolvedImplType.kind}`, {
+                node: node.type,
+                code: ErrorCode.TC_IMPL_NOT_IMPL
+            })
+
+            return;
         }
 
         // Get the expected attributes from the impl type

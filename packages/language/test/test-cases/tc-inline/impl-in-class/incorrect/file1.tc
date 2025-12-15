@@ -40,6 +40,7 @@ type Dupl = impl {
     fn getPos() -> vec3 = {1.0f, 1.0f, 1.0f}
 }
 
+
 // Test with a class using the impl
 type MyObject = class {
     let pos: vec3
@@ -60,4 +61,12 @@ type MyObject = class {
         /// @Type(rand): vec3
         let rand = this.useRandomFn()
     }
+
+    /// @Error(TCE106): Expected implementation reference
+    impl Object3D
+}
+
+/// @Error(TCE107): Implementation requirement is not an interface
+type WrongImp = impl {x: u32} {
+
 }

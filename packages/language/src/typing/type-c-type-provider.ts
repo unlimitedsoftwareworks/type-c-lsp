@@ -109,6 +109,23 @@ export class TypeCTypeProvider {
      */
     private readonly inferringMethods = new Map<ast.ClassMethod, ast.ClassType>();
 
+    /**
+     * Tracks implementation types currently being inferred to prevent infinite recursion.
+     *
+     * Similar to inferringClasses, this handles cycles when impl methods reference `this`
+     * or access other members within the implementation type.
+     */
+    private readonly inferringImplementations = new Set<ast.ImplementationType>();
+
+    /**
+     * Tracks impl methods currently being inferred to prevent infinite recursion.
+     *
+     * Similar to inferringMethods for classes, but for implementation type methods.
+     * Maps method node to its containing implementation type for cycle detection.
+     * Note: Impl methods in the AST use ClassMethod nodes, hence the type here.
+     */
+    private readonly inferringImplMethods = new Map<ast.ClassMethod, ast.ImplementationType>();
+
     /** Services for accessing Langium infrastructure */
     protected readonly services: TypeCServices;
 
@@ -1390,27 +1407,143 @@ export class TypeCTypeProvider {
     }
 
     private inferImplementationType(node: ast.ImplementationType): TypeDescription {
-        const attributes = node.attributes?.map(a => this.typeFactory.createAttributeType(
-            a.name,
-            this.getType(a.type),
-            a.isStatic ?? false,
-            a.isConst ?? false,
-            false
-        )) ?? [];
+        // Check if we're already inferring this implementation type (to handle methods that reference `this`)
+        if (this.inferringImplementations.has(node)) {
+            // Return a partial implementation type with attributes and stub methods
+            // This allows `this` expressions to get the impl type without infinite recursion
+            // Stub methods have void return types to break cycles
+            const attributes = node.attributes?.map(attrDecl =>
+                this.typeFactory.createAttributeType(
+                    attrDecl.name,
+                    this.getType(attrDecl.type),
+                    attrDecl.isStatic ?? false,
+                    attrDecl.isConst ?? false,
+                    false
+                )
+            ) ?? [];
 
-        const methods = node.methods?.map(m => {
-            const methodHeader = this.inferMethodHeader(m.method);
-            return {
-                ...methodHeader,
-                isStatic: m.isStatic ?? false,
-                isOverride: false,
-                isLocal: false
-            };
-        }) ?? [];
+            // Create stub methods to allow method-to-method calls during inference
+            // Use explicit return types when available, void as placeholder otherwise
+            const stubMethods = node.methods?.map(m => {
+                const methodHeader = m.method;
+                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
+                    arg.name,
+                    this.getType(arg.type),
+                    arg.isMut
+                )) ?? [];
 
-        const targetTypes = node.superTypes ? node.superTypes.map(st => this.getType(st)) : [];
+                // If method has explicit return type, use it for better accuracy
+                // Otherwise use void as placeholder to break cycles
+                const returnType = methodHeader.header?.returnType
+                    ? this.getType(methodHeader.header.returnType)
+                    : this.typeFactory.createVoidType(m);
 
-        return this.typeFactory.createImplementationType(attributes, methods, targetTypes, node);
+                return {
+                    names: methodHeader.names,
+                    parameters: params,
+                    returnType: returnType,
+                    node: methodHeader,
+                    genericParameters: genericParams,
+                    isStatic: m.isStatic ?? false,
+                    isOverride: false,
+                    isLocal: false
+                };
+            }) ?? [];
+
+            const targetTypes = node.superTypes ? node.superTypes.map(st => this.getType(st)) : [];
+
+            // Return impl type with stub methods to break recursion
+            return this.typeFactory.createImplementationType(attributes, stubMethods, targetTypes, node);
+        }
+
+        // Mark this implementation type as being inferred
+        this.inferringImplementations.add(node);
+
+        try {
+            const attributes = node.attributes?.map(attrDecl =>
+                this.typeFactory.createAttributeType(
+                    attrDecl.name,
+                    this.getType(attrDecl.type),
+                    attrDecl.isStatic ?? false,
+                    attrDecl.isConst ?? false,
+                    false
+                )
+            ) ?? [];
+
+            // Infer impl methods (with body/expression inference support)
+            const methods = node.methods?.map(m => {
+                const methodHeader = m.method;
+                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
+                    arg.name,
+                    this.getType(arg.type),
+                    arg.isMut
+                )) ?? [];
+
+                // Check if we're already inferring this method (cycle detection)
+                // This prevents infinite recursion when method body accesses impl members
+                if (this.inferringImplMethods.has(m)) {
+                    // Return a placeholder method with void return type to break the cycle
+                    // The actual return type will be inferred later if needed
+                    return {
+                        names: methodHeader.names,
+                        parameters: params,
+                        returnType: this.typeFactory.createVoidType(m),
+                        node: methodHeader,
+                        genericParameters: genericParams,
+                        isStatic: m.isStatic ?? false,
+                        isOverride: false,
+                        isLocal: false
+                    };
+                }
+
+                // Mark this method as being inferred
+                this.inferringImplMethods.set(m, node);
+
+                try {
+                    // Infer return type - check if explicit, otherwise infer from body/expression
+                    let returnType: TypeDescription;
+                    if (methodHeader.header?.returnType) {
+                        // Explicit return type provided
+                        returnType = this.getType(methodHeader.header.returnType);
+                    } else {
+                        // Infer return type from method body or expression
+                        if (m.expr) {
+                            // Expression-body method: fn foo() = expr
+                            returnType = this.getType(m.expr);
+                        } else if (m.body) {
+                            // Block-body method: fn foo() { ... }
+                            returnType = this.inferReturnTypeFromBody(m.body);
+                        } else {
+                            // No body or expression (should not happen in impl, but handle it)
+                            returnType = this.typeFactory.createVoidType(m);
+                        }
+                    }
+
+                    return {
+                        names: methodHeader.names,
+                        parameters: params,
+                        returnType: returnType,
+                        node: methodHeader,
+                        genericParameters: genericParams,
+                        isStatic: m.isStatic ?? false,
+                        isOverride: false,
+                        isLocal: false
+                    };
+                } finally {
+                    // Always remove from the set, even if inference fails
+                    this.inferringImplMethods.delete(m);
+                }
+            }) ?? [];
+
+            const targetTypes = node.superTypes ? node.superTypes.map(st => this.getType(st)) : [];
+
+            return this.typeFactory.createImplementationType(attributes, methods, targetTypes, node);
+        } finally {
+            // Always remove from the set, even if inference fails
+            this.inferringImplementations.delete(node);
+        }
     }
 
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
@@ -2564,11 +2697,12 @@ export class TypeCTypeProvider {
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
 
-        // CRITICAL FIX: Check if reference type points to a class being inferred BEFORE resolving
-        // This prevents triggering full inference of nested classes during member access
+        // CRITICAL FIX: Check if reference type points to a class or impl being inferred BEFORE resolving
+        // This prevents triggering full inference of nested classes/impls during member access
         if (isReferenceType(baseType)) {
-            // Check if this reference points to a class currently being inferred
             const refDecl = baseType.declaration;
+            
+            // Check if this reference points to a class currently being inferred
             if (refDecl && ast.isTypeDeclaration(refDecl) && ast.isClassType(refDecl.definition)) {
                 const targetClassNode = refDecl.definition;
                 if (this.inferringClasses.has(targetClassNode)) {
@@ -2595,8 +2729,37 @@ export class TypeCTypeProvider {
                     genericSubstitutions = this.buildGenericSubstitutions(refType);
                     baseType = this.resolveAndSubstituteReference(refType);
                 }
-            } else {
-                // Not a class reference - resolve normally
+            }
+            // Check if this reference points to an implementation type currently being inferred
+            else if (refDecl && ast.isTypeDeclaration(refDecl) && ast.isImplementationType(refDecl.definition)) {
+                const targetImplNode = refDecl.definition;
+                if (this.inferringImplementations.has(targetImplNode)) {
+                    // The referenced implementation type is currently being inferred
+                    // Get its partial type directly from the cache (which includes stub methods)
+                    const partialImplType = this.getType(targetImplNode);
+                    if (isImplementationType(partialImplType)) {
+                        // Build generic substitutions for the partial type
+                        genericSubstitutions = this.buildGenericSubstitutions(baseType);
+
+                        // Apply substitutions to the partial impl type
+                        if (genericSubstitutions && genericSubstitutions.size > 0) {
+                            baseType = this.typeUtils.substituteGenerics(partialImplType, genericSubstitutions);
+                        } else {
+                            baseType = partialImplType;
+                        }
+
+                        // Now continue with member lookup on the partial type
+                        // This will use the stub methods, preventing the cycle
+                    }
+                } else {
+                    // Normal case: resolve the reference fully
+                    const refType = baseType;
+                    genericSubstitutions = this.buildGenericSubstitutions(refType);
+                    baseType = this.resolveAndSubstituteReference(refType);
+                }
+            }
+            else {
+                // Not a class or impl reference - resolve normally
                 const refType = baseType;
                 genericSubstitutions = this.buildGenericSubstitutions(refType);
                 baseType = this.resolveAndSubstituteReference(refType);
@@ -2621,9 +2784,9 @@ export class TypeCTypeProvider {
         let memberType: TypeDescription | undefined;
 
         // CRITICAL FIX: Resolve from type when we're inferring METHOD bodies
-        // This prevents Langium's linker cycle detection when accessing class members
+        // This prevents Langium's linker cycle detection when accessing class/impl members
         // during method inference. For normal cases, we use Langium's ref which handles overloads correctly.
-        const isInMethodInferenceContext = this.inferringMethods.size > 0;
+        const isInMethodInferenceContext = this.inferringMethods.size > 0 || this.inferringImplMethods.size > 0;
 
         if (isClassType(baseType) && isInMethodInferenceContext) {
             // We're accessing a member of a class type while inferring ANY class
@@ -2673,6 +2836,58 @@ export class TypeCTypeProvider {
             }
 
             // Member not found in the class type
+            return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
+        }
+
+        // Handle implementation types during method inference
+        if (isImplementationType(baseType) && isInMethodInferenceContext) {
+            // We're accessing a member of an impl type while inferring ANY impl
+            // Resolve directly from the type to avoid Langium's cycle detection
+
+            // Check attributes first
+            const attribute = baseType.attributes.find(a => a.name === memberName);
+            if (attribute) {
+                memberType = attribute.type;
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                }
+                // Wrap in nullable if using optional chaining
+                // BUT: Don't wrap basic types - they can't be nullable
+                if (node.isNullable || baseIsNullable) {
+                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                        memberType = this.typeFactory.createNullableType(memberType, node);
+                    }
+                }
+                return memberType;
+            }
+
+            // Check methods - note: may return stub methods during inference
+            const method = baseType.methods.find(m => m.names.includes(memberName));
+            if (method) {
+                // Convert method to function type
+                memberType = this.typeFactory.createFunctionType(
+                    method.parameters,
+                    method.returnType,
+                    'fn',
+                    method.genericParameters,
+                    method.node
+                );
+                // Apply generic substitutions if we have them
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                }
+                // Wrap in nullable if using optional chaining
+                // BUT: Don't wrap basic types - they can't be nullable
+                if (node.isNullable || baseIsNullable) {
+                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                        memberType = this.typeFactory.createNullableType(memberType, node);
+                    }
+                }
+                return memberType;
+            }
+
+            // Member not found in the impl type
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 

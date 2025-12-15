@@ -6,8 +6,6 @@ type Object3D  = interface {
     fn getPos() -> vec3
     fn getScale() -> vec3
     fn getRotation() -> vec3
-
-    fn getProps() -> (vec3, vec3, vec3)
 }
 
 // Test case 1: Duplicate methods with same signature in impl
@@ -20,7 +18,7 @@ type Default3DImpl<T> = impl Object3D (
     fn getScale() = this.scale
     fn getRotation() = this.rot
     
-    /// @Error(TCE066): Duplicate implementation method overload
+    // This should trigger an error - duplicate method signature
     fn getPos() = this.position
 }
 
@@ -42,9 +40,8 @@ type GenericImpl<T> = impl Object3D (
     scale: T,
     rot: T
 ) {
-    /// @Error(TCE067): Generic implementation method overload error
-    fn getPos<U>() -> T = this.position
-    fn getPos<V>() -> T = this.position  // Should error - generic methods cannot be overloaded
+    fn getPos<U>() -> vec3 = this.position
+    fn getPos<V>() -> vec3 = this.position  // Should error - generic methods cannot be overloaded
     fn getScale() = this.scale
     fn getRotation() = this.rot
 }

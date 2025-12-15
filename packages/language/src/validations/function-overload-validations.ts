@@ -52,6 +52,7 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             NamespaceDecl: this.checkNamespaceFunctions,
             ClassType: this.checkClassMethods,
             InterfaceType: this.checkInterfaceMethods,
+            ImplementationType: this.checkImplementationMethods,
         };
     }
 
@@ -138,6 +139,21 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
      */
     checkInterfaceMethods = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
         this.checkMethodOverloads(node.methods, accept, 'interface');
+    }
+
+    /**
+     * Check for duplicate method overloads within an implementation type.
+     */
+    checkImplementationMethods = (node: ast.ImplementationType, accept: ValidationAcceptor): void => {
+        // Extract method headers from implementation methods
+        const methodHeaders: ast.MethodHeader[] = [];
+        for (const method of node.methods ?? []) {
+            if (ast.isClassMethod(method)) {
+                methodHeaders.push(method.method);
+            }
+        }
+        
+        this.checkMethodOverloads(methodHeaders, accept, 'implementation');
     }
 
     /**
@@ -327,7 +343,7 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
     private checkMethodOverloads(
         methods: ast.MethodHeader[],
         accept: ValidationAcceptor,
-        context: 'class' | 'interface'
+        context: 'class' | 'interface' | 'implementation'
     ): void {
         // Group methods by each of their names (methods can have multiple names for operators)
         const methodsByName = new Map<string, ast.MethodHeader[]>();
@@ -417,7 +433,7 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
         name: string,
         methods: ast.MethodHeader[],
         accept: ValidationAcceptor,
-        context: 'class' | 'interface'
+        context: 'class' | 'interface' | 'implementation'
     ): void {
         // Check if any method in the group is generic
         const hasGenericMethod = methods.some(m =>
@@ -431,7 +447,9 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                     if (method.genericParameters && method.genericParameters.length > 0) {
                         const errorCode = context === 'class'
                             ? ErrorCode.TC_GENERIC_CLASS_METHOD_CANNOT_OVERLOAD
-                            : ErrorCode.TC_GENERIC_INTERFACE_METHOD_CANNOT_OVERLOAD;
+                            : context === 'interface'
+                            ? ErrorCode.TC_GENERIC_INTERFACE_METHOD_CANNOT_OVERLOAD
+                            : ErrorCode.TC_GENERIC_IMPLEMENTATION_METHOD_CANNOT_OVERLOAD;
                         accept('error',
                             `Generic ${context} method overload error: Generic method '${name}' cannot be overloaded. Generic methods use type inference and cannot have multiple signatures.`,
                             {
@@ -461,7 +479,9 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                 // Report error on the current method
                 const errorCode = context === 'class'
                     ? ErrorCode.TC_DUPLICATE_CLASS_METHOD_OVERLOAD
-                    : ErrorCode.TC_DUPLICATE_INTERFACE_METHOD_OVERLOAD;
+                    : context === 'interface'
+                    ? ErrorCode.TC_DUPLICATE_INTERFACE_METHOD_OVERLOAD
+                    : ErrorCode.TC_DUPLICATE_IMPLEMENTATION_METHOD_OVERLOAD;
                 accept('error',
                     `Duplicate ${context} method overload: Method '${name}' with signature ${this.formatSignature(signature)} is already defined in this ${context}. Each overload must have a unique parameter signature.`,
                     {

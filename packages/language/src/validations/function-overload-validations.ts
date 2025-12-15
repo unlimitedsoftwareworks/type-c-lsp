@@ -2,7 +2,7 @@ import { ValidationAcceptor, ValidationChecks } from "langium";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "../typing/type-c-type-provider.js";
-import { TypeDescription } from "../typing/type-c-types.js";
+import { TypeDescription, isImplementationType, isReferenceType } from "../typing/type-c-types.js";
 import { TypeCBaseValidation } from "./base-validation.js";
 import { ErrorCode } from "../codes/errors.js";
 
@@ -79,6 +79,8 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
 
     /**
      * Check for duplicate method overloads within a class.
+     * This includes both methods defined directly in the class and methods from implementations.
+     * Errors are always reported on the class node or class method, never on impl methods.
      */
     checkClassMethods = (node: ast.ClassType, accept: ValidationAcceptor): void => {
         // Extract methods from the class
@@ -89,7 +91,46 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             }
         }
         
-        this.checkMethodOverloads(classMethods.map(m => m.method), accept, 'class');
+        // Track method headers with their source for proper error reporting
+        interface MethodWithSource {
+            header: ast.MethodHeader;
+            source: 'class' | 'impl';
+            classMethod?: ast.ClassMethod;  // For class methods
+            implDecl?: ast.ClassImplementationMethodDecl;  // For impl methods
+        }
+        
+        const allMethods: MethodWithSource[] = [];
+        
+        // Add class methods
+        for (const classMethod of classMethods) {
+            allMethods.push({
+                header: classMethod.method,
+                source: 'class',
+                classMethod
+            });
+        }
+        
+        // Add methods from implementations
+        for (const implDecl of node.implementations ?? []) {
+            let implType = this.typeProvider.getType(implDecl.type);
+            
+            if (isReferenceType(implType)) {
+                implType = this.typeProvider.resolveReference(implType);
+            }
+            
+            if (isImplementationType(implType) && implType.node && ast.isImplementationType(implType.node)) {
+                for (const implMethod of implType.node.methods ?? []) {
+                    allMethods.push({
+                        header: implMethod.method,
+                        source: 'impl',
+                        implDecl
+                    });
+                }
+            }
+        }
+        
+        // Check for duplicates with proper error reporting
+        this.checkClassMethodsWithSources(allMethods, node, accept);
     }
 
     /**
@@ -97,6 +138,160 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
      */
     checkInterfaceMethods = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
         this.checkMethodOverloads(node.methods, accept, 'interface');
+    }
+
+    /**
+     * Check methods from both class and implementations for duplicates.
+     * Errors are always reported on class methods or the class node itself.
+     */
+    private checkClassMethodsWithSources(
+        methods: Array<{
+            header: ast.MethodHeader;
+            source: 'class' | 'impl';
+            classMethod?: ast.ClassMethod;
+            implDecl?: ast.ClassImplementationMethodDecl;
+        }>,
+        classNode: ast.ClassType,
+        accept: ValidationAcceptor
+    ): void {
+        // Group methods by each of their names (methods can have multiple names for operators)
+        const methodsByName = new Map<string, typeof methods>();
+        
+        for (const method of methods) {
+            for (const name of method.header.names) {
+                if (!methodsByName.has(name)) {
+                    methodsByName.set(name, []);
+                }
+                methodsByName.get(name)!.push(method);
+            }
+        }
+
+        // Check each group for duplicate signatures
+        for (const [name, methodGroup] of methodsByName.entries()) {
+            if (methodGroup.length > 1) {
+                this.checkClassMethodGroupWithSources(name, methodGroup, classNode, accept);
+            }
+        }
+    }
+
+    /**
+     * Check a group of methods with the same name for duplicate signatures.
+     * Errors are reported on class methods or the class node.
+     */
+    private checkClassMethodGroupWithSources(
+        name: string,
+        methods: Array<{
+            header: ast.MethodHeader;
+            source: 'class' | 'impl';
+            classMethod?: ast.ClassMethod;
+            implDecl?: ast.ClassImplementationMethodDecl;
+        }>,
+        classNode: ast.ClassType,
+        accept: ValidationAcceptor
+    ): void {
+        // Check if any method in the group is generic
+        const hasGenericMethod = methods.some(m =>
+            m.header.genericParameters && m.header.genericParameters.length > 0
+        );
+
+        if (hasGenericMethod) {
+            // Generic methods cannot be overloaded at all
+            if (methods.length > 1) {
+                for (const method of methods) {
+                    if (method.header.genericParameters && method.header.genericParameters.length > 0) {
+                        const errorCode = ErrorCode.TC_GENERIC_CLASS_METHOD_CANNOT_OVERLOAD;
+                        
+                        // Report error on class method if it's from the class, otherwise on class node
+                        if (method.source === 'class' && method.classMethod) {
+                            accept('error',
+                                `Generic class method overload error: Generic method '${name}' cannot be overloaded. Generic methods use type inference and cannot have multiple signatures.`,
+                                {
+                                    node: method.classMethod.method,
+                                    property: 'names',
+                                    code: errorCode
+                                }
+                            );
+                        } else if (method.source === 'impl' && method.implDecl) {
+                            // Report on the impl declaration in the class
+                            accept('error',
+                                `Generic class method overload error: Generic method '${name}' from implementation cannot be overloaded. Generic methods use type inference and cannot have multiple signatures.`,
+                                {
+                                    node: method.implDecl,
+                                    property: 'type',
+                                    code: errorCode
+                                }
+                            );
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        // For non-generic methods, check for duplicate signatures
+        const signatures: Array<{
+            sig: MethodSignature;
+            method: typeof methods[0];
+        }> = [];
+
+        for (const method of methods) {
+            const signature = this.computeMethodSignature(name, method.header);
+            
+            // Check if this signature already exists
+            const duplicate = signatures.find(s =>
+                this.signaturesEqual(s.sig, signature)
+            );
+
+            if (duplicate) {
+                // Check if this is a valid override shadowing an impl method
+                // Case 1: Current method (class override) shadows existing method (impl)
+                const isValidOverride = this.isValidOverrideShadowing(method, duplicate.method);
+                
+                if (isValidOverride) {
+                    // Override method shadows impl method - this is allowed, no error
+                    // Replace the impl method with the override in signatures list
+                    const index = signatures.findIndex(s => s === duplicate);
+                    if (index !== -1) {
+                        signatures[index] = { sig: signature, method };
+                    }
+                    continue;
+                }
+                
+                // Case 2: Current method (impl) is shadowed by existing method (class override)
+                const isValidShadowed = this.isValidOverrideShadowing(duplicate.method, method);
+                
+                if (isValidShadowed) {
+                    // Impl method is shadowed by override method - this is allowed, no error
+                    // Keep the existing override method in the signatures list, skip this impl method
+                    continue;
+                }
+                
+                const errorCode = ErrorCode.TC_DUPLICATE_CLASS_METHOD_OVERLOAD;
+                const errorMsg = `Duplicate class method: Method '${name}' with signature ${this.formatSignature(signature)} is already defined in this class. Each overload must have a unique parameter signature.`;
+                
+                // Report error based on where the current method is from
+                if (method.source === 'class' && method.classMethod) {
+                    // Report on the class method
+                    accept('error', errorMsg, {
+                        node: method.classMethod.method,
+                        property: 'names',
+                        code: errorCode
+                    });
+                } else if (method.source === 'impl' && method.implDecl) {
+                    // Report on the impl declaration in the class
+                    accept('error',
+                        `Duplicate class method: Method '${name}' with signature ${this.formatSignature(signature)} from implementation is already defined in this class. Each overload must have a unique parameter signature.`,
+                        {
+                            node: method.implDecl,
+                            property: 'type',
+                            code: errorCode
+                        }
+                    );
+                }
+            } else {
+                signatures.push({ sig: signature, method });
+            }
+        }
     }
 
     /**
@@ -375,5 +570,26 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
         const paramsPart = sig.parameterTypes.join(', ');
         
         return `${sig.name}${genericPart}(${paramsPart})`;
+    }
+
+    /**
+     * Check if a method validly shadows another method via override.
+     * Returns true if current method is a class override method shadowing an impl method.
+     */
+    private isValidOverrideShadowing(
+        current: {
+            source: 'class' | 'impl';
+            classMethod?: ast.ClassMethod;
+        },
+        existing: {
+            source: 'class' | 'impl';
+        }
+    ): boolean {
+        // Override shadowing only happens when:
+        // 1. Current method is from class with override flag
+        // 2. Existing method is from impl
+        return current.source === 'class' &&
+               current.classMethod?.isOverride === true &&
+               existing.source === 'impl';
     }
 }

@@ -6,7 +6,7 @@ type Calculator = class {
         return a + b
     }
     
-    /// @Error(TCE061): Duplicate class method overload
+    /// @Error(TCE061): Duplicate class method
     fn add(a: u32, b: u32) -> i32 {
         return 0i32
     }
@@ -31,7 +31,7 @@ type Logger = class {
         // log
     }
     
-    /// @Error(TCE061): Duplicate class method overload
+    /// @Error(TCE061): Duplicate class method 
     fn log(msg: string) -> void {
         // log
     }
@@ -43,7 +43,7 @@ type Factory = class {
         return new Factory()
     }
     
-    /// @Error(TCE061): Duplicate class method overload
+    /// @Error(TCE061): Duplicate class method
     static fn create(id: u32) -> string {
         return "factory"
     }
@@ -53,12 +53,16 @@ type Factory = class {
 type Vec2 = class {
     let x: f64
     let y: f64
+
+    fn init(x: f64, y: f64){
+        this.{x: x, y: y}
+    }
     
     fn +(other: Vec2) -> Vec2 {
         return new Vec2(x + other.x, y + other.y)
     }
     
-    /// @Error(TCE061): Duplicate class method overload
+    /// @Error(TCE061): Duplicate class method
     fn +(other: Vec2) -> string {
         return "vec"
     }

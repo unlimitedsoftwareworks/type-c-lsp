@@ -35,6 +35,8 @@ type CustomMesh = class {
         this.scale = new Vec3(1.0f, 1.0f, 1.0f)
         this.customData = customData
     }
+
+    override fn getRotation() -> Vec3 = this.position
 }
 
 fn main() -> u32 {

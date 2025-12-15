@@ -868,6 +868,9 @@ export class TypeCTypeProvider {
             }
 
             // Add impl method nodes for auto-completion (excluding shadowed methods)
+            // Shadowed methods are those overridden by class methods with the 'override' flag
+            const classMethods = type.node.methods?.filter(m => ast.isClassMethod(m)) ?? [];
+            
             for (const implDecl of type.node.implementations ?? []) {
                 let implType = this.getType(implDecl.type);
                 if (isReferenceType(implType)) {
@@ -875,7 +878,15 @@ export class TypeCTypeProvider {
                 }
                 if (isImplementationType(implType) && implType.node && ast.isImplementationType(implType.node)) {
                     for (const implMethod of implType.node.methods ?? []) {
-                        nodes.push(implMethod);
+                        // Check if this impl method is shadowed by an override method
+                        const isShadowed = this.isMethodShadowedByOverride(
+                            implMethod.method,
+                            classMethods
+                        );
+                        
+                        if (!isShadowed) {
+                            nodes.push(implMethod);
+                        }
                     }
                 }
             }
@@ -1280,6 +1291,7 @@ export class TypeCTypeProvider {
             const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
             // Return class with stub methods to break recursion
+            // Note: During recursion, we don't filter shadowed impl methods for simplicity
             return this.typeFactory.createClassType(attributes, stubMethods, superTypes, implementations, node);
         }
 
@@ -1365,9 +1377,11 @@ export class TypeCTypeProvider {
             }) ?? [];
 
             const superTypes = node.superTypes?.map(t => this.getType(t)) ?? [];
-
             const implementations = node.implementations?.map(impl => this.getType(impl.type)) ?? [];
 
+            // Note: We don't add impl methods to the class type here because they're accessed
+            // separately through the implementations array. The type utils and other code
+            // that needs all methods (including impl) should iterate through implementations.
             return this.typeFactory.createClassType(attributes, methods, superTypes, implementations, node);
         } finally {
             // Always remove from the set, even if inference fails
@@ -4944,6 +4958,85 @@ export class TypeCTypeProvider {
         }
 
         return returns;
+    }
+
+    /**
+     * Check if an impl method is shadowed by a class override method.
+     * A method is shadowed when a class method with the override flag has the same signature.
+     *
+     * @param implMethod The method header from an implementation
+     * @param classMethods The class methods to check against
+     * @returns true if the impl method is shadowed by an override
+     */
+    private isMethodShadowedByOverride(
+        implMethod: ast.MethodHeader,
+        classMethods: ast.ClassMethod[]
+    ): boolean {
+        // Check if any override method in the class has the same signature
+        for (const classMethod of classMethods) {
+            // Only override methods can shadow impl methods
+            if (!classMethod.isOverride) {
+                continue;
+            }
+            
+            const classMethodHeader = classMethod.method;
+            
+            // Check if methods share any common name
+            const hasCommonName = implMethod.names.some(implName =>
+                classMethodHeader.names.includes(implName)
+            );
+            
+            if (!hasCommonName) {
+                continue;
+            }
+            
+            // Check if signatures match (same generic count and parameter types)
+            if (this.methodSignaturesMatch(implMethod, classMethodHeader)) {
+                return true;  // This impl method is shadowed
+            }
+        }
+        
+        return false;  // Not shadowed
+    }
+
+    /**
+     * Check if two method headers have the same signature.
+     * Used for detecting shadowing and overrides.
+     *
+     * @param method1 First method header
+     * @param method2 Second method header
+     * @returns true if signatures match (same generic count and parameter types)
+     */
+    private methodSignaturesMatch(
+        method1: ast.MethodHeader,
+        method2: ast.MethodHeader
+    ): boolean {
+        // Different generic parameter counts -> not equal
+        const genericCount1 = method1.genericParameters?.length ?? 0;
+        const genericCount2 = method2.genericParameters?.length ?? 0;
+        if (genericCount1 !== genericCount2) {
+            return false;
+        }
+
+        // Different parameter counts -> not equal
+        const params1 = method1.header?.args ?? [];
+        const params2 = method2.header?.args ?? [];
+        if (params1.length !== params2.length) {
+            return false;
+        }
+
+        // Check each parameter type
+        for (let i = 0; i < params1.length; i++) {
+            const type1 = this.getType(params1[i].type);
+            const type2 = this.getType(params2[i].type);
+            
+            // Use string comparison for type equality
+            if (type1.toString() !== type2.toString()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

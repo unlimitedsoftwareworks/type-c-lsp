@@ -23,12 +23,13 @@ type Mesh = class {
     let scale: vec3
     let rot: vec3
 
+    /// @Error(TCE061): Duplicate class method
     impl Default3DImpl<vec3>(pos, scale, rot)
 
-    override fn getPos() -> vec3 = this.pos
+    fn getPos() -> vec3 = this.pos
 }
 
 fn main() {
-    let m: Mesh = new Mesh()
+    let m: Object3D = new Mesh()
     let z = m.getPos()
 }

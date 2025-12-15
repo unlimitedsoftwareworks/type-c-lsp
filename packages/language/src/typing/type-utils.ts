@@ -904,8 +904,8 @@ export class TypeCTypeUtils {
     isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
         // All interface methods must be implemented by the class
         for (const method of to.methods) {
-            // Collect class methods and impl methods with generic substitutions applied
-            const classMethods = [...from.methods, ...from.implementations.map(implRef => {
+            // Collect impl methods with generic substitutions applied
+            const implMethods = from.implementations.map(implRef => {
                 // Build substitutions from the impl reference (e.g., Default3DImpl<vec3>)
                 let implSubstitutions: Map<string, TypeDescription> | undefined;
                 if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
@@ -935,7 +935,19 @@ export class TypeCTypeUtils {
                     return impl.methods;
                 }
                 return []
-            }).flat()]
+            }).flat();
+            
+            // Filter out impl methods that are shadowed by override methods
+            const nonShadowedImplMethods = implMethods.filter(implMethod => {
+                // Check if any class override method shadows this impl method
+                return !from.methods.some(classMethod =>
+                    classMethod.isOverride &&
+                    this.methodSignaturesMatch(classMethod, implMethod)
+                );
+            });
+            
+            // Collect all available methods (class methods + non-shadowed impl methods)
+            const classMethods = [...from.methods, ...nonShadowedImplMethods];
             // Find all class methods with matching names (to handle overloads)
             const candidateMethods = classMethods.filter(m => m.names.some(name => method.names.includes(name)));
 
@@ -3312,6 +3324,51 @@ export class TypeCTypeUtils {
         }
 
         return false;
+    }
+
+    /**
+     * Check if two MethodType objects have the same signature.
+     * Used for detecting shadowing and overrides.
+     * Compares generic count and parameter types, but NOT return type.
+     *
+     * @param method1 First method
+     * @param method2 Second method
+     * @returns true if signatures match
+     */
+    private methodSignaturesMatch(method1: MethodType, method2: MethodType): boolean {
+        // Check if methods share any common name
+        const hasCommonName = method1.names.some(name1 =>
+            method2.names.some(name2 => name1 === name2)
+        );
+        
+        if (!hasCommonName) {
+            return false;
+        }
+
+        // Different generic parameter counts -> not equal
+        const genericCount1 = method1.genericParameters?.length ?? 0;
+        const genericCount2 = method2.genericParameters?.length ?? 0;
+        if (genericCount1 !== genericCount2) {
+            return false;
+        }
+
+        // Different parameter counts -> not equal
+        if (method1.parameters.length !== method2.parameters.length) {
+            return false;
+        }
+
+        // Check each parameter type
+        for (let i = 0; i < method1.parameters.length; i++) {
+            const type1 = method1.parameters[i].type;
+            const type2 = method2.parameters[i].type;
+            
+            // Use string comparison for type equality
+            if (type1.toString() !== type2.toString()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

@@ -40,6 +40,7 @@ type Default3DImpl<T> = impl Object3D (
 type MyObject = class {
     let pos: vec3
 
+    /// @Errpr(TCE105): Class must implement interface method
     impl Default3DImpl<vec3>(pos, pos, pos)
     
     fn init(pos: vec3) {

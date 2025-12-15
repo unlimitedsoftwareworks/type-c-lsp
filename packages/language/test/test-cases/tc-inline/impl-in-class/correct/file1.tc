@@ -36,11 +36,16 @@ type Default3DImpl<T> = impl Object3D (
     }
 }
 
+type RandomImp = impl  {
+    fn randomFn() -> vec3 = {1.0f, 2.0f, 3.0f}
+}
+
 // Test with a class using the impl
 type MyObject = class {
     let pos: vec3
 
     impl Default3DImpl<vec3>(pos, pos, pos)
+    impl RandomImp()
     
     fn init(pos: vec3) {
         // This should work - accessing impl methods

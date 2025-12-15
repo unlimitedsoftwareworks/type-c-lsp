@@ -582,9 +582,9 @@ ClassType:
 
 
 ImplementationType:
-    'impl' (superTypes+=DataType<false> ("," superTypes+=DataType<false>)*)? '(' 
-        (attributes+=ImplementationAttributeDecl ("," attributes+=ImplementationAttributeDecl)*)
-    ')' '{'
+    'impl' (superTypes+=DataType<false> ("," superTypes+=DataType<false>)*)? ('(' 
+        (attributes+=ImplementationAttributeDecl ("," attributes+=ImplementationAttributeDecl)*)?
+    ')')? '{'
         ClassMethodDecl*
     '}';
 
@@ -650,7 +650,7 @@ fragment ClassImplementation:
     implementations+=ClassImplementationMethodDecl;
 
 ClassImplementationMethodDecl:
-    'impl' type=ReferenceType '(' (args += [ClassAttributeDecl:ID] (',' args += [ClassAttributeDecl:ID])*)? ')';
+    'impl' type=ReferenceType ('(' (args += [ClassAttributeDecl:ID] (',' args += [ClassAttributeDecl:ID])*)? ')')?;
 
 fragment MethodNames:
     MethodName ('|' MethodName)*;

@@ -26,6 +26,7 @@ import {
     isUnionType,
     isVariantConstructorType,
     isVariantType,
+    MethodType,
     TypeDescription,
     TypeKind
 } from "../typing/type-c-types.js";
@@ -3207,6 +3208,203 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 });
             }
         }
+
+        // Check 3: Validate that impl interface requirements are satisfied by the class
+        // This ensures that when an impl extends an interface but doesn't implement all methods,
+        // the class using the impl provides the missing methods
+        this.checkImplInterfaceRequirementsSatisfied(node, resolvedImplType, implRefType, accept);
+    }
+
+    /**
+     * Check that all interface methods required by an impl are satisfied by the class.
+     *
+     * When an impl extends an interface (e.g., `impl Object3D`), it may implement some
+     * interface methods but not all. The impl methods can then call the unimplemented
+     * interface methods (e.g., `this.randomFn()`), expecting them to be provided elsewhere.
+     *
+     * This validation ensures that the class using the impl provides all methods that:
+     * 1. Are required by the interface
+     * 2. Are NOT implemented by the impl itself
+     * 3. Are NOT provided by other impls
+     *
+     * Examples:
+     * ```tc
+     * type Object3D = interface {
+     *     fn getPos() -> vec3
+     *     fn randomFn() -> vec3
+     * }
+     *
+     * type Default3DImpl<T> = impl Object3D (pos: T) {
+     *     fn getPos() = this.position
+     *     fn useRandom() = this.randomFn()  // Calls interface method
+     * }
+     *
+     * class MyObject {
+     *     let pos: vec3
+     *     impl Default3DImpl<vec3>(pos)
+     *     // ❌ Error: Must provide randomFn() since impl doesn't implement it
+     * }
+     *
+     * class MyObject2 {
+     *     let pos: vec3
+     *     impl Default3DImpl<vec3>(pos)
+     *     fn randomFn() -> vec3 { ... }  // ✅ OK: Provides missing method
+     * }
+     * ```
+     */
+    private checkImplInterfaceRequirementsSatisfied = (
+        implDeclNode: ast.ClassImplementationMethodDecl,
+        resolvedImplType: TypeDescription,
+        implRefType: TypeDescription,
+        accept: ValidationAcceptor
+    ): void => {
+        if (!isImplementationType(resolvedImplType)) {
+            return;
+        }
+
+        // Build generic substitutions from the impl reference if it has generic args
+        let substitutions: Map<string, TypeDescription> | undefined;
+        if (isReferenceType(implRefType) && implRefType.genericArgs.length > 0 && implRefType.declaration.genericParameters) {
+            substitutions = new Map<string, TypeDescription>();
+            implRefType.declaration.genericParameters.forEach((param, i) => {
+                if (i < implRefType.genericArgs.length) {
+                    substitutions!.set(param.name, implRefType.genericArgs[i]);
+                }
+            });
+        }
+
+        // Get the containing class
+        const classNode = AstUtils.getContainerOfType(implDeclNode, ast.isClassType);
+        if (!classNode) {
+            return;
+        }
+
+        const classType = this.typeProvider.getType(classNode);
+        if (!isClassType(classType)) {
+            return;
+        }
+
+        // Check each interface that this impl extends
+        for (const targetType of resolvedImplType.targetTypes) {
+            // Resolve reference types to get the actual interface
+            let resolvedTargetType = isReferenceType(targetType)
+                ? this.typeProvider.resolveReference(targetType)
+                : targetType;
+
+            const interfaceType = this.typeUtils.asInterfaceType(resolvedTargetType);
+            if (!interfaceType) {
+                continue; // Not an interface, skip
+            }
+
+            // Check each interface method
+            for (const interfaceMethod of interfaceType.methods) {
+                // Apply generic substitutions to the interface method if we have them
+                let expectedMethod = interfaceMethod;
+                if (substitutions && substitutions.size > 0) {
+                    expectedMethod = {
+                        ...interfaceMethod,
+                        parameters: interfaceMethod.parameters.map(p => ({
+                            name: p.name,
+                            type: this.typeUtils.substituteGenerics(p.type, substitutions),
+                            isMut: p.isMut
+                        })),
+                        returnType: this.typeUtils.substituteGenerics(interfaceMethod.returnType, substitutions)
+                    };
+                }
+
+                // Check if this interface method is implemented by the impl itself
+                const implementedByImpl = resolvedImplType.methods.some(implMethod =>
+                    this.methodMatchesInterfaceMethod(implMethod, expectedMethod)
+                );
+
+                if (implementedByImpl) {
+                    continue; // Impl provides this method, no need for class to provide it
+                }
+
+                // Check if the class provides this method (directly or via other impls)
+                // Collect all class methods + methods from all impls
+                const allClassMethods = [...classType.methods];
+                
+                // Add methods from all other impls
+                for (const otherImplRef of classType.implementations) {
+                    const otherImpl = this.typeProvider.resolveReference(otherImplRef);
+                    if (isImplementationType(otherImpl)) {
+                        // Build substitutions for this other impl
+                        let otherSubstitutions: Map<string, TypeDescription> | undefined;
+                        if (isReferenceType(otherImplRef) && otherImplRef.genericArgs.length > 0 && otherImplRef.declaration.genericParameters) {
+                            otherSubstitutions = new Map<string, TypeDescription>();
+                            otherImplRef.declaration.genericParameters.forEach((param, i) => {
+                                if (i < otherImplRef.genericArgs.length) {
+                                    otherSubstitutions!.set(param.name, otherImplRef.genericArgs[i]);
+                                }
+                            });
+                        }
+
+                        // Add substituted methods from other impl
+                        for (const otherImplMethod of otherImpl.methods) {
+                            if (otherSubstitutions && otherSubstitutions.size > 0) {
+                                allClassMethods.push({
+                                    ...otherImplMethod,
+                                    parameters: otherImplMethod.parameters.map(p => ({
+                                        name: p.name,
+                                        type: this.typeUtils.substituteGenerics(p.type, otherSubstitutions!),
+                                        isMut: p.isMut
+                                    })),
+                                    returnType: this.typeUtils.substituteGenerics(otherImplMethod.returnType, otherSubstitutions!)
+                                });
+                            } else {
+                                allClassMethods.push(otherImplMethod);
+                            }
+                        }
+                    }
+                }
+
+                // Check if any method in the class (including from other impls) provides this interface method
+                const providedByClass = allClassMethods.some(classMethod =>
+                    this.methodMatchesInterfaceMethod(classMethod, expectedMethod)
+                );
+
+                if (!providedByClass) {
+                    // Missing required interface method
+                    const errorCode = ErrorCode.TC_IMPL_INTERFACE_METHOD_NOT_SATISFIED;
+                    const methodSignature = `${expectedMethod.names[0]}(${expectedMethod.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${expectedMethod.returnType.toString()}`;
+                    accept('error',
+                        `Class must implement interface method '${expectedMethod.names[0]}': ` +
+                        `Implementation '${this.getImplName(implDeclNode.type)}' extends interface with method '${methodSignature}', ` +
+                        `but neither the impl nor the class provides this method.`,
+                        {
+                            node: implDeclNode,
+                            code: errorCode
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if a method matches an interface method's signature.
+     *
+     * @param method The method to check (from impl or class)
+     * @param interfaceMethod The interface method to match against
+     * @returns true if the method satisfies the interface method requirement
+     */
+    private methodMatchesInterfaceMethod(
+        method: MethodType,
+        interfaceMethod: MethodType
+    ): boolean {
+        // Check if method has any name that matches the interface method
+        const hasCommonName = method.names.some((name: string) =>
+            interfaceMethod.names.includes(name)
+        );
+
+        if (!hasCommonName) {
+            return false;
+        }
+
+        // Check signature compatibility
+        const compatResult = this.typeUtils.isMethodImplementationCompatible(method, interfaceMethod);
+        return compatResult.success;
     }
 
     /**

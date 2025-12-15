@@ -314,6 +314,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
             // String concatenation: string + anything
             if (leftIsString || rightIsString) {
+                // Skip validation if either operand is a generic type
+                // Generic types will be validated when instantiated with concrete types
+                if (isGenericType(leftType) || isGenericType(rightType)) {
+                    return;
+                }
+
                 const convertibleTypes = [
                     TypeKind.String, TypeKind.Bool,
                     TypeKind.U8, TypeKind.U16, TypeKind.U32, TypeKind.U64,

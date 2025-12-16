@@ -279,10 +279,20 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
         }
 
-        // Skip if operator might be overloaded (class type)
-        // TODO: Check if the specific operator is actually overloaded
+        // Skip if operator might be overloaded (class type or generic with constraint)
+        // For classes: they may define operator overload methods
+        // For generics: if the constraint defines the operator, allow it
         if (isClassType(leftType)) {
             return;
+        }
+        
+        // Check if left operand is a generic type with a constraint that defines this operator
+        if (isGenericType(leftType) && leftType.constraint) {
+            // Check if the constraint (interface/join/union) defines this operator
+            const operatorName = node.op;
+            if (this.constraintDefinesOperator(leftType.constraint, operatorName)) {
+                return;
+            }
         }
 
         // Assignment operators: right must be compatible with left
@@ -3465,6 +3475,46 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return ref.name || 'unknown';
         }
         return 'unknown';
+    }
+
+    /**
+     * Check if a generic constraint defines a specific operator.
+     *
+     * This checks if the constraint (interface, union, or join type) has a method
+     * that corresponds to the given operator. For example, checking if a constraint
+     * defines the '+' operator by looking for a method named '+'.
+     *
+     * @param constraint The constraint type (interface, union, or join)
+     * @param operatorName The operator to check for (e.g., '+', '-', '*')
+     * @returns true if the constraint defines this operator
+     */
+    private constraintDefinesOperator(constraint: TypeDescription, operatorName: string): boolean {
+        // Resolve the constraint if it's a reference
+        const resolvedConstraint = this.typeUtils.resolveIfReference(constraint);
+        
+        // Handle union constraints: T: Interface1 | Interface2
+        // The generic can use operators defined in ANY of the union members
+        if (isUnionType(resolvedConstraint)) {
+            return resolvedConstraint.types.some(t => this.constraintDefinesOperator(t, operatorName));
+        }
+        
+        // Handle join constraints: T: Interface1 & Interface2
+        // The generic can use operators defined in ANY of the joined types
+        if (isJoinType(resolvedConstraint)) {
+            return resolvedConstraint.types.some(t => this.constraintDefinesOperator(t, operatorName));
+        }
+        
+        // Handle interface constraints: check if the interface defines the operator method
+        if (isInterfaceType(resolvedConstraint)) {
+            // Check if any method in the interface is named after this operator
+            return resolvedConstraint.methods.some(method =>
+                method.names.includes(operatorName)
+            );
+        }
+        
+        // For other constraint types (classes, etc.), we don't support operator overloading
+        // through constraints yet, so return false
+        return false;
     }
 
 }

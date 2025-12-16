@@ -36,6 +36,7 @@ import {
     isMetaVariantConstructorType,
     isMetaVariantType,
     isNamespaceType,
+    isNeverType,
     isNullableType,
     isPrototypeType,
     isReferenceType,
@@ -841,6 +842,15 @@ export class TypeCTypeProvider {
         // Example: Array<u32>? → get fields from Array<u32>
         if (isNullableType(type)) {
             return this.getIdentifiableFields(type.baseType);
+        }
+
+        // CRITICAL: Handle generic types with constraints for auto-completion
+        // If type is a generic type parameter (e.g., T in fn<T: ComparableObject>),
+        // use its constraint to get available fields for auto-completion
+        // Example: T: ComparableObject → auto-complete shows eq() and toString()
+        const resolvedGeneric = this.typeUtils.resolveIfGeneric(type);
+        if (resolvedGeneric !== type) {
+            return this.getIdentifiableFields(resolvedGeneric);
         }
 
         // FFI
@@ -2401,12 +2411,25 @@ export class TypeCTypeProvider {
                     );
                 }
 
-                // Build substitution map: generic parameter name -> concrete type
+                // Build substitution map and validate constraints
                 const substitutions = new Map<string, TypeDescription>();
-                genericParams.forEach((param, index) => {
+                
+                for (let index = 0; index < genericParams.length; index++) {
+                    const param = genericParams[index];
                     const concreteType = this.getType(node.genericArgs[index]);
+                    
+                    // Validate that the concrete type satisfies the generic parameter's constraint
+                    const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, param.constraint);
+                    if (!constraintCheck.success) {
+                        return this.typeFactory.createErrorType(
+                            constraintCheck.message || `Type argument does not satisfy generic constraint`,
+                            undefined,
+                            node
+                        );
+                    }
+                    
                     substitutions.set(param.name, concreteType);
-                });
+                }
 
                 // Apply substitutions to the function type
                 return this.typeUtils.substituteGenerics(type, substitutions);
@@ -2558,6 +2581,12 @@ export class TypeCTypeProvider {
         if (isNullableType(resolvedLhs)) {
             resolvedLhs = resolvedLhs.baseType;
         }
+
+        // CRITICAL: Handle generic types with constraints for operator overloads
+        // If LHS is a generic type parameter (e.g., T in fn<T: Addable>),
+        // use its constraint for operator overload resolution
+        // Example: T: Addable where Addable has fn +(other: Addable) -> Addable
+        resolvedLhs = this.typeUtils.resolveIfGeneric(resolvedLhs);
 
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
@@ -2719,6 +2748,12 @@ export class TypeCTypeProvider {
             // arr?: Array<u32> with arr.member → auto-unwrap (should be validation error)
             baseType = baseType.baseType;
         }
+
+        // CRITICAL: Handle generic types with constraints
+        // If base type is a generic type parameter (e.g., T in fn<T: ComparableObject>),
+        // use its constraint for member access resolution
+        // Example: T: ComparableObject → T.eq() resolves to ComparableObject.eq()
+        baseType = this.typeUtils.resolveIfGeneric(baseType);
 
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
@@ -3258,12 +3293,27 @@ export class TypeCTypeProvider {
             // Handle explicit generic type arguments
             if (node.genericArgs && node.genericArgs.length > 0) {
                 if (node.genericArgs.length === genericParams.length) {
-                    // Build substitution map: generic parameter name -> concrete type
+                    // Build substitution map and validate constraints
                     const explicitSubstitutions = new Map<string, TypeDescription>();
-                    genericParams.forEach((param, index) => {
+                    
+                    for (let index = 0; index < genericParams.length; index++) {
+                        const param = genericParams[index];
                         const concreteType = this.getType(node.genericArgs[index]);
+                        
+                        // Validate that the concrete type satisfies the generic parameter's constraint
+                        const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, param.constraint);
+                        if (!constraintCheck.success) {
+                            // Return error immediately if constraint not satisfied
+                            return this.typeFactory.createErrorType(
+                                constraintCheck.message || `Type argument does not satisfy generic constraint`,
+                                undefined,
+                                node
+                            );
+                        }
+                        
                         explicitSubstitutions.set(param.name, concreteType);
-                    });
+                    }
+                    
                     substitutions = explicitSubstitutions;
                 }
             }
@@ -3284,6 +3334,23 @@ export class TypeCTypeProvider {
                     parameterTypes,
                     argumentTypes
                 );
+                
+                // Validate that inferred types satisfy constraints
+                for (let i = 0; i < genericParams.length; i++) {
+                    const param = genericParams[i];
+                    const inferredType = substitutions.get(param.name);
+                    
+                    if (inferredType && !isNeverType(inferredType)) {
+                        const constraintCheck = this.typeUtils.validateGenericConstraint(inferredType, param.constraint);
+                        if (!constraintCheck.success) {
+                            return this.typeFactory.createErrorType(
+                                constraintCheck.message || `Inferred type does not satisfy generic constraint`,
+                                undefined,
+                                node
+                            );
+                        }
+                    }
+                }
             }
 
             // Apply substitutions to return type if we have any

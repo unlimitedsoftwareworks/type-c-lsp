@@ -1,64 +1,10 @@
-type vec3 = struct {
-    x: f32, y: f32, z: f32
+type AssertionResult = variant {
+    Ok(),
+    Failed(message: string)
 }
 
-type Object3D = interface {
-    fn getPos() -> vec3
-    fn getScale() -> vec3
-    fn getRotation() -> vec3
-    fn randomFn() -> vec3
-}
+fn makeRes() {
+    let res: AssertionResult = AssertionResult.Ok()
 
-// Test case: Impl extending an interface
-// The impl provides concrete implementations for some interface methods
-// and should have access to the interface methods it doesn't override
-type Default3DImpl<T> = impl Object3D (
-    position: T,
-    scale: T,
-    rot: T
-) {
-    // These methods shadow the interface methods with the same signature
-    fn getPos() = this.position
-    fn getScale() = this.scale
-    fn getRotation() = this.rot
-    
-    // This method should have access to the interface method randomFn()
-    fn useRandomFn() -> vec3 {
-        return this.randomFn()
-    }
-    
-    // This method should have access to its own methods
-    fn getAllPositions() -> T {
-        let p = this.getPos()
-        let s = this.getScale()
-        let r = this.getRotation()
-        return p
-    }
-}
-
-type RandomImp = impl  {
-    fn randomFn() -> vec3 = {1.0f, 2.0f, 3.0f}
-    fn getPos() -> vec3 = randomFn()
-}
-
-// Test with a class using the impl
-type MyObject = class {
-    let pos: vec3
-
-    impl Default3DImpl<vec3>(pos, pos, pos)
-    impl RandomImp() 
-    
-    // When we override a duplicate method, only one is seen
-    override fn getPos() -> vec3 = getAllPositions() 
-    
-    fn init(pos: vec3) {
-        // This should work - accessing impl methods
-        let p = this.getPos()
-        let s = this.getScale()
-        
-        // This should work - accessing non-shadowed interface method
-
-        /// @Type(rand): vec3
-        let rand = this.useRandomFn()
-    }
+    let r = res as! AssertionResult.Ok
 }

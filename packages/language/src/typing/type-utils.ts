@@ -123,6 +123,33 @@ export class TypeCTypeUtils {
         return isReferenceType(type) ? this.typeProvider().resolveReference(type) : type;
     }
 
+    /**
+     * Resolves a type if it's a generic type with a constraint, otherwise returns the type as-is.
+     * This is a convenience helper for constraint-based member access and operator resolution.
+     *
+     * When a generic type parameter has a constraint (e.g., T: ComparableObject),
+     * this method returns the constraint type to enable member access on the generic.
+     *
+     * This mimics Java's bounded type parameter behavior where constrained generics
+     * can access members/methods defined in their bounds.
+     *
+     * @param type The type to potentially resolve
+     * @returns The constraint type if it was a generic with constraint, otherwise the original type
+     *
+     * @example
+     * ```
+     * // T: ComparableObject
+     * resolveIfGeneric(T) → ComparableObject
+     * // T (no constraint)
+     * resolveIfGeneric(T) → T
+     * // u32 (not generic)
+     * resolveIfGeneric(u32) → u32
+     * ```
+     */
+    resolveIfGeneric(type: TypeDescription): TypeDescription {
+        return isGenericType(type) && type.constraint ? type.constraint : type;
+    }
+
     // ============================================================================
     // Pending Type Checks (for handling circular references)
     // ============================================================================
@@ -508,6 +535,20 @@ export class TypeCTypeUtils {
 
         // Unset types - treat as assignable for now (they should be resolved)
         if (isUnsetType(from) || isUnsetType(to)) return success();
+
+        // CRITICAL: Generic types with constraints are assignable to their constraints
+        // This enables passing constrained generics to methods expecting the constraint type
+        // Example: fn<T: ComparableObject>(a: T, b: T) -> a.eq(b) where eq expects ComparableObject
+        if (isGenericType(from) && from.constraint) {
+            // Resolve both constraint and target in case they're reference types
+            const resolvedConstraint = this.resolveIfReference(from.constraint);
+            const resolvedTo = this.resolveIfReference(to);
+            const constraintResult = this.isAssignable(resolvedConstraint, resolvedTo);
+            if (constraintResult.success) {
+                return success();
+            }
+            // If constraint didn't match, continue with other checks
+        }
 
         // Numeric promotions
         if (isNumericType(from) && isNumericType(to)) {
@@ -3278,6 +3319,76 @@ export class TypeCTypeUtils {
         }
 
         return false;
+    }
+
+    /**
+     * Validates that a concrete type satisfies a generic constraint.
+     *
+     * Used when instantiating generic types to ensure the provided type arguments
+     * satisfy the constraints specified in the generic parameter declaration.
+     *
+     * @param concreteType The concrete type provided as a generic argument
+     * @param constraint The constraint from the generic parameter (e.g., T: ComparableObject)
+     * @returns TypeCheckResult indicating if the constraint is satisfied
+     *
+     * @example
+     * ```
+     * // fn test<T: interface { fn toString() -> string }>(x: T)
+     * // test<u32>(1) → u32 must satisfy the interface constraint
+     * validateGenericConstraint(u32, interface { fn toString() -> string })
+     * // → failure (u32 doesn't have toString method)
+     * ```
+     */
+    validateGenericConstraint(
+        concreteType: TypeDescription,
+        constraint: TypeDescription | undefined
+    ): TypeCheckResult {
+        // No constraint means any type is valid
+        if (!constraint) {
+            return success();
+        }
+
+        // Resolve reference types in both the concrete type and constraint
+        const resolvedType = this.resolveIfReference(concreteType);
+        const resolvedConstraint = this.resolveIfReference(constraint);
+
+        // Handle union constraints: T: A | B means type must satisfy at least one
+        if (isUnionType(resolvedConstraint)) {
+            for (const constraintMember of resolvedConstraint.types) {
+                const result = this.isAssignable(resolvedType, constraintMember);
+                if (result.success) {
+                    return success();
+                }
+            }
+            return failure(
+                `Type '${concreteType.toString()}' does not satisfy constraint '${constraint.toString()}'. ` +
+                `The type must implement at least one of the required interfaces.`
+            );
+        }
+
+        // Handle join constraints: T: A & B means type must satisfy all
+        if (isJoinType(resolvedConstraint)) {
+            for (const constraintMember of resolvedConstraint.types) {
+                const result = this.isAssignable(resolvedType, constraintMember);
+                if (!result.success) {
+                    return failure(
+                        `Type '${concreteType.toString()}' does not satisfy constraint '${constraint.toString()}'. ` +
+                        `The type must implement all required interfaces.`
+                    );
+                }
+            }
+            return success();
+        }
+
+        // For other constraint types (interface, class, etc.), use standard assignability
+        const result = this.isAssignable(resolvedType, resolvedConstraint);
+        if (!result.success) {
+            return failure(
+                `Type '${concreteType.toString()}' does not satisfy constraint '${constraint.toString()}'.`
+            );
+        }
+
+        return success();
     }
 
     /**

@@ -1,0 +1,10 @@
+fn test<T: interface { fn toString() -> string }>(x: T) {
+    return x.toString()
+}
+
+fn main() {
+    /// @Error(TCE120): does not satisfy constraint
+    test<u32>(1)
+    /// @Error(TCE120): does not satisfy constraint
+    test({x: 1})
+}

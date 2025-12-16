@@ -1,0 +1,11 @@
+fn test<T: interface { fn toString() -> string }>(x: T) {
+    return x.toString()
+}
+
+type UTF24String = class {
+    fn toString() = "hihi"
+}
+
+fn main() {
+    test(new UTF24String())
+}

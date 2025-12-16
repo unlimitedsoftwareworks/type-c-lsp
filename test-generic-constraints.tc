@@ -1,0 +1,118 @@
+// Test file for generic constraint member access
+
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+} 
+
+// Test 1: Basic member access on constrained generic
+fn assert_obj_eq<T: ComparableObject>(actual: T, expected: T) -> bool {
+    if actual.eq(expected) {
+        return true
+    } else {
+        return false
+    }
+}
+
+// Test 2: Multiple method access on constrained generic
+fn compare_and_print<T: ComparableObject>(a: T, b: T) -> string {
+    let result: string = a.toString()
+    if a.eq(b) {
+        return result
+    }
+    return b.toString()
+}
+
+// Test 3: Nested generic constraints
+type Printable = interface {
+    fn print() -> string
+}
+
+type ComparableAndPrintable = interface ComparableObject, Printable {
+    fn hash() -> u64
+}
+
+fn process<T: ComparableAndPrintable>(item: T, other: T) -> u64 {
+    // Should access all methods from both interfaces
+    let str1: string = item.print()
+    let str2: string = item.toString()
+    let equal: bool = item.eq(other)
+    return item.hash()
+}
+
+// Test 4: Generic constraint with union (for bounds)
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Movable = interface {
+    fn move(x: u32, y: u32) -> void
+}
+
+fn handle<T: Drawable | Movable>(obj: T) -> void {
+    // Should be able to access either interface's methods
+    obj.draw()
+}
+
+// Test 5: Generic with interface that has generic methods
+type Container<U> = interface {
+    fn get() -> U
+    fn set(value: U) -> void
+}
+
+fn swap<T, C: Container<T>>(container: C, newValue: T) -> T {
+    let old: T = container.get()
+    container.set(newValue)
+    return old
+}
+
+// Test 6: Operator overloads with generic constraints
+type Addable = interface {
+    fn +(other: Addable) -> Addable
+    fn -(other: Addable) -> Addable
+}
+
+type Comparable = interface {
+    fn <(other: Comparable) -> bool
+    fn >(other: Comparable) -> bool
+}
+
+fn add_three<T: Addable>(a: T, b: T, c: T) -> Addable {
+    // Should resolve + operator through Addable constraint
+    return a + b + c
+}
+
+fn max<T: Comparable>(a: T, b: T) -> T {
+    // Should resolve > operator through Comparable constraint
+    if a > b {
+        return a
+    }
+    return b
+}
+
+// Test 7: Multiple constraints with operators
+type Numeric = interface Addable, Comparable {
+    fn *(other: Numeric) -> Numeric
+    fn /(other: Numeric) -> Numeric
+}
+
+fn calculate<T: Numeric>(x: T, y: T, z: T) -> Numeric {
+    // Should resolve all operators through Numeric constraint
+    let sum: Numeric = x + y
+    let product: Numeric = sum * z
+    if product > x {
+        return product / z
+    }
+    return x - y
+}
+
+// Test 8: Index operator with constraints
+type Indexable<K, V> = interface {
+    fn [](key: K) -> V
+    fn []=(key: K, value: V) -> void
+}
+
+fn get_or_default<K, V, T: Indexable<K, V>>(container: T, key: K, default: V) -> V {
+    // Should resolve [] operator through Indexable constraint
+    return container[key]
+}

@@ -1,0 +1,156 @@
+// Comprehensive test for generic constraint validation
+
+// Define test interfaces
+type Stringable = interface {
+    fn toString() -> string
+}
+
+type Comparable = interface {
+    fn compare(other: Comparable) -> i32
+}
+
+type ComparableAndStringable = interface Comparable, Stringable {
+    fn hash() -> u64
+}
+
+// Test 1: Basic constraint violation with explicit type argument
+fn testExplicit<T: Stringable>(x: T) -> string {
+    return x.toString()
+}
+
+fn test1() -> void {
+    // Should ERROR: u32 does not implement Stringable
+    /// @Error(TCE120): does not satisfy constraint
+    testExplicit<u32>(1)
+}
+
+// Test 2: Basic constraint violation with inferred type argument
+fn testInferred<T: Stringable>(x: T) -> string {
+    return x.toString()
+}
+
+fn test2() -> void {
+    // Should ERROR: inferred type u32 does not satisfy constraint Stringable
+    /// @Error(TCE120): does not satisfy constraint
+    testInferred(1)
+}
+
+// Test 3: Multiple constraints - all must be satisfied
+fn testMultiple<T: ComparableAndStringable>(x: T) -> string {
+    return x.toString()
+}
+
+fn test3() -> void {
+    // Should ERROR: u32 doesn't implement ComparableAndStringable
+    /// @Error(TCE120): does not satisfy constraint
+    testMultiple<u32>(1)
+    /// @Error(TCE120): does not satisfy constraint
+    testMultiple(1)
+}
+
+// Test 4: Union constraint (T: A | B means must satisfy at least one)
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Movable = interface {
+    fn move(x: u32, y: u32) -> void
+}
+
+fn testUnion<T: Drawable | Movable>(obj: T) -> void {
+    // Can access methods from constraint
+}
+
+fn test4() -> void {
+    // Should ERROR: u32 implements neither Drawable nor Movable
+    /// @Error(TCE120): does not satisfy constraint
+    testUnion<u32>(1)
+    /// @Error(TCE120): does not satisfy constraint
+    testUnion(1)
+}
+
+// Test 5: Valid cases that should PASS
+type MyStringable = class {
+    fn toString() -> string {
+        return "MyStringable"
+    }
+}
+
+fn test5() -> void {
+    let obj = new MyStringable()
+    // Should PASS: MyStringable implements Stringable
+    testExplicit<MyStringable>(obj)
+    testInferred(obj)
+}
+
+// Test 6: Nested generics with constraints
+type Container<U: Stringable> = interface {
+    fn get() -> U
+    fn set(value: U) -> void
+}
+
+fn testNested<T: Stringable, C: Container<T> >(container: C, value: T) -> string {
+    container.set(value)
+    return container.get().toString()
+}
+
+fn test6() -> void {
+    // Should ERROR: u32 doesn't satisfy Stringable, so Container<u32> is invalid
+    // This is tricky - the error should be on the Container<u32> part
+    // But we need to ensure u32 satisfies the constraint that Container requires
+}
+
+// Test 7: Generic constraint with multiple type parameters
+fn testMultiParam<T: Comparable, U: Stringable>(a: T, b: U) -> string {
+    return b.toString()
+}
+
+fn test7() -> void {
+    // Should ERROR: first arg (u32) doesn't implement Comparable
+    /// @Error(TCE120): does not satisfy constraint
+    testMultiParam<u32, MyStringable>(1, new MyStringable())
+    
+    // Should ERROR: inferred types don't satisfy constraints
+    /// @Error(TCE120): does not satisfy constraint
+    testMultiParam(1, new MyStringable())
+}
+
+// Test 8: Constraint on function reference with explicit generics
+fn process<T: Stringable>(value: T) -> string {
+    return value.toString()
+}
+
+fn test8() -> void {
+    // Direct reference with explicit generic args
+    /// @Error(TCE120): does not satisfy constraint
+    let f = process<u32>  // Should ERROR: u32 doesn't satisfy Stringable
+}
+
+// Test 9: Array of constrained generics
+fn processArray<T: Stringable>(arr: T[]) -> string[] {
+    let result: string[] = []
+    return result
+}
+
+fn test9() -> void {
+    let nums: u32[] = [1, 2, 3]
+    // Should ERROR: u32 doesn't satisfy Stringable
+    /// @Error(TCE120): does not satisfy constraint
+    processArray<u32>(nums)
+    /// @Error(TCE120): does not satisfy constraint
+    processArray(nums)
+}
+
+// Test 10: Passing null to nullable constrained generic
+fn testNullable<T: Stringable>(x: T?) -> string? {
+    if x == null {
+        return null
+    }
+    return x?.toString()
+}
+
+fn test10() -> void {
+    // Should ERROR even with null: u32 doesn't satisfy Stringable
+    /// @Error(TCE120): does not satisfy constraint
+    testNullable<u32>(null)
+}

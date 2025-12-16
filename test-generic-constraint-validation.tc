@@ -1,0 +1,15 @@
+// Test generic constraint validation
+
+type Stringable = interface {
+    fn toString() -> string
+}
+
+fn test<T: Stringable>(x: T) -> string {
+    return x.toString()
+}
+
+fn main() -> void {
+    // Both should fail - u32 doesn't implement Stringable interface
+    test<u32>(1)    // Error: u32 does not satisfy constraint Stringable
+    test(1)         // Error: inferred u32 does not satisfy constraint Stringable
+}

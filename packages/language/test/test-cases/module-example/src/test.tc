@@ -43,9 +43,3 @@ fn main() {
 
     }
 }
-
-type int = u32
-
-let xint: int = 1
-
-let z: xint = "hi"

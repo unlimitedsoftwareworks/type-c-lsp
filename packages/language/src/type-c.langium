@@ -781,7 +781,7 @@ hidden terminal WS: /\s+/;
 // This pattern is more permissive to handle nested generics like Array<Array<u32>>
 // It looks for < followed by valid type syntax (identifiers, commas, nested <>, etc.) and ending with >
 // Treat `<` as GENERICS_OPEN only if there is a `>` later in the same "segment"
-terminal GENERICS_OPEN: /<(?=(?:(?!&&|\|\||==|!=|<=|>=|=).)*>)/;
+terminal GENERICS_OPEN: /<(?=[_a-zA-Z"{])/;
 terminal LESS_THAN: /</;
 
 /**

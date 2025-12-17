@@ -790,7 +790,7 @@ terminal LESS_THAN: /</;
 
 // Float literal: Supports numbers with fractional parts, exponent, and 'f' or 'F' suffix
 // Same as double but with 'f' or 'F' suffix
-terminal FLOAT_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+)([eE][+-]?[0-9]+)?[fF]/;
+terminal FLOAT_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+|[0-9]+)([eE][+-]?[0-9]+)?[fF]/;
 
 // Double literal: Supports numbers with fractional parts, exponent, but no 'f' or 'F' suffix
 terminal DOUBLE_LITERAL: /([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+[eE][+-]?[0-9]+)([eE][+-]?[0-9]+)?/;
@@ -807,7 +807,6 @@ terminal OCTAL_INT_LITERAL: /0o[0-7]+([ui](8|16|32|64))?/;
 
 // Decimal with optional type suffix
 terminal DECIMAL_INT_LITERAL: /[0-9]+([iu](8|16|32|64))?/;
-
 
 // binary string: b"hello", treated as u8[]
 terminal BINARY_STRING: /b"[^"]*"/;

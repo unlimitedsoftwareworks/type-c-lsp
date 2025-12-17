@@ -1,0 +1,96 @@
+// Test file for operator overload validation
+// Tests the fixes to checkBinaryExpression
+
+type Vector = class {
+    let x: f32
+    let y: f32
+    
+    fn init(x: f32, y: f32) {
+        this.x = x
+        this.y = y
+    }
+    
+    // Operator overloads
+    fn +(other: Vector) -> Vector {
+        return new Vector(this.x + other.x, this.y + other.y)
+    }
+    
+    fn +(scalar: f32) -> Vector {
+        return new Vector(this.x + scalar, this.y + scalar)
+    }
+    
+    fn -(other: Vector) -> Vector {
+        return new Vector(this.x - other.x, this.y - other.y)
+    }
+    
+    fn *(scalar: f32) -> Vector {
+        return new Vector(this.x * scalar, this.y * scalar)
+    }
+}
+
+type NoOperators = class  {
+    let value: u32
+    
+    fn init(value: u32) {
+        this.value = value
+    }
+}
+
+fn testValidOperators() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: Vector + Vector (has fn +(Vector))
+    let v3 = v1 + v2
+    
+    // ✅ Valid: Vector + f32 (has fn +(f32))
+    let v4 = v1 + 5.0f
+    
+    // ✅ Valid: Vector - Vector (has fn -(Vector))
+    let v5 = v1 - v2
+    
+    // ✅ Valid: Vector * f32 (has fn *(f32))
+    let v6 = v1 * 2.0f
+}
+
+fn testInvalidOperators() {
+    let v1 = new Vector(1.0f, 2.0f)
+    
+    let bad2 = v1 + 42.0f
+}
+fn testCompoundAssignments() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: v1 += v2 requires:
+    //   1. Vector has fn +(Vector) -> Vector ✓
+    //   2. Result Vector is assignable to v1: Vector ✓
+    v1 += v2
+    
+    // ✅ Valid: v1 += 5.0f requires:
+    //   1. Vector has fn +(f32) -> Vector ✓
+    //   2. Result Vector is assignable to v1: Vector ✓
+    v1 += 5.0f
+    
+    // ✅ Valid: v1 -= v2 (has fn -(Vector))
+    v1 -= v2
+    
+    // ✅ Valid: v1 *= 2.0f (has fn *(f32))
+    v1 *= 2.0f
+}
+
+
+fn testMixedTypes() {
+    let v1 = new Vector(1.0f, 2.0f)
+    
+    // ✅ Valid: Vector + 5.0f (LHS Vector has operator)
+    let good = v1 + 5.0f
+}
+
+fn testRegularAssignment() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: Regular assignment just checks type compatibility
+    v1 = v2
+}

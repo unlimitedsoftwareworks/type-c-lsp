@@ -1,0 +1,154 @@
+// Test file for operator overload validation
+// Tests the fixes to checkBinaryExpression
+
+class Vector {
+    let x: f32
+    let y: f32
+    
+    fn init(x: f32, y: f32) {
+        this.x = x
+        this.y = y
+    }
+    
+    // Operator overloads
+    fn +(other: Vector) -> Vector {
+        return new Vector(this.x + other.x, this.y + other.y)
+    }
+    
+    fn +(scalar: f32) -> Vector {
+        return new Vector(this.x + scalar, this.y + scalar)
+    }
+    
+    fn -(other: Vector) -> Vector {
+        return new Vector(this.x - other.x, this.y - other.y)
+    }
+    
+    fn *(scalar: f32) -> Vector {
+        return new Vector(this.x * scalar, this.y * scalar)
+    }
+}
+
+class NoOperators {
+    let value: u32
+    
+    fn init(value: u32) {
+        this.value = value
+    }
+}
+
+fn testValidOperators() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: Vector + Vector (has fn +(Vector))
+    let v3 = v1 + v2
+    
+    // ✅ Valid: Vector + f32 (has fn +(f32))
+    let v4 = v1 + 5.0f
+    
+    // ✅ Valid: Vector - Vector (has fn -(Vector))
+    let v5 = v1 - v2
+    
+    // ✅ Valid: Vector * f32 (has fn *(f32))
+    let v6 = v1 * 2.0f
+}
+
+fn testInvalidOperators() {
+    let v1 = new Vector(1.0f, 2.0f)
+    
+    // ❌ ERROR: Vector + string (no fn +(string) defined)
+    // Expected: "Class 'Vector' has operator overloads, but none match the right operand type 'string'. Available: +(Vector) or +(f32)"
+    let bad1 = v1 + "hello"
+    
+    // ❌ ERROR: Vector + u32 (no fn +(u32), only fn +(f32))
+    // Expected: Similar error showing available overloads
+    let bad2 = v1 + 42u32
+}
+
+fn testMissingOperators() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ❌ ERROR: Vector / Vector (no fn / defined)
+    // Expected: "Class 'Vector' does not implement operator '/'"
+    let bad3 = v1 / v2
+    
+    // ❌ ERROR: Vector % f32 (no fn % defined)
+    // Expected: "Class 'Vector' does not implement operator '%'"
+    let bad4 = v1 % 2.0f
+}
+
+fn testNoOperatorsClass() {
+    let n1 = new NoOperators(10u32)
+    let n2 = new NoOperators(20u32)
+    
+    // ❌ ERROR: NoOperators + NoOperators (no operator overloads at all)
+    // Expected: "Class 'NoOperators' does not implement operator '+'"
+    let bad5 = n1 + n2
+    
+    // ❌ ERROR: NoOperators - NoOperators
+    // Expected: "Class 'NoOperators' does not implement operator '-'"
+    let bad6 = n1 - n2
+}
+
+fn testCompoundAssignments() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: v1 += v2 requires:
+    //   1. Vector has fn +(Vector) -> Vector ✓
+    //   2. Result Vector is assignable to v1: Vector ✓
+    v1 += v2
+    
+    // ✅ Valid: v1 += 5.0f requires:
+    //   1. Vector has fn +(f32) -> Vector ✓
+    //   2. Result Vector is assignable to v1: Vector ✓
+    v1 += 5.0f
+    
+    // ✅ Valid: v1 -= v2 (has fn -(Vector))
+    v1 -= v2
+    
+    // ✅ Valid: v1 *= 2.0f (has fn *(f32))
+    v1 *= 2.0f
+}
+
+fn testInvalidCompoundAssignments() {
+    let v1 = new Vector(1.0f, 2.0f)
+    
+    // ❌ ERROR: v1 += "text" requires fn +(string) which doesn't exist
+    // Expected: Similar to regular + operator error
+    v1 += "text"
+    
+    // ❌ ERROR: v1 /= 2.0f requires fn / which doesn't exist
+    // Expected: "Class 'Vector' does not implement operator '/'"
+    v1 /= 2.0f
+    
+    let n1 = new NoOperators(10u32)
+    
+    // ❌ ERROR: n1 += 5u32 requires fn + which doesn't exist
+    // Expected: "Class 'NoOperators' does not implement operator '+'"
+    n1 += 5u32
+}
+
+fn testMixedTypes() {
+    let v1 = new Vector(1.0f, 2.0f)
+    
+    // ❌ ERROR: u32 + Vector (LHS is not a class with operator, RHS being class is irrelevant)
+    // Expected: Standard numeric error since u32 doesn't have operator overload
+    let bad7 = 42u32 + v1
+    
+    // ✅ Valid: Vector + 5.0f (LHS Vector has operator)
+    let good = v1 + 5.0f
+}
+
+fn testRegularAssignment() {
+    let v1 = new Vector(1.0f, 2.0f)
+    let v2 = new Vector(3.0f, 4.0f)
+    
+    // ✅ Valid: Regular assignment just checks type compatibility
+    v1 = v2
+    
+    // ❌ ERROR: Type mismatch (standard assignment validation)
+    let n1 = new NoOperators(10u32)
+    v1 = n1
+}

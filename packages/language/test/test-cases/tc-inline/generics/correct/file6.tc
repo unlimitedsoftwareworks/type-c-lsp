@@ -139,6 +139,9 @@ type Array = class {
     fn get | [] (index: u64) -> u32 {
         return data[index]
     }
+    fn get | [] (index: u64, index2) -> u32 {
+        return data[index]
+    }
 
     fn []= (key: u64, value: u32) {
         data[key] = value
@@ -149,4 +152,5 @@ fn test() {
     let arr1: Array = new Array()
     let arr2: Indexable<u64, u32> = arr1
 
+    let a = arr1
 }

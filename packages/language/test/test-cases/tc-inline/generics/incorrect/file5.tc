@@ -1,0 +1,22 @@
+
+type Array = class {
+    let data: u32[] = 0
+
+    fn get | [] (index: u64) -> u32 {
+        return data[index]
+    }
+    fn get | [] (index: u64, index2) -> u32 {
+        return data[index]
+    }
+
+    fn []= (key: u64, value: u32) {
+        data[key] = value
+    }
+}
+
+fn test() {
+    let arr1: Array = new Array()
+
+    /// @Error(TCE010): does not implement operator '+'
+    let a = arr1 + arr1
+}

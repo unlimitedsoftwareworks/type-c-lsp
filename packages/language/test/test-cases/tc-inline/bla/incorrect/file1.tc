@@ -1,0 +1,14 @@
+
+fn main() {
+    // Test 1: Single index on array - should be OK
+    let x = [1, 2, 3]
+    let a = x[0]  // ✅ OK
+    
+    // Test 2: Multiple indices on array - should ERROR
+    /// @Error(TCE151): Array index access error
+    let b = x[1, 2]  // ❌ Error: Arrays only support single index access
+
+    // Test 5: Index set on array with multiple indices - should ERROR
+    /// @Error(TCE151): Array index access error
+    x[1, 2] = 5  // ❌ Error: Arrays only support single index access
+}

@@ -133,6 +133,7 @@ export enum ErrorCode {
 
     // Array/Spread Errors (TCE150-TCE159)
     TC_ARRAY_SPREAD_REQUIRES_ARRAY = 'TCE150',
+    TC_INDEX_ACCESS_MULTIPLE_INDICES_ON_BASIC = 'TCE151',
 
     // Cast Expression Errors (TCE160-TCE169)
     TC_CAST_INVALID_REGULAR_CAST = 'TCE160',

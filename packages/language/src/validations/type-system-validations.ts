@@ -70,7 +70,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             FunctionDeclaration: this.checkFunctionDeclaration,
             ClassMethod: this.checkClassMethod,
             LambdaExpression: this.checkLambdaExpression,
-            IndexSet: this.checkIndexSet,
+            IndexSet: [this.checkIndexSet, this.checkIndexAccessMultipleIndices],
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
             InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
@@ -83,7 +83,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
             ReferenceType: this.checkReferenceType,
             UnaryExpression: [this.checkExpressionForErrors],
-            IndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
+            IndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors, this.checkIndexAccessMultipleIndices],
             ReverseIndexAccess: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             PostfixOp: [this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ConditionalExpression: this.checkExpressionForErrors,
@@ -1502,6 +1502,106 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                         });
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Check that basic types (arrays, strings) only use a single index.
+     *
+     * When accessing native/basic types like arrays or strings, only a single
+     * index is allowed. Multiple indices (like x[1,2]) are not supported for
+     * basic types.
+     *
+     * Rules:
+     * 1. Array types can only be accessed with a single index
+     * 2. String types can only be accessed with a single index
+     * 3. Classes with overloaded [] operators may accept multiple indices
+     *
+     * Examples:
+     * ```tc
+     * let x = [1, 2, 3]
+     * let a = x[0]           // ✅ OK - single index
+     * let b = x[1, 2]        // ❌ Error - multiple indices on array
+     *
+     * let s = "hello"
+     * let c = s[0]           // ✅ OK - single index
+     * let d = s[1, 2]        // ❌ Error - multiple indices on string
+     *
+     * class Matrix {
+     *     fn [](row: u32, col: u32) -> f32 { ... }
+     * }
+     * let m: Matrix = ...
+     * let e = m[1, 2]        // ✅ OK - class overloads [] with multiple params
+     * ```
+     */
+    checkIndexAccessMultipleIndices = (node: ast.IndexAccess | ast.IndexSet, accept: ValidationAcceptor): void => {
+        // Get the base type being indexed
+        let baseType = this.typeProvider.getType(node.expr);
+        
+        // Resolve reference types
+        baseType = this.typeUtils.resolveIfReference(baseType);
+        
+        // Get the number of indices provided
+        const indexCount = node.indexes.length;
+        
+        // If only one index, no validation needed
+        if (indexCount <= 1) {
+            return;
+        }
+        
+        // Check if the base type is an array
+        if (isArrayType(baseType)) {
+            const errorCode = ErrorCode.TC_INDEX_ACCESS_MULTIPLE_INDICES_ON_BASIC;
+            accept('error',
+                `Array index access error: Arrays only support single index access, but ${indexCount} indices were provided. ` +
+                `Use separate accesses like arr[${node.indexes[0].$cstNode?.text}][${node.indexes[1].$cstNode?.text}] for multidimensional arrays.`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+        
+        // Check if the base type is string
+        if (baseType.kind === TypeKind.String) {
+            const errorCode = ErrorCode.TC_INDEX_ACCESS_MULTIPLE_INDICES_ON_BASIC;
+            accept('error',
+                `String index access error: Strings only support single index access, but ${indexCount} indices were provided.`,
+                {
+                    node,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+        
+        // For classes with [] operator overload, validate against the operator's parameter count
+        if (isClassType(baseType)) {
+            // Determine which operator to check based on whether this is IndexSet or IndexAccess
+            const operatorName = ast.isIndexSet(node) ? '[]=' : '[]';
+            const indexMethod = baseType.methods.find(m => m.names.includes(operatorName));
+            
+            if (indexMethod) {
+                // For []= operator, the last parameter is the value, so we need to subtract 1
+                const expectedIndexCount = ast.isIndexSet(node)
+                    ? indexMethod.parameters.length - 1
+                    : indexMethod.parameters.length;
+                
+                if (indexCount !== expectedIndexCount) {
+                    const errorCode = ErrorCode.TC_INDEX_ACCESS_MULTIPLE_INDICES_ON_BASIC;
+                    accept('error',
+                        `Index operator '${operatorName}' error: Class '${baseType.toString()}' expects ${expectedIndexCount} index parameter(s), but got ${indexCount}.`,
+                        {
+                            node,
+                            code: errorCode
+                        }
+                    );
+                }
+            } else {
+                // Class doesn't define the operator - this error will be caught by other validations
+                return;
             }
         }
     }

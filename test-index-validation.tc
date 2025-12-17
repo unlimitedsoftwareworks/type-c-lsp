@@ -1,0 +1,20 @@
+// Test file for index access validation
+
+fn main() {
+    // Test 1: Single index on array - should be OK
+    let x = [1, 2, 3]
+    let a = x[0]  // ✅ OK
+    
+    // Test 2: Multiple indices on array - should ERROR
+    let b = x[1, 2]  // ❌ Error: Arrays only support single index access
+    
+    // Test 3: Single index on string - should be OK
+    let s = "hello"
+    let c = s[0]  // ✅ OK
+    
+    // Test 4: Multiple indices on string - should ERROR
+    let d = s[1, 2]  // ❌ Error: Strings only support single index access
+    
+    // Test 5: Index set on array with multiple indices - should ERROR
+    x[1, 2] = 5  // ❌ Error: Arrays only support single index access
+}

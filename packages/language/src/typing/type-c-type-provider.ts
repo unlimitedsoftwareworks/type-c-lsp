@@ -3535,6 +3535,12 @@ export class TypeCTypeProvider {
             baseType = this.resolveReference(baseType);
         }
 
+        // CRITICAL: Handle generic types with constraints for index operators
+        // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
+        // use its constraint for operator resolution
+        // Example: T: Indexable<K, V> → T[key] resolves to Indexable<K, V>.[]
+        baseType = this.typeUtils.resolveIfGeneric(baseType);
+
         if (isArrayType(baseType)) {
             return baseType.elementType;
         }
@@ -3554,6 +3560,11 @@ export class TypeCTypeProvider {
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+
+        // CRITICAL: Handle generic types with constraints for index operators
+        // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
+        // use its constraint for operator resolution
+        baseType = this.typeUtils.resolveIfGeneric(baseType);
 
         // Check for operator overload on classes/interfaces
         // []=  operator takes index types + value type as parameters
@@ -3576,6 +3587,11 @@ export class TypeCTypeProvider {
             baseType = this.resolveReference(baseType);
         }
 
+        // CRITICAL: Handle generic types with constraints for index operators
+        // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
+        // use its constraint for operator resolution
+        baseType = this.typeUtils.resolveIfGeneric(baseType);
+
         if (isArrayType(baseType)) {
             return baseType.elementType;
         }
@@ -3595,6 +3611,11 @@ export class TypeCTypeProvider {
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+
+        // CRITICAL: Handle generic types with constraints for index operators
+        // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
+        // use its constraint for operator resolution
+        baseType = this.typeUtils.resolveIfGeneric(baseType);
 
         // Check for operator overload on classes/interfaces
         // [-]= operator takes index type + value type as parameters

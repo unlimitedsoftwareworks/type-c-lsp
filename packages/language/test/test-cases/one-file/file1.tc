@@ -1,10 +1,31 @@
-type AssertionResult = variant {
-    Ok(),
-    Failed(message: string)
+type Addable = interface {
+    fn + (other: Addable) -> Addable
+    fn -(other: Addable) -> Addable
 }
 
-fn makeRes() {
-    let res: AssertionResult = AssertionResult.Ok()
-
-    let r = res as! AssertionResult.Ok
+type Comparable = interface {
+    fn < (other: Comparable) -> bool
+    fn > (other: Comparable) -> bool
 }
+
+type Numeric = interface Addable, Comparable {
+    fn *(other: Numeric) -> Numeric
+    fn /(other: Numeric) -> Numeric
+}
+
+fn calculate<T: Numeric>(x: T, y: T, z: T) -> Numeric {
+    // Should resolve all operators through Numeric constraint
+    let sum: Numeric = x + y
+    let product: Numeric = sum * z
+    if product > x {
+        return product / z
+    }
+    return x - y
+}
+
+
+I get:
+
+Cannot infer common type: found Numeric, T: Numerictype-c(TCE040)
+
+From both the returns of the function ... any clue why?

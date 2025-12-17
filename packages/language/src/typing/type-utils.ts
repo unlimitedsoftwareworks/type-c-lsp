@@ -1060,7 +1060,86 @@ export class TypeCTypeUtils {
     }
 
     isInterfaceAssignableToInterface(from: InterfaceTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
-        return failure(`Interface to interface assignment not yet implemented`);
+        // Structural subtyping: 'from' must have all methods of 'to' with compatible signatures
+        // This enables interface inheritance and join type assignability
+        
+        // Collect all methods from 'from' including inherited ones
+        const allFromMethods = this.collectAllInterfaceMethods(from);
+        
+        for (const toMethod of to.methods) {
+            // Find all methods with matching names in 'from' (to handle overloads)
+            const candidateMethods = allFromMethods.filter(m =>
+                m.names.some(name => toMethod.names.includes(name))
+            );
+
+            if (candidateMethods.length === 0) {
+                return failure(`interface does not implement required method '${toMethod.names[0]}'`);
+            }
+
+            // Check if any candidate method matches the signature
+            let foundMatch = false;
+            let lastError = '';
+
+            for (const fromMethod of candidateMethods) {
+                // Check type compatibility (allowing covariant return types)
+                const result = this.isMethodImplementationCompatible(fromMethod, toMethod);
+                if (result.success) {
+                    foundMatch = true;
+                    break;
+                }
+                lastError = result.message || '';
+            }
+
+            if (!foundMatch) {
+                // Build a helpful error message showing expected signature
+                const expectedSig = `${toMethod.names[0]}(${toMethod.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${toMethod.returnType.toString()}`;
+                return failure(`method '${toMethod.names[0]}' signature mismatch: expected ${expectedSig} but no matching overload found. ${lastError}`);
+            }
+        }
+        
+        // Also verify that all required methods from 'to' supertypes are satisfied
+        for (const toSuperType of to.superTypes) {
+            const resolvedToSuper = this.resolveIfReference(toSuperType);
+            const toSuperInterface = this.asInterfaceType(resolvedToSuper);
+            
+            if (toSuperInterface) {
+                const superResult = this.isInterfaceAssignableToInterface(from, toSuperInterface);
+                if (!superResult.success) {
+                    return superResult;
+                }
+            }
+        }
+        
+        return success();
+    }
+    
+    /**
+     * Recursively collects all methods from an interface including inherited ones.
+     * This enables proper structural subtyping for interface inheritance.
+     *
+     * Since interfaces use structural typing, we simply collect all methods from
+     * the entire inheritance hierarchy. Duplicate methods (same signature) don't
+     * cause issues - they're structurally equivalent anyway.
+     *
+     * @param iface The interface to collect methods from
+     * @returns Array of all methods (direct + inherited)
+     */
+    collectAllInterfaceMethods(iface: InterfaceTypeDescription): MethodType[] {
+        const allMethods: MethodType[] = [...iface.methods];
+        
+        // Recursively collect methods from supertypes
+        for (const superType of iface.superTypes) {
+            const resolvedSuper = this.resolveIfReference(superType);
+            const superInterface = this.asInterfaceType(resolvedSuper);
+            
+            if (superInterface) {
+                // Recursively get all methods from the supertype
+                const superMethods = this.collectAllInterfaceMethods(superInterface);
+                allMethods.push(...superMethods);
+            }
+        }
+        
+        return allMethods;
     }
 
     /**
@@ -2315,81 +2394,95 @@ export class TypeCTypeUtils {
                         if (allIdentical) {
                             commonType = firstType;
                         } else {
-                            // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
-                            const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
-                            if (structTypes.length === nonNullTypes.length) {
-                            // All types are structs or resolve to structs
-                            commonType = this.getCommonStructType(structTypes);
-                            // Check if getCommonStructType returned an error
-                            if (isErrorType(commonType)) {
-                                return commonType;
-                            }
-                        } else {
-                            // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
-                            // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
-                            const allReferences = nonNullTypes.every(t => isReferenceType(t));
-                            if (allReferences) {
-                                const referenceTypes = nonNullTypes.filter(isReferenceType);
-                                const firstDecl = referenceTypes[0].declaration;
-
-                                // Check if all references point to the same declaration
-                                const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
-                                if (allSameDecl) {
-                                    // Unify generic arguments across all references
-                                    commonType = this.getCommonReferenceType(referenceTypes);
-                                    // Check if getCommonReferenceType returned an error
-                                    if (isErrorType(commonType)) {
-                                        return commonType;
-                                    }
-                                } else {
-                                    // Different declarations - try structural LUB (NEW!)
-                                    // This enables finding common supertypes for structural subtypes
-                                    // Example: [AstNode, VarDecl] → struct { _type: string }
-                                    commonType = this.computeLeastUpperBound(referenceTypes);
-                                    if (isErrorType(commonType)) {
-                                        return commonType;
-                                    }
-                                }
+                            // CRITICAL: Check if types differ only by generic constraints
+                            // This handles: T: Numeric and Numeric should unify to Numeric
+                            // Resolve any generics to their constraints for comparison
+                            const resolvedTypes = nonNullTypes.map(t => this.resolveIfGeneric(t));
+                            const firstResolved = resolvedTypes[0];
+                            const allResolvedIdentical = resolvedTypes.every(t =>
+                                this.areTypesEqual(t, firstResolved).success
+                            );
+                            
+                            if (allResolvedIdentical) {
+                                // All types resolve to the same constraint - use the constraint
+                                commonType = firstResolved;
                             } else {
-                                // Check if all are variant constructors - unify generic arguments
-                                const allVariantConstructors = nonNullTypes.every(t => isVariantConstructorType(t));
-                                if (allVariantConstructors) {
-                                    commonType = this.getCommonVariantConstructorType(nonNullTypes.filter(isVariantConstructorType));
-                                    // Check if getCommonVariantConstructorType returned an error
+                                // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
+                                const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
+                                if (structTypes.length === nonNullTypes.length) {
+                                    // All types are structs or resolve to structs
+                                    commonType = this.getCommonStructType(structTypes);
+                                    // Check if getCommonStructType returned an error
                                     if (isErrorType(commonType)) {
                                         return commonType;
                                     }
                                 } else {
-                                    // Check for MIXED case: ReferenceTypes and VariantConstructorTypes to the same variant
-                                    // Example: Result<U, E> and Result.Err<never, E> should unify to Result<U, E>
-                                    const hasReferences = nonNullTypes.some(t => isReferenceType(t));
-                                    const hasConstructors = nonNullTypes.some(t => isVariantConstructorType(t));
-                                    
-                                    if (hasReferences && hasConstructors) {
-                                        // Try to unify mixed references and constructors
-                                        const unified = this.getCommonMixedVariantTypes(nonNullTypes);
-                                        if (!isErrorType(unified)) {
-                                            commonType = unified;
+                                    // Check if all are references to the same declaration (e.g., Result<i32, never> and Result<never, string>)
+                                    // This handles arrays of variant constructor calls: [Result.Ok(1), Result.Err("error")]
+                                    const allReferences = nonNullTypes.every(t => isReferenceType(t));
+                                    if (allReferences) {
+                                        const referenceTypes = nonNullTypes.filter(isReferenceType);
+                                        const firstDecl = referenceTypes[0].declaration;
+
+                                        // Check if all references point to the same declaration
+                                        const allSameDecl = referenceTypes.every(ref => ref.declaration === firstDecl);
+                                        if (allSameDecl) {
+                                            // Unify generic arguments across all references
+                                            commonType = this.getCommonReferenceType(referenceTypes);
+                                            // Check if getCommonReferenceType returned an error
+                                            if (isErrorType(commonType)) {
+                                                return commonType;
+                                            }
                                         } else {
-                                            return unified;
+                                            // Different declarations - try structural LUB (NEW!)
+                                            // This enables finding common supertypes for structural subtypes
+                                            // Example: [AstNode, VarDecl] → struct { _type: string }
+                                            commonType = this.computeLeastUpperBound(referenceTypes);
+                                            if (isErrorType(commonType)) {
+                                                return commonType;
+                                            }
                                         }
                                     } else {
-                                        // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
-                                        // For now, if types differ, it's an error
-                                        return this.typeFactory.createErrorType(
-                                            `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
-                                            undefined,
-                                            firstType.node
-                                        );
-                                       }
-                                   }
-                               }
-                           }
-                       }
-                   }
-               }
-           }
-       }
+                                        // Check if all are variant constructors - unify generic arguments
+                                        const allVariantConstructors = nonNullTypes.every(t => isVariantConstructorType(t));
+                                        if (allVariantConstructors) {
+                                            commonType = this.getCommonVariantConstructorType(nonNullTypes.filter(isVariantConstructorType));
+                                            // Check if getCommonVariantConstructorType returned an error
+                                            if (isErrorType(commonType)) {
+                                                return commonType;
+                                            }
+                                        } else {
+                                            // Check for MIXED case: ReferenceTypes and VariantConstructorTypes to the same variant
+                                            // Example: Result<U, E> and Result.Err<never, E> should unify to Result<U, E>
+                                            const hasReferences = nonNullTypes.some(t => isReferenceType(t));
+                                            const hasConstructors = nonNullTypes.some(t => isVariantConstructorType(t));
+                                            
+                                            if (hasReferences && hasConstructors) {
+                                                // Try to unify mixed references and constructors
+                                                const unified = this.getCommonMixedVariantTypes(nonNullTypes);
+                                                if (!isErrorType(unified)) {
+                                                    commonType = unified;
+                                                } else {
+                                                    return unified;
+                                                }
+                                            } else {
+                                                // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
+                                                // For now, if types differ, it's an error
+                                                return this.typeFactory.createErrorType(
+                                                    `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                                    undefined,
+                                                    firstType.node
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // If we had any nulls, wrap the common type in Nullable (but only once)
         if (nullTypes.length > 0) {

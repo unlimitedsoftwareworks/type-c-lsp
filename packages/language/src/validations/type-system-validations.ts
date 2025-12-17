@@ -282,15 +282,22 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Skip if operator might be overloaded (class type or generic with constraint)
         // For classes: they may define operator overload methods
         // For generics: if the constraint defines the operator, allow it
-        if (isClassType(leftType)) {
+        if (isClassType(leftType) || isClassType(rightType)) {
             return;
         }
         
-        // Check if left operand is a generic type with a constraint that defines this operator
+        // Check if EITHER operand is a generic type with a constraint that defines this operator
+        // This allows both T + T and T + Constraint and Constraint + T patterns
         if (isGenericType(leftType) && leftType.constraint) {
-            // Check if the constraint (interface/join/union) defines this operator
             const operatorName = node.op;
             if (this.constraintDefinesOperator(leftType.constraint, operatorName)) {
+                return;
+            }
+        }
+        
+        if (isGenericType(rightType) && rightType.constraint) {
+            const operatorName = node.op;
+            if (this.constraintDefinesOperator(rightType.constraint, operatorName)) {
                 return;
             }
         }
@@ -3484,6 +3491,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * that corresponds to the given operator. For example, checking if a constraint
      * defines the '+' operator by looking for a method named '+'.
      *
+     * CRITICAL: This must check inherited methods too! If Numeric extends Addable,
+     * and Addable defines '+', then Numeric also defines '+'.
+     *
      * @param constraint The constraint type (interface, union, or join)
      * @param operatorName The operator to check for (e.g., '+', '-', '*')
      * @returns true if the constraint defines this operator
@@ -3505,9 +3515,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         // Handle interface constraints: check if the interface defines the operator method
+        // CRITICAL: Must check ALL methods including inherited ones!
         if (isInterfaceType(resolvedConstraint)) {
-            // Check if any method in the interface is named after this operator
-            return resolvedConstraint.methods.some(method =>
+            // Collect all methods including inherited ones
+            const allMethods = this.typeUtils.collectAllInterfaceMethods(resolvedConstraint);
+            // Check if any method (direct or inherited) is named after this operator
+            return allMethods.some(method =>
                 method.names.includes(operatorName)
             );
         }

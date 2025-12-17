@@ -1,0 +1,17 @@
+type Option<T> = variant {
+    Some(value: T),
+    None()
+}
+
+fn test() {
+    let z: Option<u32> = Option.Some(1u32)
+
+    /// @Error(TCE160): Cannot safely cast
+    let a = z as Option.Some<string>
+
+    /// @Error(TCE160): Cannot safely cast
+    let b = z as Option.Some<u32>
+
+    /// @Error(TCE180): Types are completely unrelated
+    let c = z is Option.Some<string>
+}

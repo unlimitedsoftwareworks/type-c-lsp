@@ -1,0 +1,117 @@
+// Test file for valid 'is' operator usage
+// All cases here should pass validation
+
+// Define test types - direct definitions
+type Animal = class {}
+type Dog = class {}
+type Cat = class {}
+
+type Drawable = interface {
+    fn draw() -> void
+}
+
+// Define test types - via type declarations
+type Shape = interface {
+    fn area() -> f64
+}
+
+type Vehicle = class {
+    let speed: u32
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+fn testClassChecks() {
+    let animal: Animal = new Animal()
+    
+    // ✅ Valid: Class type on RHS
+    if animal is Cat {
+        // Check if animal is a Cat
+    }
+    
+    if animal is Dog {
+        // Check if animal is a Dog
+    }
+}
+
+fn testInterfaceChecks() {
+    let obj: Animal = new Animal()
+    
+    // ✅ Valid: Interface type on RHS (direct definition)
+    if obj is Drawable {
+        // Check if obj implements Drawable
+    }
+    
+    // ✅ Valid: Interface type on RHS (via type declaration)
+    if obj is Shape {
+        // Check if obj implements Shape
+    }
+}
+
+fn testClassViaTypeDeclaration() {
+    let v: Vehicle = new Vehicle()
+    
+    // ✅ Valid: Class type on RHS (defined via type declaration)
+    if v is Vehicle {
+        // Check if v is a Vehicle
+    }
+}
+
+fn testVariantChecks() {
+    let opt: Option<u32> = Option.Some(42)
+    
+    // ✅ Valid: Variant type on RHS
+    if opt is Option<u32> {
+        // Check if opt is any Option constructor
+    }
+    
+    // ✅ Valid: Variant constructor type on RHS
+    if opt is Option.Some<u32> {
+        // Check if opt is specifically Option.Some
+    }
+    
+    if opt is Option.None<u32> {
+        // Check if opt is specifically Option.None
+    }
+}
+
+fn testResultVariant() {
+    let res: Result<u32, string> = Result.Ok(100)
+    
+    // ✅ Valid: Variant type on RHS
+    if res is Result<u32, string> {
+        // Any Result variant
+    }
+    
+    // ✅ Valid: Variant constructor types on RHS
+    if res is Result.Ok<u32, string> {
+        // Specifically Ok
+    }
+    
+    if res is Result.Err<u32, string> {
+        // Specifically Err
+    }
+}
+
+fn main() {
+    testClassChecks()
+    testInterfaceChecks()
+    testClassViaTypeDeclaration()
+    testVariantChecks()
+    testResultVariant()
+}
+
+fn test() {
+    let z: Option<u32> = Option.Some(1u32)
+    
+    let a = z as? Option.Some<u32>
+    let b = z is Option.Some<u32>
+}

@@ -1597,12 +1597,17 @@ export class TypeCTypeUtils {
             }
         }
 
-        // Variant to variant constructor - not guaranteed (safe cast)
+        // Variant to variant constructor - downcast, NOT safe for regular 'as'
+        // This is like casting from Animal to Cat - we don't know at compile-time
+        // if the variant value is actually that specific constructor
+        // Example: Option<u32> as Option.Some is NOT safe - could be Option.None!
         if (isVariantType(resolvedFrom) && isVariantConstructorType(resolvedTo)) {
             // Check if the constructor exists in the source variant
             const constructor = resolvedFrom.constructors.find(c => c.name === resolvedTo.constructorName);
             if (constructor) {
-                return success();
+                // This is a downcast - return failure to indicate it's not safe for 'as'
+                // It's valid for 'as?' (safe cast) or 'as!' (forced cast), but NOT 'as'
+                return failure(`Cannot safely cast variant to specific constructor - use 'as?' for safe cast or 'as!' to force`);
             }
             return failure(`Variant does not have constructor '${resolvedTo.constructorName}'`);
         }

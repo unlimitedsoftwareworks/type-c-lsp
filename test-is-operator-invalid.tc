@@ -1,0 +1,98 @@
+// Test file for invalid 'is' operator usage
+// All cases here should produce TCE180 validation errors
+
+class Animal {}
+
+fn testPrimitiveTypes() {
+    let n: u32 = 42
+    
+    // ❌ Error: u32 is a primitive type
+    if n is u32 {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+    
+    let s: string = "hello"
+    
+    // ❌ Error: string is a primitive type
+    if s is string {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+    
+    let b: bool = true
+    
+    // ❌ Error: bool is a primitive type
+    if b is bool {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+    
+    let f: f64 = 3.14
+    
+    // ❌ Error: f64 is a primitive type
+    if f is f64 {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testArrayType() {
+    let arr: u32[] = [1, 2, 3]
+    
+    // ❌ Error: u32[] is an array type, not a class/interface/variant
+    if arr is u32[] {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testStructType() {
+    let point = {x: 10, y: 20}
+    
+    // ❌ Error: struct types are not supported for 'is'
+    if point is {x: u32, y: u32} {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testNullableType() {
+    let maybeAnimal: Animal? = new Animal()
+    
+    // ❌ Error: Animal? is a nullable type, not a class
+    if maybeAnimal is Animal? {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testTupleType() {
+    let tuple = (1, "hello")
+    
+    // ❌ Error: tuple types are not supported
+    if tuple is (u32, string) {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testUnionType() {
+    let val: u32 | string = 42
+    
+    // ❌ Error: union types are not directly supported for 'is'
+    if val is u32 | string {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testFunctionType() {
+    let func = fn(x: u32) -> u32 = x * 2
+    
+    // ❌ Error: function types are not supported
+    if func is fn(u32) -> u32 {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn main() {
+    testPrimitiveTypes()
+    testArrayType()
+    testStructType()
+    testNullableType()
+    testTupleType()
+    testUnionType()
+    testFunctionType()
+}

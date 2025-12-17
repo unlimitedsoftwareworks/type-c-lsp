@@ -141,4 +141,7 @@ export enum ErrorCode {
 
     // Nullable Type Errors (TCE170-TCE179)
     TC_NULLABLE_PRIMITIVE_TYPE = 'TCE170',
+
+    // Instance Check Errors (TCE180-TCE189)
+    TC_INSTANCE_CHECK_INVALID_RHS_TYPE = 'TCE180',
 }

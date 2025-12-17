@@ -1,0 +1,69 @@
+// Test file for invalid 'is' operator usage
+// All cases here should produce TCE180 validation errors
+
+type Animal = class {}
+
+fn testPrimitiveTypes() {
+    let n: u32 = 42
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if n is u32 {
+    }
+    
+    let s: string = "hello"
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if s is string {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+    
+    let b: bool = true
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if b is bool {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+    
+    let f: f64 = 3.14
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if f is f64 {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testArrayType() {
+    let arr: u32[] = [1, 2, 3]
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if arr is u32[] {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testStructType() {
+    let point = {x: 10, y: 20}
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if point is {x: u32, y: u32} {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testNullableType() {
+    let maybeAnimal: Animal? = new Animal()
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if maybeAnimal is Animal? {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}
+
+fn testFunctionType() {
+    let func = fn(x: u32) -> u32 = x * 2
+    
+    /// @Error(TCE180): Invalid type for 'is' operator
+    if func is fn(u32) -> u32 {
+        // ERROR: TC_INSTANCE_CHECK_INVALID_RHS_TYPE
+    }
+}

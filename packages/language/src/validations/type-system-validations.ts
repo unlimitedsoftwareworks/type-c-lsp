@@ -99,7 +99,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ThrowExpression: this.checkExpressionForErrors,
             MutateExpression: this.checkExpressionForErrors,
             CoroutineExpression: this.checkExpressionForErrors,
-            InstanceCheckExpression: this.checkExpressionForErrors,
+            InstanceCheckExpression: [this.checkInstanceCheckExpression, this.checkExpressionForErrors],
             ThisExpression: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
             ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
@@ -3352,6 +3352,88 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 node: node,
                 code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
+        }
+    }
+
+    /**
+     * Check instance check expressions (`is` operator) for valid RHS types.
+     *
+     * The `is` operator checks if a value is an instance of a type at runtime.
+     * Only certain types support runtime type checking:
+     * - Class types (check if instance is of that class)
+     * - Interface types (check if instance implements that interface)
+     * - Variant types (check if value is any constructor of that variant)
+     * - Variant constructor types (check if value is that specific constructor)
+     *
+     * Examples:
+     * ```tc
+     * let x: Animal = ...
+     * if x is Cat { ... }                    // ✅ OK - Cat is a class
+     *
+     * let y: any = ...
+     * if y is Drawable { ... }               // ✅ OK - Drawable is an interface
+     *
+     * let opt: Option<u32> = ...
+     * if opt is Option.Some { ... }          // ✅ OK - Option.Some is a variant constructor
+     * if opt is Option { ... }               // ✅ OK - Option is a variant
+     *
+     * let n: u32 = ...
+     * if n is u32 { ... }                    // ❌ Error - u32 is a primitive type
+     * if n is string { ... }                 // ❌ Error - string is a primitive type
+     * ```
+     */
+    checkInstanceCheckExpression = (node: ast.InstanceCheckExpression, accept: ValidationAcceptor): void => {
+        // Get the type of the expression being checked (LHS of `is`)
+        const sourceType = this.typeProvider.getType(node.left);
+        
+        // Get the type we're checking against (RHS of `is`)
+        const destType = this.typeProvider.getType(node.destType);
+        
+        // Resolve reference types to get the actual types
+        const resolvedSource = this.typeUtils.resolveIfReference(sourceType);
+        const resolvedDest = this.typeUtils.resolveIfReference(destType);
+        
+        // Skip validation if either is an error type
+        if (isErrorType(resolvedSource) || isErrorType(resolvedDest)) {
+            return;
+        }
+        
+        // Check if it's one of the allowed types
+        const isValidType = isClassType(resolvedDest) ||
+                           isInterfaceType(resolvedDest) ||
+                           isVariantType(resolvedDest) ||
+                           isVariantConstructorType(resolvedDest);
+        
+        if (!isValidType) {
+            const errorCode = ErrorCode.TC_INSTANCE_CHECK_INVALID_RHS_TYPE;
+            const typeKindName = this.getTypeKindName(resolvedDest);
+            accept('error',
+                `Invalid type for 'is' operator: The 'is' operator requires a Class, Interface, Variant, or Variant Constructor type, but got ${typeKindName} '${resolvedDest.toString()}'. ` +
+                `Runtime type checking is only supported for these reference types.`,
+                {
+                    node: node.destType,
+                    code: errorCode
+                }
+            );
+            return;
+        }
+        
+        // Now validate that there's a valid relationship between LHS and RHS
+        // Similar to cast validation, check if there's ANY relationship between the types
+        const sourceToDestResult = this.typeUtils.canCastTypes(resolvedSource, resolvedDest);
+        const destToSourceResult = this.typeUtils.canCastTypes(resolvedDest, resolvedSource);
+        const hasRelationship = sourceToDestResult.success || destToSourceResult.success;
+        
+        if (!hasRelationship) {
+            const errorCode = ErrorCode.TC_INSTANCE_CHECK_INVALID_RHS_TYPE;
+            accept('error',
+                `Invalid 'is' check from '${sourceType.toString()}' to '${destType.toString()}': Types are completely unrelated. ` +
+                `The 'is' operator can only be used when there's a valid type relationship between the operands.`,
+                {
+                    node: node.destType,
+                    code: errorCode
+                }
+            );
         }
     }
 

@@ -66,7 +66,7 @@ fn test4() {
 // ERROR: Attempting to mutate const attribute
 fn test5() {
     let counter = new Counter(100u32)
-    /// @Error(TCE015): Attribute 'max' is constant and cannot be mutated
+    /// @Error(TCE191): Attribute 'max' is constant and cannot be mutated
     let invalid = counter.{max: 200u32}
 }
 
@@ -101,7 +101,7 @@ fn test9() {
 // ERROR: Attempting to update const class attribute with computed value
 fn test10() {
     let vec = new Vector3(1.0f, 2.0f, 3.0f)
-    /// @Error(TCE015): Attribute 'magnitude' is constant and cannot be mutated
+    /// @Error(TCE191): Attribute 'magnitude' is constant and cannot be mutated
     let invalid = vec.{magnitude: vec.x + vec.y}
 }
 

@@ -1,0 +1,87 @@
+// Test lvalue validation
+
+fn main() {
+    // Valid assignments
+    let x = 10
+    x = 20  // OK - mutable variable
+
+    let arr = [1, 2, 3]
+    arr[0] = 5  // OK - array element
+
+    // Invalid assignments - literals
+    10 = 5  // ERROR: Cannot assign to literal value
+    "hello" = "world"  // ERROR: Cannot assign to literal value
+    true = false  // ERROR: Cannot assign to literal value
+
+    // Invalid assignments - const variables
+    const y = 30
+    y = 40  // ERROR: Cannot assign to const variable
+
+    // Invalid assignments - function calls
+    fn getId() -> u32 = 42
+    getId() = 100  // ERROR: Cannot assign to function call result
+
+    // Invalid assignments - expressions
+    (x + 10) = 5  // ERROR: Cannot assign to expression result
+    (x * 2) = 10  // ERROR: Cannot assign to expression result
+
+    // Invalid assignments - type casts
+    (x as u64) = 100  // ERROR: Cannot assign to cast expression result
+
+    // Invalid assignments - 'this'
+    // this = something  // ERROR: Cannot assign to 'this'
+
+    // Invalid assignments - unary expressions
+    !x = true  // ERROR: Cannot assign to unary expression result
+    -x = 5  // ERROR: Cannot assign to unary expression result
+
+    // Invalid assignments - new expression
+    class Point { let x: u32, let y: u32 }
+    new Point(0, 0) = new Point(1, 1)  // ERROR: Cannot assign to new expression result
+
+    // Invalid assignments - match expression
+    match x {
+        10 => x,
+        _ => 0
+    } = 5  // ERROR: Cannot assign to expression result
+
+    // Invalid assignments - if expression
+    if x > 5 => x else 0 = 10  // ERROR: Cannot assign to expression result
+
+    // Invalid assignments - iterator variables
+    foreach i in [1, 2, 3] {
+        i = 10  // ERROR: Cannot assign to iterator variable
+    }
+
+    // Valid assignments - member access and object update
+    class MyClass {
+        let mutableField: u32
+        const immutableField: u32
+
+        fn init(m: u32, i: u32) {
+            // OK - const can be assigned in constructor using direct assignment
+            this.mutableField = m
+            this.immutableField = i
+
+            // OK - const can also be assigned using object update syntax in constructor
+            this.{
+                mutableField: m,
+                immutableField: i
+            }
+        }
+
+        fn updateFields(m: u32, i: u32) {
+            this.mutableField = m  // OK - mutable attribute
+            this.immutableField = i  // ERROR: Cannot assign to const attribute outside constructor
+
+            // ERROR: Cannot assign to const attribute outside constructor
+            this.{
+                mutableField: m,
+                immutableField: i  // ERROR here
+            }
+        }
+    }
+    let obj = new MyClass(1, 2)
+    obj.mutableField = 100  // OK - mutable attribute
+    obj.immutableField = 200  // ERROR: Cannot assign to const attribute outside constructor
+}

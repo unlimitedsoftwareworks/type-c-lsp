@@ -144,4 +144,9 @@ export enum ErrorCode {
 
     // Instance Check Errors (TCE180-TCE189)
     TC_INSTANCE_CHECK_INVALID_RHS_TYPE = 'TCE180',
+
+    // Lvalue Validation Errors (TCE190-TCE199)
+    TC_INVALID_ASSIGNMENT_TARGET = 'TCE190',
+    TC_ASSIGNMENT_TO_CONST = 'TCE191',
+    TC_ASSIGNMENT_TO_IMMUTABLE = 'TCE192',
 }

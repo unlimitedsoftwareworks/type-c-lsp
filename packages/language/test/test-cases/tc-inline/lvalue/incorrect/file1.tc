@@ -18,8 +18,15 @@ type  MyClass = class {
             immutableField: b
         }
 
+        this.immutableField = 1
+
         /// Error:
         this = new MyClass(1, 2)
+    }
+
+    fn get(){
+        /// @Error(TCE191): Const attributes can only be assigned in constructors
+        this.{immutableField: 1}
     }
 }
 
@@ -85,10 +92,10 @@ fn main() {
 
     // Invalid assignments - iterator variables
     foreach i, v in [1, 2, 3] {
-        /// @Error(TCE190): Cannot assign to 
+        /// @Error(TCE192): Cannot assign to 
         i = 10  // ERROR: Cannot assign to iterator variable
 
-        /// @Error(TCE190): Cannot assign to 
+        /// @Error(TCE192): Cannot assign to 
         v = 10
     }
 
@@ -98,4 +105,9 @@ fn main() {
     obj.mutableField = 100  // OK - mutable attribute
     /// @Error(TCE191): Cannot assign to 
     obj.immutableField = 200  // ERROR: Cannot assign to const attribute
+
+    let const z: {x: u32, y:u32} = {1, 2}
+
+    /// @Error(TCE191): Cannot assign to const variable
+    z = {2, 3}
 }

@@ -282,6 +282,16 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         // Assignment operators: right must be compatible with left
         const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
         if (assignmentOps.includes(node.op)) {
+            // Validate that the left side is a valid lvalue
+            const lvalueError = this.checkLvalue(node.left);
+            if (lvalueError) {
+                accept('error', lvalueError.message, {
+                    node: node.left,
+                    code: lvalueError.code
+                });
+                return;
+            }
+
             // For compound assignments (+=, -=, etc.), check if LHS class implements the operator
             if (node.op !== '=' && isClassType(leftType)) {
                 // Extract the underlying operator: '+=' → '+', '-=' → '-', etc.
@@ -2833,16 +2843,16 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 continue;
             }
             
-            /**
-             * TODO: Make sure we are not within this class's constructor!
-             * Because we allow mutations there
-             */
+            // Allow const assignment in constructor (init method)
             if (fieldInfo.isConst) {
-                accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated`, {
-                    node: kvPair,
-                    code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
-                });
-                continue;
+                if (!this.isInConstructor(node)) {
+                    accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated. Const attributes can only be assigned in constructors (init methods).`, {
+                        node: kvPair,
+                        code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                    });
+                    continue;
+                }
+                // Valid: const can be assigned in constructor
             }
 
             // Check type compatibility
@@ -3835,6 +3845,286 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         
         // For other constraint types (classes, etc.), we don't support operator overloading
         // through constraints yet, so return false
+        return false;
+    }
+
+    /**
+     * Check if an expression is a valid lvalue (can be assigned to).
+     *
+     * Valid lvalues:
+     * - Variable references (non-const)
+     * - Member access (non-const attributes)
+     * - Index access (array elements)
+     * - Reverse index access
+     *
+     * Invalid lvalues:
+     * - Literals
+     * - Function calls
+     * - Binary expressions (except assignments)
+     * - Const variables
+     * - Const class attributes
+     *
+     * @param expr The expression to check
+     * @returns Error info if invalid lvalue, undefined if valid
+     */
+    private checkLvalue(expr: ast.Expression): { message: string; code: ErrorCode } | undefined {
+        // Valid lvalue: Variable reference (must check for const)
+        if (ast.isQualifiedReference(expr)) {
+            const ref = expr.reference?.ref;
+            if (!ref) {
+                return {
+                    message: `Cannot assign to unresolved reference`,
+                    code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+                };
+            }
+
+            // Check if it's a const variable
+            if (ast.isVariableDeclaration(ref)) {
+                if (ref.isConst) {
+                    return {
+                        message: `Cannot assign to const variable '${ref.name}'`,
+                        code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                    };
+                }
+                return undefined; // Valid mutable variable
+            }
+
+            // Check if it's a function parameter
+            if (ast.isFunctionParameter(ref)) {
+                // Parameters are mutable unless explicitly marked otherwise
+                return undefined;
+            }
+
+            // Check if it's a class attribute
+            if (ast.isClassAttributeDecl(ref)) {
+                if (ref.isConst) {
+                    // Allow assignment in constructor (init method)
+                    if (this.isInConstructor(expr)) {
+                        return undefined; // Valid: const can be assigned in constructor
+                    }
+                    return {
+                        message: `Cannot assign to const attribute '${ref.name}'. Const attributes can only be assigned in constructors (init methods).`,
+                        code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                    };
+                }
+                return undefined; // Valid mutable attribute
+            }
+
+            // Check if it's an iterator variable (from foreach loops)
+            if (ast.isIteratorVar(ref)) {
+                return {
+                    message: `Cannot assign to iterator variable '${ref.name || 'iterator'}'. Iterator variables are immutable.`,
+                    code: ErrorCode.TC_ASSIGNMENT_TO_IMMUTABLE
+                };
+            }
+
+            // Check if it's a variable pattern (from match expressions)
+            if (ast.isVariablePattern(ref)) {
+                return {
+                    message: `Cannot assign to pattern variable '${ref.name || 'pattern'}'. Pattern variables are immutable.`,
+                    code: ErrorCode.TC_ASSIGNMENT_TO_IMMUTABLE
+                };
+            }
+
+            // Other references (functions, types, etc.) cannot be assigned to
+            return {
+                message: `Cannot assign to '${this.getReferenceName(ref)}'. This is not a valid assignment target.`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Valid lvalue: Member access (must check for const attributes)
+        if (ast.isMemberAccess(expr)) {
+            const element = expr.element?.ref;
+            if (element && ast.isClassAttributeDecl(element) && element.isConst) {
+                // Allow assignment in constructor (init method)
+                if (this.isInConstructor(expr)) {
+                    return undefined; // Valid: const can be assigned in constructor
+                }
+                return {
+                    message: `Cannot assign to const attribute '${element.name}'. Const attributes can only be assigned in constructors (init methods).`,
+                    code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                };
+            }
+            return undefined; // Valid member access
+        }
+
+        // Valid lvalue: Index access
+        if (ast.isIndexAccess(expr)) {
+            return undefined;
+        }
+
+        // Valid lvalue: Reverse index access
+        if (ast.isReverseIndexAccess(expr)) {
+            return undefined;
+        }
+
+        // Invalid lvalue: Literals
+        if (ast.isLiteralExpression(expr)) {
+            return {
+                message: `Cannot assign to literal value`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Function calls
+        if (ast.isFunctionCall(expr)) {
+            return {
+                message: `Cannot assign to function call result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Binary expressions (unless they're also assignments, which is handled separately)
+        if (ast.isBinaryExpression(expr)) {
+            return {
+                message: `Cannot assign to expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Unary expressions
+        if (ast.isUnaryExpression(expr)) {
+            return {
+                message: `Cannot assign to unary expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Type cast expressions
+        if (ast.isTypeCastExpression(expr)) {
+            return {
+                message: `Cannot assign to cast expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Instance check expressions
+        if (ast.isInstanceCheckExpression(expr)) {
+            return {
+                message: `Cannot assign to type check result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: 'this' expression
+        if (ast.isThisExpression(expr)) {
+            return {
+                message: `Cannot assign to 'this'`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Lambda expressions
+        if (ast.isLambdaExpression(expr)) {
+            return {
+                message: `Cannot assign to lambda expression`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Array/struct construction
+        if (ast.isArrayConstructionExpression(expr) ||
+            ast.isNamedStructConstructionExpression(expr) ||
+            ast.isAnonymousStructConstructionExpression(expr)) {
+            return {
+                message: `Cannot assign to constructor expression`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Match/If/LetIn expressions
+        if (ast.isMatchExpression(expr) ||
+            ast.isConditionalExpression(expr) ||
+            ast.isLetInExpression(expr)) {
+            return {
+                message: `Cannot assign to expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Do expression
+        if (ast.isDoExpression(expr)) {
+            return {
+                message: `Cannot assign to do expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: New expression
+        if (ast.isNewExpression(expr)) {
+            return {
+                message: `Cannot assign to new expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Throw/Yield/Mutate/Coroutine expressions
+        if (ast.isThrowExpression(expr) ||
+            ast.isYieldExpression(expr) ||
+            ast.isMutateExpression(expr) ||
+            ast.isCoroutineExpression(expr)) {
+            return {
+                message: `Cannot assign to expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Postfix operations (++, --, denull)
+        if (ast.isPostfixOp(expr) || ast.isDenullExpression(expr)) {
+            return {
+                message: `Cannot assign to expression result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Tuple expression
+        if (ast.isTupleExpression(expr)) {
+            return {
+                message: `Cannot assign to tuple expression. Use destructuring assignment instead.`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Invalid lvalue: Object update expression
+        if (ast.isObjectUpdate(expr)) {
+            return {
+                message: `Cannot assign to object update result`,
+                code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+            };
+        }
+
+        // Default: Unknown expression type, treat as invalid
+        return {
+            message: `Invalid assignment target`,
+            code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET
+        };
+    }
+
+    /**
+     * Check if an expression is within a constructor (init method).
+     *
+     * @param expr The expression to check
+     * @returns true if inside an init method, false otherwise
+     */
+    private isInConstructor(expr: AstNode): boolean {
+        let current: AstNode | undefined = expr;
+        
+        // Walk up the AST tree to find a containing method
+        while (current) {
+            // Check if we're in a class method
+            if (ast.isClassMethod(current)) {
+                // Check if this method is named 'init' (constructor)
+                const method = current.method;
+                if (method && method.names.includes('init')) {
+                    return true;
+                }
+                return false; // In a method, but not a constructor
+            }
+            
+            current = current.$container;
+        }
+        
         return false;
     }
 

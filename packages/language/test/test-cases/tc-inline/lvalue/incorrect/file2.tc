@@ -3,20 +3,19 @@
 
 // Interface method implementation must match mutability
 type Processor = interface {
-    fn transform(mut value: u32) -> u32
+    fn transform(value: u32) -> u32
 }
 
 type MyProcessor = class  Processor {
-    // Must use 'mut' to match interface signature
-    fn transform(mut value: u32) -> u32 {
-        value = value * 2  // OK: can mutate
-        return value
+    fn transform(value: u32) -> u32 {
+        let value1 = value * 2  // OK: can mutate
+        return value1
     }
 }
 
-/// @Error(TCE007): but implementation has immutable parameter
+/// @Error(TCE007): but implementation parameter is mutable
 type BadProcessor = class Processor {
-    fn transform(value: u32) -> u32 {  // ERROR: Parameter mutability mismatch with interface
+    fn transform(mut value: u32) -> u32 { 
         return value * 2
     }
 }

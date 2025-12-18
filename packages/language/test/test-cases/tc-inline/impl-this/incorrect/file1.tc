@@ -1,0 +1,38 @@
+type vec3 = struct {
+    x: f32, y: f32, z: f32
+}
+
+type Object3D = interface {
+    fn getPos() -> vec3
+}
+
+type Default3DImpl<T> = impl Object3D (
+    position: T
+) {
+    fn getPos() = this.position
+
+    fn dostuff(x: {x: u32, y: u32}) {}
+}
+
+type Mesh = class {
+    let pos: vec3
+
+    impl Default3DImpl<vec3>(pos)
+
+    // This override has no matching impl method to override!
+    /// @Error(TCE068): Override method 'nonExistent' does not override any method from implementations
+    override fn nonExistent() -> i32 = 0
+    
+    // This override has wrong return type
+    /// @Error(TCE069): signature does not match any impl method
+    override fn getPos() -> i32 = 0
+
+    /// @Error(TCE069): signature does not match any impl method
+    override fn dostuff(mut x: {x: u32, y: u32}) {
+
+    }
+}
+
+fn main() {
+    let m: Mesh = new Mesh()
+}

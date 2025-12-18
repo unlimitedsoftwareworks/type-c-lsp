@@ -71,7 +71,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
             FunctionDeclaration: this.checkFunctionDeclaration,
-            ClassMethod: this.checkClassMethod,
+            ClassMethod: [this.checkClassMethod, this.checkOverrideMethod],
             LambdaExpression: this.checkLambdaExpression,
             IndexSet: [this.checkIndexSet, this.checkIndexAccessMultipleIndices],
             ReverseIndexSet: this.checkReverseIndexSet,
@@ -1338,6 +1338,206 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     node: node.expr??methodHeader.header.returnType,
                     code: ErrorCode.TC_METHOD_RETURN_TYPE_MISMATCH
                 });
+            }
+        }
+    }
+
+    /**
+     * Check that override methods actually override an impl method.
+     *
+     * Validates:
+     * 1. Methods marked with `override` must actually override a method from an implementation
+     * 2. The override signature must match the impl method signature (parameters)
+     * 3. The override return type must be compatible with the impl method return type
+     *
+     * Examples:
+     * ```tc
+     * type Default3DImpl<T> = impl Object3D (position: T) {
+     *     fn getPos() = this.position
+     * }
+     *
+     * class Mesh {
+     *     let pos: vec3
+     *     impl Default3DImpl<vec3>(pos)
+     *     override fn getPos() -> vec3 = this.pos  // ✅ OK - overrides impl method
+     *     override fn nonExistent() -> i32 = 0     // ❌ Error - no impl method to override
+     *     override fn getPos() -> i32 = 0          // ❌ Error - wrong return type
+     * }
+     * ```
+     */
+    checkOverrideMethod = (node: ast.ClassMethod, accept: ValidationAcceptor): void => {
+        // Only validate methods marked with override
+        if (!node.isOverride) {
+            return;
+        }
+
+        // Get the containing class
+        const classNode = AstUtils.getContainerOfType(node, ast.isClassType);
+        if (!classNode) {
+            return;
+        }
+
+        const classType = this.typeProvider.getType(classNode);
+        if (!isClassType(classType)) {
+            return;
+        }
+
+        // Get all method names from this override method
+        const overrideMethodNames = node.method.names;
+        
+        // For each name, check if there's a matching impl method
+        for (const methodName of overrideMethodNames) {
+            // Collect all methods from implementations with this name
+            const implMethods: MethodType[] = [];
+            
+            for (const implRef of classType.implementations) {
+                const implType = this.typeProvider.resolveReference(implRef);
+                
+                if (isImplementationType(implType)) {
+                    // Build generic substitutions if the impl has generic args
+                    let substitutions: Map<string, TypeDescription> | undefined;
+                    if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
+                        substitutions = new Map<string, TypeDescription>();
+                        implRef.declaration.genericParameters.forEach((param, i) => {
+                            if (i < implRef.genericArgs.length) {
+                                substitutions!.set(param.name, implRef.genericArgs[i]);
+                            }
+                        });
+                    }
+                    
+                    // Find methods with matching name
+                    for (const implMethod of implType.methods) {
+                        if (implMethod.names.includes(methodName)) {
+                            // Apply generic substitutions if we have them
+                            if (substitutions && substitutions.size > 0) {
+                                implMethods.push({
+                                    ...implMethod,
+                                    parameters: implMethod.parameters.map(p => ({
+                                        name: p.name,
+                                        type: this.typeUtils.substituteGenerics(p.type, substitutions!),
+                                        isMut: p.isMut
+                                    })),
+                                    returnType: this.typeUtils.substituteGenerics(implMethod.returnType, substitutions!)
+                                });
+                            } else {
+                                implMethods.push(implMethod);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If no impl methods found with this name, report error
+            if (implMethods.length === 0) {
+                const errorCode = ErrorCode.TC_OVERRIDE_WITHOUT_IMPL_METHOD;
+                accept('error',
+                    `Override method '${methodName}' does not override any method from implementations. ` +
+                    `The 'override' keyword can only be used when overriding a method provided by an impl.`,
+                    {
+                        node: node.method,
+                        property: 'names',
+                        code: errorCode
+                    }
+                );
+                continue;
+            }
+
+            // Get the override method signature
+            let overrideMethodType: MethodType | undefined;
+            
+            // Extract the method type from the class method
+            if (classType.methods) {
+                overrideMethodType = classType.methods.find(m =>
+                    m.names.includes(methodName) &&
+                    m.parameters.length === (node.method.header?.args?.length ?? 0)
+                );
+            }
+
+            if (!overrideMethodType) {
+                continue; // Couldn't get method type, skip validation
+            }
+
+            // Check if the override signature matches any impl method
+            let foundMatch = false;
+            let signatureMismatchDetails: string[] = [];
+
+            for (const implMethod of implMethods) {
+                // Check parameter count
+                if (overrideMethodType.parameters.length !== implMethod.parameters.length) {
+                    signatureMismatchDetails.push(
+                        `Expected ${implMethod.parameters.length} parameter(s), got ${overrideMethodType.parameters.length}`
+                    );
+                    continue;
+                }
+
+                // Check parameter types AND mutability
+                let parametersMatch = true;
+                for (let i = 0; i < overrideMethodType.parameters.length; i++) {
+                    const overrideParam = overrideMethodType.parameters[i];
+                    const implParam = implMethod.parameters[i];
+                    
+                    // Use type equality check for parameters
+                    const compatResult = this.typeUtils.areTypesEqual(overrideParam.type, implParam.type);
+                    if (!compatResult.success) {
+                        parametersMatch = false;
+                        signatureMismatchDetails.push(
+                            `Parameter ${i + 1} type mismatch: expected '${implParam.type.toString()}', got '${overrideParam.type.toString()}'`
+                        );
+                        break;
+                    }
+                    
+                    // Check mutability: override can be LESS permissive but NOT MORE permissive
+                    // ✅ impl has mut, override has immutable (less permissive) - OK
+                    // ❌ impl has immutable, override has mut (more permissive) - ERROR
+                    const overrideIsMut = overrideParam.isMut || false;
+                    const implIsMut = implParam.isMut || false;
+                    
+                    if (overrideIsMut && !implIsMut) {
+                        // Override is MORE permissive (wants to mutate when impl doesn't)
+                        parametersMatch = false;
+                        signatureMismatchDetails.push(
+                            `Parameter ${i + 1} mutability mismatch: impl parameter is immutable, but override parameter is mutable. ` +
+                            `Override cannot be more permissive than the impl method.`
+                        );
+                        break;
+                    }
+                }
+
+                if (!parametersMatch) {
+                    continue;
+                }
+
+                // Check return type compatibility (override return type should be compatible with impl return type)
+                const returnTypeCompat = this.isTypeCompatible(overrideMethodType.returnType, implMethod.returnType);
+                if (!returnTypeCompat.success) {
+                    signatureMismatchDetails.push(
+                        `Return type mismatch: expected '${implMethod.returnType.toString()}', got '${overrideMethodType.returnType.toString()}'`
+                    );
+                    continue;
+                }
+
+                // Found a matching impl method
+                foundMatch = true;
+                break;
+            }
+
+            // If no matching impl method found, report error
+            if (!foundMatch) {
+                const errorCode = ErrorCode.TC_OVERRIDE_SIGNATURE_MISMATCH;
+                const implSignatures = implMethods.map(m =>
+                    `${methodName}(${m.parameters.map(p => p.type.toString()).join(', ')}) -> ${m.returnType.toString()}`
+                ).join(' or ');
+                
+                accept('error',
+                    `Override method '${methodName}' signature does not match any impl method. ` +
+                    `Expected: ${implSignatures}. ` +
+                    `Issues: ${signatureMismatchDetails.join('; ')}`,
+                    {
+                        node: node.method,
+                        property: 'names',
+                        code: errorCode
+                    }
+                );
             }
         }
     }

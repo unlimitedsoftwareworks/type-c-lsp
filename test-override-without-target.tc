@@ -1,0 +1,36 @@
+type vec3 = struct {
+    x: f32, y: f32, z: f32
+}
+
+type Object3D = interface {
+    fn getPos() -> vec3
+}
+
+type Default3DImpl<T> = impl Object3D (
+    position: T
+) {
+    fn getPos() = this.position
+
+    fn dostuff(x: {x: u32, y: u32}) {}
+}
+
+type Mesh = class {
+    let pos: vec3
+
+    impl Default3DImpl<vec3>(pos)
+
+    // This override has no matching impl method to override!
+    override fn nonExistent() -> i32 = 0
+    
+    // This override has wrong return type
+    override fn getPos() -> i32 = 0
+
+    // This should be an error - override is MORE permissive (mut when impl has immutable)
+    override fn dostuff(mut x: {x: u32, y: u32}) {
+
+    }
+}
+
+fn main() {
+    let m: Mesh = new Mesh()
+}

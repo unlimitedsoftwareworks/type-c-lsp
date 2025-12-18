@@ -1,0 +1,7 @@
+type Object3D = interface {
+    fn dostuff(mut x: {x: u32, y: u32})  // Interface expects mut
+}
+
+type Mesh = class Object3D {
+    fn dostuff(x: {x: u32, y: u32}) {}
+}

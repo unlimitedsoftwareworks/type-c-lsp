@@ -1076,12 +1076,17 @@ export class TypeCTypeUtils {
                 return failure(`Parameter ${i + 1} type mismatch: ${typeResult.message}`);
             }
             
-            // Check parameter mutability (must match exactly for interface implementation)
-            if (implParam.isMut !== ifaceParam.isMut) {
+            // Check parameter mutability (contravariant)
+            // Rule: Implementation can be LESS permissive (immutable when interface has mut)
+            // But NOT MORE permissive (mut when interface has immutable)
+            //
+            // Interface has immutable, implementation has mut → ERROR (more permissive)
+            // Interface has mut, implementation has immutable → OK (less permissive)
+            if (!ifaceParam.isMut && implParam.isMut) {
                 return failure(
                     `Parameter ${i + 1} mutability mismatch: ` +
-                    `interface expects ${ifaceParam.isMut ? 'mut' : 'immutable'} parameter, ` +
-                    `but implementation has ${implParam.isMut ? 'mut' : 'immutable'} parameter`
+                    `interface parameter is immutable, but implementation parameter is mutable. ` +
+                    `Implementation cannot be more permissive than the interface.`
                 );
             }
         }

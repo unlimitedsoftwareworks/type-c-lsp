@@ -1,0 +1,79 @@
+// Test parameter mutability and contravariance
+
+fn main() {
+    // Basic parameter mutability
+    fn testImmutable(x: u32) {
+        x = 10  // ERROR: Cannot assign to immutable parameter
+    }
+
+    fn testMutable(mut x: u32) {
+        x = 10  // OK: parameter is mutable
+    }
+
+    // Contravariance: Read-only can be used where mutable is expected
+    let f1: fn(mut x: u32) -> u32 = fn(x: u32) -> u32 = x  // OK: read-only function assigned to mutable-param type
+    let f2: fn(x: u32) -> u32 = fn(mut x: u32) -> u32 = x  // ERROR: mutable function assigned to read-only-param type
+
+    // Function types with multiple parameters
+    let f3: fn(mut x: u32, y: u32) -> u32 = fn(x: u32, y: u32) -> u32 = x + y  // OK: both read-only
+    let f4: fn(mut x: u32, y: u32) -> u32 = fn(mut x: u32, mut y: u32) -> u32 = x + y  // ERROR: second param mutable
+    let f5: fn(x: u32, mut y: u32) -> u32 = fn(mut x: u32, y: u32) -> u32 = x + y  // ERROR: first param mutable
+
+    // Class methods with parameter mutability
+    class Counter {
+        let value: u32
+
+        fn init(v: u32) {
+            this.value = v
+        }
+
+        // Immutable parameter
+        fn increment(amount: u32) {
+            amount = 10  // ERROR: Cannot assign to immutable parameter
+            this.value = this.value + amount
+        }
+
+        // Mutable parameter
+        fn modify(mut amount: u32) {
+            amount = amount * 2  // OK: parameter is mutable
+            this.value = this.value + amount
+        }
+    }
+
+    // Overloads with different mutability are NOT allowed (even though it's part of the signature)
+    fn process(x: u32) -> u32 = x        // Signature: process(u32)
+    fn process(mut x: u32) -> u32 = x    // ERROR: Duplicate - cannot overload based on mutability alone
+
+    // Interface method implementation must match mutability
+    type Processor = interface {
+        fn transform(mut value: u32) -> u32
+    }
+
+    class MyProcessor Processor {
+        // Must use 'mut' to match interface signature
+        fn transform(mut value: u32) -> u32 {
+            value = value * 2  // OK: can mutate
+            return value
+        }
+    }
+
+    class BadProcessor Processor {
+        fn transform(value: u32) -> u32 {  // ERROR: Parameter mutability mismatch with interface
+            return value * 2
+        }
+    }
+
+    // Member access through const parameters
+    type Point = struct {
+        x: u32,
+        y: u32
+    }
+
+    fn testConstParamMemberAccess(p: Point) {
+        p.x = 10  // ERROR: Cannot assign to member of const parameter
+    }
+
+    fn testMutParamMemberAccess(mut p: Point) {
+        p.x = 10  // OK: parameter is mutable
+    }
+}

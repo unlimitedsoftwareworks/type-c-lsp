@@ -1,0 +1,28 @@
+// Test: Class methods should be considered duplicates even if they differ only in parameter mutability
+
+type Processor = interface {
+    fn transform(mut value: u32) -> u32
+}
+
+// This should show an error because the class has duplicate methods
+// (same signature except for mutability, which should NOT distinguish overloads in classes)
+type BadProcessor = class Processor {
+    fn transform(value: u32) -> u32 { 
+        return value * 2
+    }
+
+    fn transform(mut value: u32) -> u32 { 
+        return value * 3
+    }
+}
+
+// This should also show an error - duplicate methods in class
+type AnotherBad = class {
+    fn process(x: u32) -> u32 {
+        return x
+    }
+    
+    fn process(mut x: u32) -> u32 {
+        return x + 1
+    }
+}

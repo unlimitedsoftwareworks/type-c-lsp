@@ -14,6 +14,7 @@ interface MethodSignature {
     name: string;
     genericParamCount: number;
     parameterTypes: string[];  // Serialized type representations
+    parameterMutability: boolean[];  // Whether each parameter is mutable
     node: ast.MethodHeader | ast.FunctionDeclaration;
 }
 
@@ -254,8 +255,9 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             const signature = this.computeMethodSignature(name, method.header);
             
             // Check if this signature already exists
+            // For classes, parameter mutability should NOT distinguish overloads
             const duplicate = signatures.find(s =>
-                this.signaturesEqual(s.sig, signature)
+                this.signaturesEqualIgnoringMutability(s.sig, signature)
             );
 
             if (duplicate) {
@@ -421,7 +423,28 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                     }
                 );
             } else {
-                signatures.push(signature);
+                // Check if there's a signature that differs only in parameter mutability
+                const differsOnlyInMutability = signatures.find(sig =>
+                    this.signaturesEqualIgnoringMutability(sig, signature) &&
+                    !this.signaturesEqual(sig, signature)
+                );
+                
+                if (differsOnlyInMutability) {
+                    // Report error - cannot overload based on mutability alone
+                    const errorCode = ErrorCode.TC_OVERLOAD_DIFFERS_ONLY_IN_MUTABILITY;
+                    accept('error',
+                        `Invalid function overload: Function '${name}' cannot be overloaded based on parameter mutability alone. ` +
+                        `Overloads must differ in parameter types or count, not just mutability. ` +
+                        `Found: ${this.formatSignature(differsOnlyInMutability)} and ${this.formatSignature(signature)}`,
+                        {
+                            node: fn,
+                            property: 'name',
+                            code: errorCode
+                        }
+                    );
+                } else {
+                    signatures.push(signature);
+                }
             }
         }
     }
@@ -491,7 +514,28 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                     }
                 );
             } else {
-                signatures.push(signature);
+                // Check if there's a signature that differs only in parameter mutability
+                const differsOnlyInMutability = signatures.find(sig =>
+                    this.signaturesEqualIgnoringMutability(sig, signature) &&
+                    !this.signaturesEqual(sig, signature)
+                );
+                
+                if (differsOnlyInMutability) {
+                    // Report error - cannot overload based on mutability alone
+                    const errorCode = ErrorCode.TC_OVERLOAD_DIFFERS_ONLY_IN_MUTABILITY;
+                    accept('error',
+                        `Invalid ${context} method overload: Method '${name}' cannot be overloaded based on parameter mutability alone. ` +
+                        `Overloads must differ in parameter types or count, not just mutability. ` +
+                        `Found: ${this.formatSignature(differsOnlyInMutability)} and ${this.formatSignature(signature)}`,
+                        {
+                            node: method,
+                            property: 'names',
+                            code: errorCode
+                        }
+                    );
+                } else {
+                    signatures.push(signature);
+                }
             }
         }
     }
@@ -503,17 +547,20 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
     private computeFunctionSignature(fn: ast.FunctionDeclaration): MethodSignature {
         const genericParamCount = fn.genericParameters?.length ?? 0;
         const parameterTypes: string[] = [];
+        const parameterMutability: boolean[] = [];
 
-        // Get parameter types
+        // Get parameter types and mutability
         for (const param of fn.header.args) {
             const paramType = this.typeProvider.getType(param.type);
             parameterTypes.push(this.serializeType(paramType));
+            parameterMutability.push(param.isMut || false);
         }
 
         return {
             name: fn.name,
             genericParamCount,
             parameterTypes,
+            parameterMutability,
             node: fn
         };
     }
@@ -525,23 +572,27 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
     private computeMethodSignature(name: string, method: ast.MethodHeader): MethodSignature {
         const genericParamCount = method.genericParameters?.length ?? 0;
         const parameterTypes: string[] = [];
+        const parameterMutability: boolean[] = [];
 
-        // Get parameter types
+        // Get parameter types and mutability
         for (const param of method?.header?.args ?? []) {
             const paramType = this.typeProvider.getType(param.type);
             parameterTypes.push(this.serializeType(paramType));
+            parameterMutability.push(param.isMut || false);
         }
 
         return {
             name,
             genericParamCount,
             parameterTypes,
+            parameterMutability,
             node: method
         };
     }
 
     /**
      * Check if two signatures are equal (for duplicate detection).
+     * Signatures are equal if they have the same name, generic count, parameter types, AND parameter mutability.
      */
     private signaturesEqual(sig1: MethodSignature, sig2: MethodSignature): boolean {
         // Different names -> not equal
@@ -559,9 +610,14 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             return false;
         }
 
-        // Check each parameter type
+        // Check each parameter type and mutability
         for (let i = 0; i < sig1.parameterTypes.length; i++) {
             if (sig1.parameterTypes[i] !== sig2.parameterTypes[i]) {
+                return false;
+            }
+            
+            // Check parameter mutability
+            if (sig1.parameterMutability[i] !== sig2.parameterMutability[i]) {
                 return false;
             }
         }
@@ -583,11 +639,15 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
      * Format a signature for error messages.
      */
     private formatSignature(sig: MethodSignature): string {
-        const genericPart = sig.genericParamCount > 0 
+        const genericPart = sig.genericParamCount > 0
             ? `<${Array(sig.genericParamCount).fill('T').map((_, i) => `T${i}`).join(', ')}>`
             : '';
         
-        const paramsPart = sig.parameterTypes.join(', ');
+        // Include mutability in parameter representation
+        const paramsPart = sig.parameterTypes.map((type, i) => {
+            const mutPrefix = sig.parameterMutability[i] ? 'mut ' : '';
+            return `${mutPrefix}${type}`;
+        }).join(', ');
         
         return `${sig.name}${genericPart}(${paramsPart})`;
     }
@@ -611,5 +671,35 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
         return current.source === 'class' &&
                current.classMethod?.isOverride === true &&
                existing.source === 'impl';
+    }
+
+    /**
+     * Check if two signatures are equal ignoring parameter mutability.
+     * Used to detect overloads that differ only in mutability.
+     */
+    private signaturesEqualIgnoringMutability(sig1: MethodSignature, sig2: MethodSignature): boolean {
+        // Different names -> not equal
+        if (sig1.name !== sig2.name) {
+            return false;
+        }
+
+        // Different generic parameter counts -> not equal
+        if (sig1.genericParamCount !== sig2.genericParamCount) {
+            return false;
+        }
+
+        // Different parameter counts -> not equal
+        if (sig1.parameterTypes.length !== sig2.parameterTypes.length) {
+            return false;
+        }
+
+        // Check each parameter type (but NOT mutability)
+        for (let i = 0; i < sig1.parameterTypes.length; i++) {
+            if (sig1.parameterTypes[i] !== sig2.parameterTypes[i]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

@@ -3891,8 +3891,14 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
             // Check if it's a function parameter
             if (ast.isFunctionParameter(ref)) {
-                // Parameters are mutable unless explicitly marked otherwise
-                return undefined;
+                // Parameters are const by default unless marked with 'mut'
+                if (!ref.isMut) {
+                    return {
+                        message: `Cannot assign to parameter '${ref.name}'. Parameters are immutable by default. Use 'mut' keyword to make it mutable.`,
+                        code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                    };
+                }
+                return undefined; // Valid mutable parameter
             }
 
             // Check if it's a class attribute
@@ -3933,8 +3939,15 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             };
         }
 
-        // Valid lvalue: Member access (must check for const attributes)
+        // Valid lvalue: Member access (must check for const attributes and const base)
         if (ast.isMemberAccess(expr)) {
+            // First check if the base expression is const
+            const baseConstError = this.checkIfBaseIsConst(expr.expr);
+            if (baseConstError) {
+                return baseConstError;
+            }
+
+            // Then check if the member itself is const
             const element = expr.element?.ref;
             if (element && ast.isClassAttributeDecl(element) && element.isConst) {
                 // Allow assignment in constructor (init method)
@@ -4126,6 +4139,51 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         return false;
+    }
+
+    /**
+     * Check if the base of a member access chain is const.
+     *
+     * For example:
+     * - `let const a = {x: 1}; a.x = 2` → base `a` is const, so error
+     * - `let a = {x: 1}; a.x = 2` → base `a` is mutable, so OK
+     * - `let const a = {nested: {x: 1}}; a.nested.x = 2` → base `a` is const, so error
+     *
+     * @param expr The base expression to check
+     * @returns Error info if base is const, undefined otherwise
+     */
+    private checkIfBaseIsConst(expr: ast.Expression): { message: string; code: ErrorCode } | undefined {
+        // Check if it's a qualified reference
+        if (ast.isQualifiedReference(expr)) {
+            const ref = expr.reference?.ref;
+            if (ref && ast.isVariableDeclaration(ref) && ref.isConst) {
+                return {
+                    message: `Cannot assign to member of const variable '${ref.name}'. The variable is declared as const, making all its members immutable.`,
+                    code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                };
+            }
+            
+            // Check if it's a function parameter
+            if (ref && ast.isFunctionParameter(ref)) {
+                // Function parameters are const by default unless marked with 'mut'
+                if (!ref.isMut) {
+                    return {
+                        message: `Cannot assign to member of parameter '${ref.name}'. Parameters are immutable by default. Use 'mut' keyword to make it mutable.`,
+                        code: ErrorCode.TC_ASSIGNMENT_TO_CONST
+                    };
+                }
+                return undefined; // Valid mutable parameter
+            }
+        }
+
+        // Check if it's a member access - recursively check the base
+        if (ast.isMemberAccess(expr)) {
+            return this.checkIfBaseIsConst(expr.expr);
+        }
+
+        // For other expressions (index access, function calls, etc.),
+        // we don't consider them as const bases
+        return undefined;
     }
 
 }

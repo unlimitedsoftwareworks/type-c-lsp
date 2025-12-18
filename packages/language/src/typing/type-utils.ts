@@ -430,13 +430,20 @@ export class TypeCTypeUtils {
             return failure(`Parameter count mismatch: ${a.parameters.length} vs ${b.parameters.length}`);
         }
 
-        // Check parameter types
+        // Check parameter types and mutability
         for (let i = 0; i < a.parameters.length; i++) {
             const aParam = a.parameters[i];
             const bParam = b.parameters[i];
+            
+            // Check parameter type
             const typeResult = this.areTypesEqual(aParam.type, bParam.type);
             if (!typeResult.success) {
                 return failure(`parameter ${i + 1} type mismatch: ${typeResult.message}`);
+            }
+            
+            // Check parameter mutability (must match exactly for equality)
+            if (aParam.isMut !== bParam.isMut) {
+                return failure(`parameter ${i + 1} mutability mismatch: ${aParam.isMut ? 'mut' : 'immutable'} vs ${bParam.isMut ? 'mut' : 'immutable'}`);
             }
         }
 
@@ -923,11 +930,31 @@ export class TypeCTypeUtils {
             return failure(`Parameter count mismatch: ${from.parameters.length} vs ${to.parameters.length}`);
         }
 
-        // Parameters are contravariant
+        // Parameters are contravariant (both type and mutability)
         for (let i = 0; i < to.parameters.length; i++) {
-            const result = this.isAssignable(to.parameters[i].type, from.parameters[i].type);
+            const fromParam = from.parameters[i];
+            const toParam = to.parameters[i];
+            
+            // Check parameter type (contravariant)
+            const result = this.isAssignable(toParam.type, fromParam.type);
             if (!result.success) {
-                return failure(`Parameter ${i + 1} is not contravariant: ${result.message}`);
+                return failure(`Parameter ${i + 1} type is not contravariant: ${result.message}`);
+            }
+            
+            // Check parameter mutability (contravariant)
+            // Rule: A read-only parameter function can be used where a mutable parameter function is expected
+            // But NOT vice versa.
+            //
+            // Expected has 'mut', actual has immutable → OK (can use read-only where mutable expected)
+            // Expected has immutable, actual has 'mut' → ERROR (cannot use mutable where read-only expected)
+            //
+            // In other words: if expected is immutable (false), actual must also be immutable (false)
+            if (!toParam.isMut && fromParam.isMut) {
+                return failure(
+                    `Parameter ${i + 1} mutability is not contravariant: ` +
+                    `expected immutable parameter, but got mutable parameter. ` +
+                    `A function with mutable parameters cannot be used where immutable parameters are expected.`
+                );
             }
         }
 
@@ -1038,14 +1065,24 @@ export class TypeCTypeUtils {
             return failure(`Parameter count mismatch: ${implementation.parameters.length} vs ${interfaceMethod.parameters.length}`);
         }
 
-        // Check parameter types (must be exactly equal, not covariant/contravariant)
+        // Check parameter types and mutability (must be exactly equal for interface implementation)
         for (let i = 0; i < implementation.parameters.length; i++) {
             const implParam = implementation.parameters[i];
             const ifaceParam = interfaceMethod.parameters[i];
 
+            // Check parameter type
             const typeResult = this.areTypesEqual(implParam.type, ifaceParam.type);
             if (!typeResult.success) {
                 return failure(`Parameter ${i + 1} type mismatch: ${typeResult.message}`);
+            }
+            
+            // Check parameter mutability (must match exactly for interface implementation)
+            if (implParam.isMut !== ifaceParam.isMut) {
+                return failure(
+                    `Parameter ${i + 1} mutability mismatch: ` +
+                    `interface expects ${ifaceParam.isMut ? 'mut' : 'immutable'} parameter, ` +
+                    `but implementation has ${implParam.isMut ? 'mut' : 'immutable'} parameter`
+                );
             }
         }
 
@@ -3492,7 +3529,7 @@ export class TypeCTypeUtils {
     /**
      * Check if two MethodType objects have the same signature.
      * Used for detecting shadowing and overrides.
-     * Compares generic count and parameter types, but NOT return type.
+     * Compares generic count, parameter types, and parameter mutability, but NOT return type.
      *
      * @param method1 First method
      * @param method2 Second method
@@ -3520,13 +3557,18 @@ export class TypeCTypeUtils {
             return false;
         }
 
-        // Check each parameter type
+        // Check each parameter type and mutability
         for (let i = 0; i < method1.parameters.length; i++) {
-            const type1 = method1.parameters[i].type;
-            const type2 = method2.parameters[i].type;
+            const param1 = method1.parameters[i];
+            const param2 = method2.parameters[i];
             
             // Use string comparison for type equality
-            if (type1.toString() !== type2.toString()) {
+            if (param1.type.toString() !== param2.type.toString()) {
+                return false;
+            }
+            
+            // Check parameter mutability
+            if (param1.isMut !== param2.isMut) {
                 return false;
             }
         }

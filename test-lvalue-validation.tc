@@ -8,6 +8,20 @@ fn main() {
     let arr = [1, 2, 3]
     arr[0] = 5  // OK - array element
 
+    // Const base member access
+    let const constStruct = {x: 1, y: 2}
+    constStruct.x = 10  // ERROR: Cannot assign to member of const variable
+    
+    let mutableStruct = {x: 1, y: 2}
+    mutableStruct.x = 10  // OK - mutable variable
+
+    // Nested member access with const base
+    let const constNested = {inner: {value: 42}}
+    constNested.inner.value = 100  // ERROR: Cannot assign to member of const variable
+    
+    let mutableNested = {inner: {value: 42}}
+    mutableNested.inner.value = 100  // OK - mutable variable
+
     // Invalid assignments - literals
     10 = 5  // ERROR: Cannot assign to literal value
     "hello" = "world"  // ERROR: Cannot assign to literal value
@@ -84,4 +98,22 @@ fn main() {
     let obj = new MyClass(1, 2)
     obj.mutableField = 100  // OK - mutable attribute
     obj.immutableField = 200  // ERROR: Cannot assign to const attribute outside constructor
+
+    // Function parameters - const by default
+    fn testParams(x: u32, mut y: u32) {
+        x = 10  // ERROR: Cannot assign to parameter - immutable by default
+        y = 20  // OK - marked with 'mut'
+    }
+
+    // Function parameters with member access
+    fn testParamMembers(obj: MyClass, mut mutObj: MyClass) {
+        obj.mutableField = 1  // ERROR: Cannot assign to member of const parameter
+        mutObj.mutableField = 2  // OK - parameter is mutable
+    }
+
+    // Nested const propagation with parameters
+    fn testNestedParams(point: {x: u32, y: {nested: u32}}) {
+        point.x = 1  // ERROR: Cannot assign to member of const parameter
+        point.y.nested = 2  // ERROR: Cannot assign to member of const parameter (propagates)
+    }
 }

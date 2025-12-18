@@ -110,4 +110,43 @@ fn main() {
 
     /// @Error(TCE191): Cannot assign to const variable
     z = {2, 3}
+
+    z.x = 1
+
+
+    // Const base member access
+    let const constStruct = {x: 1, y: 2}
+    /// @Error(TCE191): The variable is declared as const
+    constStruct.x = 10  // ERROR: Cannot assign to member of const variable
+    
+    let mutableStruct = {x: 1, y: 2}
+    mutableStruct.x = 10  // OK - mutable variable
+
+    // Nested member access with const base
+    let const constNested = {inner: {value: 42}}
+    /// @Error(TCE191): The variable is declared as const
+    constNested.inner.value = 100  // ERROR: Cannot assign to member of const variable
+    
+    let mutableNested = {inner: {value: 42}}
+    mutableNested.inner.value = 100  // OK - mutable variable
+
+    // Function parameters - const by default
+    fn testParams(x: u32, mut y: u32) {
+        /// @Error(TCE191): Parameters are immutable by default
+        x = 10  // ERROR: Cannot assign to parameter - immutable by default
+        y = 20  // OK - marked with 'mut'
+    }
+    // Function parameters with member access
+    fn testParamMembers(obj: MyClass, mut mutObj: MyClass) {
+        /// @Error(TCE191): Parameters are immutable by default
+        obj.mutableField = 1  // ERROR: Cannot assign to member of const parameter
+        mutObj.mutableField = 2  // OK - parameter is mutable
+    }
+    // Nested const propagation with parameters
+    fn testNestedParams(point: {x: u32, y: {nested: u32}}) {
+        /// @Error(TCE191): Parameters are immutable by default
+        point.x = 1  // ERROR: Cannot assign to member of const parameter
+        /// @Error(TCE191): Parameters are immutable by default
+        point.y.nested = 2  // ERROR: Cannot assign to member of const parameter (propagates)
+    }
 }

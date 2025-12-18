@@ -1,0 +1,91 @@
+// Test parameter mutability and contravariance
+
+
+// Interface method implementation must match mutability
+type Processor = interface {
+    fn transform(mut value: u32) -> u32
+}
+
+type MyProcessor = class  Processor {
+    // Must use 'mut' to match interface signature
+    fn transform(mut value: u32) -> u32 {
+        value = value * 2  // OK: can mutate
+        return value
+    }
+}
+
+/// @Error(TCE007): but implementation has immutable parameter
+type BadProcessor = class Processor {
+    fn transform(value: u32) -> u32 {  // ERROR: Parameter mutability mismatch with interface
+        return value * 2
+    }
+}
+
+// Member access through const parameters
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+
+// Class methods with parameter mutability
+type Counter = class {
+    let value: u32
+
+    fn init(v: u32) {
+        this.value = v
+    }
+
+    // Immutable parameter
+    fn increment(amount: u32) {
+        /// @Error(TCE191): Parameters are immutable by default
+        amount = 10  // ERROR: Cannot assign to immutable parameter
+        this.value = this.value + amount
+    }
+
+    // Mutable parameter
+    fn modify(mut amount: u32) {
+        amount = amount * 2  // OK: parameter is mutable
+        this.value = this.value + amount
+    }
+}
+
+fn main() {
+    // Basic parameter mutability
+    fn testImmutable(x: u32) {
+        /// @Error(TCE191): Parameters are immutable by default
+        x = 10  // ERROR: Cannot assign to immutable parameter
+    }
+
+    fn testMutable(mut x: u32) {
+        x = 10  // OK: parameter is mutable
+    }
+
+    // Contravariance: Read-only can be used where mutable is expected
+    let f1: fn(mut x: u32) -> u32 = fn(x: u32) -> u32 = x  // OK: read-only function assigned to mutable-param type
+
+    /// @Error(TCE006): expected immutable parameter, but got mutable parameter
+    let f2: fn(x: u32) -> u32 = fn(mut x: u32) -> u32 = x  // ERROR: mutable function assigned to read-only-param type
+
+    // Function types with multiple parameters
+    let f3: fn(mut x: u32, y: u32) -> u32 = fn(x: u32, y: u32) -> u32 = x + y  // OK: both read-only
+    /// @Error(TCE006): expected immutable parameter, but got mutable parameter
+    let f4: fn(mut x: u32, y: u32) -> u32 = fn(mut x: u32, mut y: u32) -> u32 = x + y  // ERROR: second param mutable
+    /// @Error(TCE006): expected immutable parameter, but got mutable parameter
+    let f5: fn(x: u32, mut y: u32) -> u32 = fn(mut x: u32, y: u32) -> u32 = x + y  // ERROR: first param mutable
+
+
+    // Overloads with different mutability are considered different signatures
+    fn process(x: u32) -> u32 = x        // Signature: process(u32)
+    fn process(mut x: u32) -> u32 = x    // Signature: process(mut u32) - DIFFERENT, both allowed
+
+
+    fn testConstParamMemberAccess(p: Point) {
+        /// @Error(TCE191): Parameters are immutable by default
+        p.x = 10  // ERROR: Cannot assign to member of const parameter
+    }
+
+    fn testMutParamMemberAccess(mut p: Point) {
+        p.x = 10  // OK: parameter is mutable
+    }
+}

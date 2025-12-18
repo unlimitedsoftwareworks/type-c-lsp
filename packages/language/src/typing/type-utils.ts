@@ -1029,6 +1029,15 @@ export class TypeCTypeUtils {
                 // Check type compatibility (allowing covariant return types)
                 const result = this.isMethodImplementationCompatible(classMethod, method);
                 if (result.success) {
+                    // CRITICAL: Interface methods are always public, so check if the class method is local
+                    // Local methods cannot implement interface methods
+                    if (classMethod.isLocal) {
+                        return failure(
+                            `method '${method.names[0]}' cannot be implemented by local method. ` +
+                            `Interface methods are always public, but class method '${classMethod.names[0]}' is marked as local (private). ` +
+                            `Remove the 'local' keyword from the class method to implement the interface.`
+                        );
+                    }
                     foundMatch = true;
                     break;
                 }

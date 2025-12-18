@@ -577,7 +577,7 @@ InterfaceType:
 
 ClassType:
     'class' (superTypes+=DataType<false> (',' superTypes+=(DataType<false>))*)? '{' 
-        (ClassAttributesDecl|ClassMethodDecl|ClassStaticBlock|ClassImplementation)* 
+        (ClassMethodDecl|ClassAttributesDecl|ClassStaticBlock|ClassImplementation)* 
     '}';
 
 

@@ -1,12 +1,8 @@
 // Test file for local member access validation
 
-type Incrementable = interface {
-    fn increment() 
-}
-
-type Counter = class Incrementable {
-    let local count: u32 = 0
-    let local secret: string = "hidden"
+class Counter {
+    local let count: u32 = 0
+    local let secret: string = "hidden"
     let public: u32 = 42
     
     local fn increment() {
@@ -56,8 +52,8 @@ fn main() {
     let gs = c.getSecret()
 }
 
-type SubCounter = class {
-    let counter: Incrementable = new Counter()
+class SubCounter {
+    let counter: Counter = new Counter()
     
     fn useCounter() {
         // ❌ Error - cannot access local members even through composition

@@ -134,7 +134,7 @@ fn get_or_default<K, V, T: Indexable<K, V> >(container: T, key: K, default: V) -
 }
 
 type Array = class {
-    let data: u32[] = 0
+    let data: u32[] = [0u32]
 
     fn get | [] (index: u64) -> u32 {
         return data[index]

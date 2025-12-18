@@ -1315,7 +1315,7 @@ export class TypeCTypeProvider {
             // Use explicit return types when available, void as placeholder otherwise
             const stubMethods = node.methods?.map(m => {
                 const methodHeader = m.method;
-                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const genericParams = ((methodHeader?.genericParameters ?? [])?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
@@ -1366,7 +1366,7 @@ export class TypeCTypeProvider {
             // Infer class-defined methods (these can override impl methods)
             const methods = node.methods?.map(m => {
                 const methodHeader = m.method;
-                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const genericParams = ((methodHeader?.genericParameters ?? []).map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),

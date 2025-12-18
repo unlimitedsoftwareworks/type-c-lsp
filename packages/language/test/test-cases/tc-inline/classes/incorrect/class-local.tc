@@ -3,11 +3,11 @@
 type Incrementable = interface {
     fn increment() 
 }
-
+/// @Error(TCE007): Class must implement interface
 type Counter = class Incrementable {
-    let local count: u32 = 0
+    let local count: u32 = 0u32
     let local secret: string = "hidden"
-    let public: u32 = 42
+    let public: u32 = 42u32
     
     local fn increment() {
         this.count = this.count + 1
@@ -44,24 +44,31 @@ fn main() {
     let count = c.getCount()
     
     // ❌ Error - accessing local attribute outside class
+    /// @Error(TCE200): Cannot access local attribute
     let secret = c.count
     
     // ❌ Error - accessing local attribute outside class
+    /// @Error(TCE200): Cannot access local attribute
     let s = c.secret
     
     // ❌ Error - calling local method outside class
+    /// @Error(TCE201): Cannot access local method 
     c.increment()
     
     // ❌ Error - calling local method outside class
+    /// @Error(TCE201): Cannot access local method 
     let gs = c.getSecret()
 }
 
 type SubCounter = class {
+    /// @Error(TCE006): type mismatch
     let counter: Incrementable = new Counter()
+    let counter2: Counter = new Counter()
     
     fn useCounter() {
         // ❌ Error - cannot access local members even through composition
-        let x = this.counter.count
+        /// @Error(TCE200): Cannot access local attribute
+        let x = this.counter2.count
         this.counter.increment()
     }
 }

@@ -1,0 +1,72 @@
+// Test file for local method interface implementation validation
+// Local methods should NOT be able to implement interface methods
+
+type Serializable = interface {
+    fn serialize() -> string
+    fn deserialize(data: string) -> void
+}
+
+// ❌ Error - Local method cannot implement interface method
+class BadCounter: Serializable {
+    let count: u32 = 0
+    
+    // This is marked as local but tries to implement the interface method
+    local fn serialize() -> string {
+        return "count"
+    }
+    
+    fn deserialize(data: string) {
+        // implementation
+    }
+}
+
+// ✅ OK - Public method correctly implements interface
+class GoodCounter: Serializable {
+    let count: u32 = 0
+    
+    fn serialize() -> string {
+        return "count"
+    }
+    
+    fn deserialize(data: string) {
+        // implementation
+    }
+}
+
+// ❌ Error - Both methods local
+class WrongCounter: Serializable {
+    let count: u32 = 0
+    
+    local fn serialize() -> string {
+        return "count"
+    }
+    
+    local fn deserialize(data: string) {
+        // implementation
+    }
+}
+
+// Test with a more complex interface
+type Comparable = interface {
+    fn compare(other: Comparable) -> i32
+    fn equals(other: Comparable) -> bool
+}
+
+// ❌ Error - Local method trying to implement interface
+class BadPoint: Comparable {
+    let x: f64 = 0.0
+    let y: f64 = 0.0
+    
+    local fn compare(other: Comparable) -> i32 {
+        return 0
+    }
+    
+    fn equals(other: Comparable) -> bool {
+        return true
+    }
+}
+
+fn main() {
+    let gc = new GoodCounter()
+    let s = gc.serialize()
+}

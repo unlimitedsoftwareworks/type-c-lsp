@@ -80,7 +80,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ClassType: this.checkClassImplementation,
             ImplementationType: this.checkImplementaiton,
             ClassImplementationMethodDecl: this.checkClassImplDeclaration,
-            MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
+            MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkLocalMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
             NewExpression: [this.checkNewExpression, this.checkExpressionForErrors],
@@ -2437,6 +2437,135 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
+     * Check that local attributes and methods are only accessed within their class scope.
+     *
+     * Local members (marked with `local` keyword) are private to the class and cannot be accessed
+     * from outside the class, even from subclasses or instances in other contexts.
+     *
+     * Rules:
+     * 1. Local attributes can only be accessed within methods of the same class
+     * 2. Local methods can only be called within methods of the same class
+     * 3. Access via `this` within the class is allowed
+     * 4. Access from outside the class (even from subclasses) is forbidden
+     *
+     * Examples:
+     * ```tc
+     * class Counter {
+     *     local let count: u32 = 0
+     *     local fn increment() { this.count += 1 }
+     *
+     *     fn getCount() -> u32 = this.count  // ✅ OK - accessing local within class
+     *     fn tick() { this.increment() }      // ✅ OK - calling local method within class
+     * }
+     *
+     * let c = new Counter()
+     * let x = c.count           // ❌ Error - accessing local attribute outside class
+     * c.increment()             // ❌ Error - calling local method outside class
+     * ```
+     */
+    checkLocalMemberAccess = (node: ast.MemberAccess, accept: ValidationAcceptor): void => {
+        const element = node.element?.ref;
+        if (!element) {
+            return; // Unresolved reference, will be caught elsewhere
+        }
+
+        // Check if accessing a class attribute
+        if (ast.isClassAttributeDecl(element)) {
+            if (!element.isLocal) {
+                return; // Not a local attribute, no validation needed
+            }
+
+            // Get the containing class of the attribute
+            const attributeClass = AstUtils.getContainerOfType(element, ast.isClassType);
+            if (!attributeClass) {
+                return; // Shouldn't happen, but be safe
+            }
+
+            // Check if we're accessing from within the same class
+            if (this.isAccessWithinClass(node, attributeClass)) {
+                return; // ✅ Access from within the same class is allowed
+            }
+
+            // ❌ Error: Accessing local attribute from outside the class
+            const errorCode = ErrorCode.TC_LOCAL_ATTRIBUTE_ACCESS_OUTSIDE_CLASS;
+            accept('error',
+                `Cannot access local attribute '${element.name}' outside of its class. ` +
+                `Local attributes are private to the class and can only be accessed within the class's methods.`,
+                {
+                    node,
+                    property: 'element',
+                    code: errorCode
+                }
+            );
+            return;
+        }
+
+        // Check if accessing a class method
+        if (ast.isClassMethod(element)) {
+            if (!element.isLocal) {
+                return; // Not a local method, no validation needed
+            }
+
+            // Get the containing class of the method
+            const methodClass = AstUtils.getContainerOfType(element, ast.isClassType);
+            if (!methodClass) {
+                return; // Shouldn't happen, but be safe
+            }
+
+            // Check if we're accessing from within the same class
+            if (this.isAccessWithinClass(node, methodClass)) {
+                return; // ✅ Access from within the same class is allowed
+            }
+
+            // ❌ Error: Accessing local method from outside the class
+            const errorCode = ErrorCode.TC_LOCAL_METHOD_ACCESS_OUTSIDE_CLASS;
+            const methodNames = element.method?.names || ['method'];
+            accept('error',
+                `Cannot access local method '${methodNames[0]}' outside of its class. ` +
+                `Local methods are private to the class and can only be called within the class's methods.`,
+                {
+                    node,
+                    property: 'element',
+                    code: errorCode
+                }
+            );
+        }
+    }
+
+    /**
+     * Helper method to check if a member access is within the same class.
+     *
+     * @param accessNode The member access node
+     * @param targetClass The class that contains the member being accessed
+     * @returns true if the access is from within the same class, false otherwise
+     */
+    private isAccessWithinClass(accessNode: ast.MemberAccess, targetClass: ast.ClassType): boolean {
+        // Walk up the AST to find the containing class (if any)
+        let current: AstNode | undefined = accessNode.$container;
+        
+        while (current) {
+            // Check if we're in a class method
+            if (ast.isClassMethod(current)) {
+                // Get the containing class of this method
+                const containingClass = AstUtils.getContainerOfType(current, ast.isClassType);
+                
+                // Check if it's the same class (by reference equality)
+                if (containingClass === targetClass) {
+                    return true;
+                }
+                
+                // Not the same class, return false
+                return false;
+            }
+            
+            current = current.$container;
+        }
+        
+        // Not within any class method
+        return false;
+    }
+
+    /**
      * Check denull expression for unnecessary usage on non-nullable types.
      *
      * Rules:
@@ -3664,6 +3793,23 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
         }
+        
+        // Check type compatibility if both annotation and initializer exist
+        if (node.initializer) {
+            const initType = this.typeProvider.getType(node.initializer);
+            const compatResult = this.isTypeCompatible(initType, attrType);
+            
+            if (!compatResult.success) {
+                const errorCode = ErrorCode.TC_VARIABLE_TYPE_MISMATCH;
+                const errorMsg = compatResult.message
+                    ? `Attribute '${node.name}' type mismatch: ${compatResult.message}`
+                    : `Attribute '${node.name}' type mismatch: Expected '${attrType.toString()}', but got '${initType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.initializer,
+                    code: errorCode
+                });
+            }
+        }
     }
 
     /**
@@ -4102,6 +4248,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         );
 
         if (!hasCommonName) {
+            return false;
+        }
+
+        // CRITICAL: Interface methods are always public
+        // Local (private) methods cannot implement interface methods
+        if (method.isLocal) {
             return false;
         }
 

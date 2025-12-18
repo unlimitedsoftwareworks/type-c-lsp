@@ -59,6 +59,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     getChecks(): ValidationChecks<ast.TypeCAstType> {
         return {
             VariableDeclSingle: this.checkVariableDeclSingle,
+            VariableDeclArrayDestructuring: this.checkVariableDeclArrayDestructuring,
+            VariableDeclStructDestructuring: this.checkVariableDeclStructDestructuring,
+            VariableDeclTupleDestructuring: this.checkVariableDeclTupleDestructuring,
             FunctionParameter: this.checkFunctionParameter,
             ClassAttributeDecl: this.checkClassAttributeDecl,
             IteratorVar: this.checkIteratorVar,
@@ -157,6 +160,29 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return;
         }
         
+        // Check if non-const variable is assigned from a const expression
+        // Only applies to reference types (not basic types which are copied by value)
+        if (!node.isConst && node.initializer) {
+            const constSource = this.getConstSource(node.initializer);
+            if (constSource) {
+                // Get the type being assigned to check if it's a reference type
+                const initializerType = this.typeProvider.getType(node.initializer);
+                const resolvedType = this.typeUtils.resolveIfReference(initializerType);
+                
+                // Only error if it's NOT a basic type (basic types are copied, not referenced)
+                if (!this.typeUtils.isTypeBasic(resolvedType)) {
+                    accept('error',
+                        `Cannot assign ${constSource.description} to non-const variable '${node.name}'. ` +
+                        `Reference types must preserve const-ness. Either declare the variable as const (let const ${node.name} = ...) or assign from a mutable source.`,
+                        {
+                            node: node.initializer,
+                            code: ErrorCode.TC_ASSIGNMENT_FROM_CONST_TO_MUTABLE
+                        }
+                    );
+                }
+            }
+        }
+        
         // Only check type compatibility if there's both annotation AND initializer
         if (!node.annotation || !node.initializer) {
             return;
@@ -196,6 +222,124 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 property: 'initializer',
                 code: errorCode
             });
+        }
+    }
+
+    /**
+     * Check array destructuring variable declarations for const assignment from const sources.
+     */
+    checkVariableDeclArrayDestructuring = (node: ast.VariableDeclArrayDestructuring, accept: ValidationAcceptor): void => {
+        if (!node.initializer || node.isConst) {
+            return; // Skip if no initializer or already const
+        }
+
+        // Check if assigning from a const source
+        const constSource = this.getConstSource(node.initializer);
+        if (!constSource) {
+            return; // Not from a const source
+        }
+
+        // Check each destructured element
+        for (const element of node.elements) {
+            if (!ast.isDestructuringElement(element)) {
+                continue;
+            }
+
+            // Get the type being assigned to check if it's a reference type
+            const elementType = this.typeProvider.getType(element);
+            const resolvedType = this.typeUtils.resolveIfReference(elementType);
+            
+            // Only error if it's NOT a basic type
+            if (!this.typeUtils.isTypeBasic(resolvedType)) {
+                accept('error',
+                    `Cannot assign element from ${constSource.description} to non-const variable '${element.name}'. ` +
+                    `Reference types must preserve const-ness. Either declare as const (let const [...] = ...) or assign from a mutable source.`,
+                    {
+                        node: element,
+                        property: 'name',
+                        code: ErrorCode.TC_ASSIGNMENT_FROM_CONST_TO_MUTABLE
+                    }
+                );
+            }
+        }
+    }
+
+    /**
+     * Check struct destructuring variable declarations for const assignment from const sources.
+     */
+    checkVariableDeclStructDestructuring = (node: ast.VariableDeclStructDestructuring, accept: ValidationAcceptor): void => {
+        if (!node.initializer || node.isConst) {
+            return; // Skip if no initializer or already const
+        }
+
+        // Check if assigning from a const source
+        const constSource = this.getConstSource(node.initializer);
+        if (!constSource) {
+            return; // Not from a const source
+        }
+
+        // Check each destructured element
+        for (const element of node.elements) {
+            if (!ast.isDestructuringElement(element)) {
+                continue;
+            }
+
+            // Get the type being assigned to check if it's a reference type
+            const elementType = this.typeProvider.getType(element);
+            const resolvedType = this.typeUtils.resolveIfReference(elementType);
+            
+            // Only error if it's NOT a basic type
+            if (!this.typeUtils.isTypeBasic(resolvedType)) {
+                const fieldName = element.originalName || element.name;
+                accept('error',
+                    `Cannot assign field '${fieldName}' from ${constSource.description} to non-const variable '${element.name}'. ` +
+                    `Reference types must preserve const-ness. Either declare as const (let const {...} = ...) or assign from a mutable source.`,
+                    {
+                        node: element,
+                        property: 'name',
+                        code: ErrorCode.TC_ASSIGNMENT_FROM_CONST_TO_MUTABLE
+                    }
+                );
+            }
+        }
+    }
+
+    /**
+     * Check tuple destructuring variable declarations for const assignment from const sources.
+     */
+    checkVariableDeclTupleDestructuring = (node: ast.VariableDeclTupleDestructuring, accept: ValidationAcceptor): void => {
+        if (!node.initializer || node.isConst) {
+            return; // Skip if no initializer or already const
+        }
+
+        // Check if assigning from a const source
+        const constSource = this.getConstSource(node.initializer);
+        if (!constSource) {
+            return; // Not from a const source
+        }
+
+        // Check each destructured element
+        for (const element of node.elements) {
+            if (!ast.isDestructuringElement(element)) {
+                continue;
+            }
+
+            // Get the type being assigned to check if it's a reference type
+            const elementType = this.typeProvider.getType(element);
+            const resolvedType = this.typeUtils.resolveIfReference(elementType);
+            
+            // Only error if it's NOT a basic type
+            if (!this.typeUtils.isTypeBasic(resolvedType)) {
+                accept('error',
+                    `Cannot assign tuple element from ${constSource.description} to non-const variable '${element.name}'. ` +
+                    `Reference types must preserve const-ness. Either declare as const (let const (...) = ...) or assign from a mutable source.`,
+                    {
+                        node: element,
+                        property: 'name',
+                        code: ErrorCode.TC_ASSIGNMENT_FROM_CONST_TO_MUTABLE
+                    }
+                );
+            }
         }
     }
 
@@ -4183,6 +4327,55 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // For other expressions (index access, function calls, etc.),
         // we don't consider them as const bases
+        return undefined;
+    }
+
+    /**
+     * Check if an expression is a const source that requires const assignment.
+     *
+     * Returns information about the const source if found, undefined otherwise.
+     *
+     * Const sources include:
+     * - Const variables
+     * - Immutable parameters (parameters without 'mut')
+     * - Members accessed from const variables or immutable parameters
+     *
+     * @param expr The expression to check
+     * @returns Info about the const source if found, undefined otherwise
+     */
+    private getConstSource(expr: ast.Expression): { description: string } | undefined {
+        // Check qualified references (variables, parameters)
+        if (ast.isQualifiedReference(expr)) {
+            const ref = expr.reference?.ref;
+            if (!ref) {
+                return undefined;
+            }
+            
+            // Const variable
+            if (ast.isVariableDeclaration(ref) && ref.isConst) {
+                return { description: `const variable '${ref.name}'` };
+            }
+            
+            // Immutable parameter (parameters are const by default)
+            if (ast.isFunctionParameter(ref) && !ref.isMut) {
+                return { description: `immutable parameter '${ref.name}'` };
+            }
+            
+            return undefined;
+        }
+        
+        // Check member access - if base is const, member access is const
+        if (ast.isMemberAccess(expr)) {
+            // Check if accessing from a const base
+            const baseConstSource = this.getConstSource(expr.expr);
+            if (baseConstSource) {
+                const element = expr.element?.ref;
+                const memberName = element && ast.isClassAttributeDecl(element) ? element.name : 'member';
+                return { description: `${baseConstSource.description}.${memberName}` };
+            }
+            return undefined;
+        }
+        
         return undefined;
     }
 

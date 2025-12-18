@@ -1,0 +1,81 @@
+// Test: Variables cannot be assigned from const sources without being const
+// EXCEPTION: Basic types (value types) are allowed since they're copied, not referenced
+
+// Basic types - these should all be OK
+let const x = 10u32
+let y = x  // OK: basic type is copied by value
+
+fn testParam(value: u32) {
+    let z = value  // OK: basic type param copied to mutable var
+}
+
+fn testMutParam(mut value: u32) {
+    let w = value  // OK: mutable param assigned to mutable var
+}
+
+fn testParamConst(value: u32) {
+    let c = value
+    let const c = value  // OK: immutable param assigned to const
+}
+
+// Reference types - structs, strings, etc. - these enforce const
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+let const p1 = {x: 1u32, y: 2u32}
+
+/// @Error(TCE195): Cannot assign const variable
+let p2 = p1  // ERROR: struct is a reference type, cannot assign const to non-const
+let const p3 = p1  // OK: const struct assigned to const
+
+let const str1 = "hello"
+/// @Error(TCE195): Cannot assign const variable
+let str2 = str1  // ERROR: string is a reference type
+let const str3 = str1  // OK: const string assigned to const
+
+fn testStructParam(point: Point) {
+    /// @Error(TCE195): Cannot assign immutable parameter
+    let p = point  // ERROR: struct param (immutable) assigned to non-const
+    let const q = point  // OK: immutable param assigned to const
+}
+
+fn testMutableStructParam(mut point: Point) {
+    let r = point  // OK: mutable struct param assigned to mutable var
+}
+
+// Member access - members of basic structs are also basic types
+let const point = {x: 1u32, y: 2u32}
+let memberX = point.x  // OK: member x is u32 (basic type), copied by value
+let const memberY = point.y  // OK: also valid
+
+fn testMemberParam(pt: Point) {
+    let x = pt.x  // OK: member is basic type (u32), copied
+    let const y = pt.y  // OK: also valid
+}
+
+fn testMutableMemberParam(mut pt: Point) {
+    let z = pt.x  // OK: mutable param's member
+}
+
+// Array destructuring
+let const arr = [{x: 1u32, y: 2u32}, {x: 3u32, y: 4u32}]
+/// @Error(TCE195): Cannot assign element from const variable
+let [first, second] = arr  // ERROR: array elements are reference types (Point)
+let const [first2, second2] = arr  // OK: const destructuring
+let const basicArr = [1u32, 2u32, 3u32]
+let [a, b, c] = basicArr  // OK: array elements are basic types
+// Struct destructuring  
+type Nested = struct {
+    nested: Point
+}
+let const nested1 = {nested: {x: 1u32, y: 2u32}}
+/// @Error(TCE195): Cannot assign
+let {nested: nested2} = nested1  // ERROR: nested field is a reference type (Point)
+let const {nested: nested3} = nested1  // OK: const destructuring
+type BasicStruct = struct {
+    val: u32
+}
+let const basicStruct = {val: 42u32}
+let {val: myVal} = basicStruct  // OK: field is basic type

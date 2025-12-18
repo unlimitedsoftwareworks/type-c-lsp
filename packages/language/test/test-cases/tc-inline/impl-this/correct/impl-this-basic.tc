@@ -20,7 +20,7 @@ type VecOperations = impl (
         return this.vec.x
     }
 
-    fn scale(factor: f32) -> void {
+    fn scale(mut factor: f32) -> void {
         // @type: Vec3
         this.vec.x = this.vec.x * factor
         this.vec.y = this.vec.y * factor
@@ -46,6 +46,16 @@ type Container<T> = impl (
     fn increment() -> void {
         // @type: u32
         this.count = this.count + 1u32
+    }
+}
+
+type Vector = class {
+    let vec: Vec3
+
+    impl VecOperations(vec)
+
+    override fn scale(factor: f32) -> void {
+        
     }
 }
 

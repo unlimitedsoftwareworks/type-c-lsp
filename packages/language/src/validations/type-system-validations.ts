@@ -3782,33 +3782,98 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * Catches cases like: class C { let x: u32? }
      */
     checkClassAttributeDecl = (node: ast.ClassAttributeDecl, accept: ValidationAcceptor): void => {
-        if (!node.type) return;
-        
-        const attrType = this.typeProvider.getType(node.type);
-        const errorMsg = this.checkForNullableBasicType(attrType);
-        
-        if (errorMsg) {
-            accept('error', `Attribute '${node.name}' cannot have ${errorMsg}`, {
-                node: node.type,
-                code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+        // Validate that attribute has either type or initializer (or both)
+        if (!node.type && !node.initializer) {
+            accept('error', `Class attribute '${node.name}' must have either a type annotation or an initializer`, {
+                node: node,
+                code: ErrorCode.TC_CLASS_ATTRIBUTE_MISSING_TYPE_OR_INITIALIZER
             });
+            return;
         }
         
-        // Check type compatibility if both annotation and initializer exist
-        if (node.initializer) {
-            const initType = this.typeProvider.getType(node.initializer);
-            const compatResult = this.isTypeCompatible(initType, attrType);
-            
-            if (!compatResult.success) {
-                const errorCode = ErrorCode.TC_VARIABLE_TYPE_MISMATCH;
-                const errorMsg = compatResult.message
-                    ? `Attribute '${node.name}' type mismatch: ${compatResult.message}`
-                    : `Attribute '${node.name}' type mismatch: Expected '${attrType.toString()}', but got '${initType.toString()}'`;
-                accept('error', errorMsg, {
+        // Get the final type of the attribute (from annotation or inferred from initializer)
+        let finalType: TypeDescription;
+        
+        if (node.type) {
+            finalType = this.typeProvider.getType(node.type);
+        } else if (node.initializer) {
+            finalType = this.typeProvider.getType(node.initializer);
+            if (isErrorType(finalType)) {
+                accept('error', finalType.message, {
                     node: node.initializer,
-                    code: errorCode
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
                 });
+                return;
             }
+        } else {
+            return; // Should not reach here due to check above
+        }
+        
+        // Resolve references to get the actual type
+        finalType = this.typeUtils.resolveIfReference(finalType);
+        
+        // Check if the final attribute type is a nullable basic type
+        if (isNullableType(finalType) && this.typeUtils.isTypeBasic(finalType.baseType)) {
+            const errorNode = node.type || node.initializer || node;
+            accept('error',
+                `Attribute '${node.name}' cannot have nullable basic type '${finalType.toString()}'. ` +
+                `Basic types cannot be nullable. ` +
+                `Consider using a reference type or handling null with the ?? operator.`,
+                {
+                    node: errorNode,
+                    code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
+                }
+            );
+            return;
+        }
+        
+        // Check if non-const attribute is assigned from a const expression
+        // Only applies to reference types (not basic types which are copied by value)
+        if (!node.isConst && node.initializer) {
+            const constSource = this.getConstSource(node.initializer);
+            if (constSource) {
+                // Get the type being assigned to check if it's a reference type
+                const initializerType = this.typeProvider.getType(node.initializer);
+                const resolvedType = this.typeUtils.resolveIfReference(initializerType);
+                
+                // Only error if it's NOT a basic type (basic types are copied, not referenced)
+                if (!this.typeUtils.isTypeBasic(resolvedType)) {
+                    accept('error',
+                        `Cannot assign ${constSource.description} to non-const attribute '${node.name}'. ` +
+                        `Reference types must preserve const-ness. Either declare the attribute as const (let const ${node.name} = ...) or assign from a mutable source.`,
+                        {
+                            node: node.initializer,
+                            code: ErrorCode.TC_ASSIGNMENT_FROM_CONST_TO_MUTABLE
+                        }
+                    );
+                }
+            }
+        }
+        
+        // Only check type compatibility if there's both annotation AND initializer
+        if (!node.type || !node.initializer) {
+            return;
+        }
+
+        let expectedType = this.typeProvider.getType(node.type);
+        let inferredType = this.typeProvider.getType(node.initializer);
+
+        // Resolve type references
+        expectedType = this.typeUtils.resolveIfReference(expectedType);
+        inferredType = this.typeUtils.resolveIfReference(inferredType);
+
+        // Check compatibility
+        const compatResult = this.isTypeCompatible(inferredType, expectedType);
+        if (!compatResult.success) {
+            const errorCode = ErrorCode.TC_VARIABLE_TYPE_MISMATCH;
+            const errorMsg = compatResult.message
+                ? `Attribute '${node.name}' type mismatch: ${compatResult.message}`
+                : `Attribute '${node.name}' type mismatch: Expected type '${expectedType.toString()}', but got '${inferredType.toString()}'`;
+            accept('error', errorMsg, {
+                node: node.initializer,
+                property: 'initializer',
+                code: errorCode
+            });
         }
     }
 

@@ -1,35 +1,32 @@
 type TestAttributeValidation = class {
     // Valid cases - both type and initializer
+    /// @Type(x): u32
     let x: u32 = 42
+    /// @Type(y): string
     let y: string = "hello"
     
     // Valid cases - only type (no initializer is ok)
+    /// @Type(a): u32
     let a: u32
+
+    /// @Type(b): string
     let b: string
     
     // Valid cases - only initializer (inferred type)
+    /// @Type(c): i32
     let c = 100
+
+    /// @Type(d): string
     let d = "world"
+    /// @Type(e): i32[]
     let e = [1, 2, 3]
     
-    // Invalid case - no type, no initializer (should error)
-    let invalid
-    
     // Valid - const with initializer
+    /// @Type(z): i32
     let const z = 42
     
     // Valid - const with type and initializer
+    /// @Type(w): u32
     let const w: u32 = 100
     
-    // Invalid - type mismatch
-    let bad: u32 = "string"
-    
-    // Invalid - inferred type mismatch with nullable basic type
-    let nullBad = 42
-    
-    // Test const assignment validation
-    fn testConstAssignment(param: {x: u32}) {
-        // Invalid - assigning const parameter to non-const attribute
-        let nonConstAttr = param
-    }
 }

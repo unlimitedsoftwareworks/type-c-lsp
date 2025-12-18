@@ -1,4 +1,4 @@
-type TestAttributeValidation = class {
+class TestAttributeValidation {
     // Valid cases - both type and initializer
     let x: u32 = 42
     let y: string = "hello"
@@ -16,10 +16,10 @@ type TestAttributeValidation = class {
     let invalid
     
     // Valid - const with initializer
-    let const z = 42
+    const z = 42
     
     // Valid - const with type and initializer
-    let const w: u32 = 100
+    const w: u32 = 100
     
     // Invalid - type mismatch
     let bad: u32 = "string"
@@ -28,7 +28,7 @@ type TestAttributeValidation = class {
     let nullBad = 42
     
     // Test const assignment validation
-    fn testConstAssignment(param: {x: u32}) {
+    fn testConstAssignment(const param: {x: u32}) {
         // Invalid - assigning const parameter to non-const attribute
         let nonConstAttr = param
     }

@@ -628,7 +628,7 @@ fragment ClassAttributesDecl:
 
 ClassAttributeDecl:
     // order matters, local static const x: u32
-    isLocal?='local'? isStatic?='static'? isConst?='const'? name=ID ':' type=DataType<false> (
+    isLocal?='local'? isStatic?='static'? isConst?='const'? name=ID (':' type=DataType<false>)? (
         '=' initializer=Expression // optional initializer for class attributes
     )?;
 

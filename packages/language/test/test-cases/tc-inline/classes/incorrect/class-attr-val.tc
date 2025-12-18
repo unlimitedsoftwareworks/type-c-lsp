@@ -13,6 +13,7 @@ type TestAttributeValidation = class {
     let e = [1, 2, 3]
     
     // Invalid case - no type, no initializer (should error)
+    /// @Error(TCE210):  must have either a type annotation or an initializer
     let invalid
     
     // Valid - const with initializer
@@ -22,14 +23,13 @@ type TestAttributeValidation = class {
     let const w: u32 = 100
     
     // Invalid - type mismatch
+    /// @Error(TCE006): string is not assignable to u32
     let bad: u32 = "string"
-    
-    // Invalid - inferred type mismatch with nullable basic type
-    let nullBad = 42
     
     // Test const assignment validation
     fn testConstAssignment(param: {x: u32}) {
         // Invalid - assigning const parameter to non-const attribute
+        /// @Error(TCE195): Cannot assign immutable parameter
         let nonConstAttr = param
     }
 }

@@ -292,6 +292,12 @@ export class TypeCTypeProvider {
         if (ast.isVariableDeclaration(parent) && parent.annotation && parent.initializer === node) {
             return this.getType(parent.annotation);
         }
+        
+        // Class attribute declaration with type annotation
+        // let x: T = expr (in class)
+        if (ast.isClassAttributeDecl(parent) && parent.type && parent.initializer === node) {
+            return this.getType(parent.type);
+        }
 
         // Expression-body function: fn foo() -> T = expr
         if (ast.isFunctionDeclaration(parent) && parent.expr === node && parent.header?.returnType) {
@@ -1040,7 +1046,24 @@ export class TypeCTypeProvider {
         if (ast.isTypeDeclaration(node)) return this.getType(node.definition);
         if (ast.isFunctionDeclaration(node)) return this.inferFunctionDeclaration(node);
         if (ast.isVariableDeclaration(node)) return this.inferVariableDeclaration(node);
-        if (ast.isClassAttributeDecl(node)) return this.getType(node.type);
+        if (ast.isClassAttributeDecl(node)) {
+            // If there's an explicit type annotation, use it
+            if (node.type) {
+                return this.getType(node.type);
+            }
+            
+            // Otherwise, infer type from initializer (if present)
+            if (node.initializer) {
+                return this.inferExpression(node.initializer);
+            }
+            
+            // No type or initializer - error (will be caught by validation)
+            return this.typeFactory.createErrorType(
+                `Class attribute '${node.name}' has no type annotation or initializer`,
+                undefined,
+                node
+            );
+        }
         if (ast.isImplementationAttributeDecl(node)) return this.getType(node.type);
         if (ast.isFunctionParameter(node)) {
             // If parameter has explicit type annotation, use it
@@ -1304,7 +1327,7 @@ export class TypeCTypeProvider {
             const attributes = node.attributes?.map(attrDecl =>
                 this.typeFactory.createAttributeType(
                     attrDecl.name,
-                    this.getType(attrDecl.type),
+                    this.getType(attrDecl),
                     attrDecl.isStatic ?? false,
                     attrDecl.isConst ?? false,
                     attrDecl.isLocal ?? false
@@ -1356,7 +1379,7 @@ export class TypeCTypeProvider {
             const attributes = node.attributes?.map(attrDecl =>
                 this.typeFactory.createAttributeType(
                     attrDecl.name,
-                    this.getType(attrDecl.type),
+                    this.getType(attrDecl),
                     attrDecl.isStatic ?? false,
                     attrDecl.isConst ?? false,
                     attrDecl.isLocal ?? false
@@ -1451,7 +1474,7 @@ export class TypeCTypeProvider {
             const attributes = node.attributes?.map(attrDecl =>
                 this.typeFactory.createAttributeType(
                     attrDecl.name,
-                    this.getType(attrDecl.type),
+                    this.getType(attrDecl),
                     attrDecl.isStatic ?? false,
                     attrDecl.isConst ?? false,
                     false
@@ -1500,7 +1523,7 @@ export class TypeCTypeProvider {
             const attributes = node.attributes?.map(attrDecl =>
                 this.typeFactory.createAttributeType(
                     attrDecl.name,
-                    this.getType(attrDecl.type),
+                    this.getType(attrDecl),
                     attrDecl.isStatic ?? false,
                     attrDecl.isConst ?? false,
                     false

@@ -1,0 +1,10 @@
+type Maybe<T> = variant {
+    Perhaps(value: T?)
+}
+
+type Provider<T> = interface {
+    fn provide() -> Maybe<T>
+    fn provideArray() -> Maybe<T>[]
+}
+
+type T7 = Provider<f32>

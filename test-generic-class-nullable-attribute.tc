@@ -1,0 +1,20 @@
+type Box<T> = class {
+    let data: T?
+}
+
+type Node<T> = {x: T?}
+
+type Maybe<T> = variant {
+    Perhaps(value: T?)
+}
+
+type Func<T> = fn(T) -> T?
+
+type T1 = Box<u32> // Should error: u32? is invalid in class attribute
+type T2 = Node<u32> // Should error: u32? is invalid in struct field
+type T3 = Box<Node<u32>> // Should work since Node<u32> is a struct, not a basic type
+type T4 = Func<u32> // Should error: u32? is invalid in function return type
+
+fn main() {
+    let c: Node<u32> = {x: 1u32}
+}

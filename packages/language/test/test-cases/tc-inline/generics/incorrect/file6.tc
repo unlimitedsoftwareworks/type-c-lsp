@@ -1,0 +1,74 @@
+type Box<T> = class {
+    let data: T?
+}
+
+type Node<T> = {x: T?}
+
+type Maybe<T> = variant {
+    Perhaps(value: T?),
+    Ok(value: T)
+}
+
+type Provider<T> = interface {
+    fn provide() -> Maybe<T>
+    fn provideArray() -> Maybe<T>[]
+}
+
+/// @Error(TCE120): Illegal nullable 
+type T7 = Provider<f32>
+
+/// @Error(TCE120): Illegal nullable 
+type F32Provider = interface Provider<f32> {
+    fn getDefault() -> f32
+}
+
+fn test19() {
+    let prov: F32Provider? = null
+
+    /// @Type(maybe): Maybe<f32>
+    let maybe = 
+        /// @Error(TCE120): Illegal nullable 
+        prov!.provide()
+    
+    /// @Type(maybes): Maybe<f32>[]
+    let maybes = 
+        /// @Error(TCE120): Illegal nullable 
+        prov!.provideArray()
+}
+
+// Test 20: The Ultimate Test - Everything combined
+type TreeNode<T> = struct {
+    value: T,
+    children: TreeNode<T>[]?,
+    metadata: struct { depth: u32, path: string }
+}
+
+
+type Func<T> = fn(T) -> T?
+
+/// @Error(TCE120): Illegal nullable 
+type T4 = Func<u32>
+
+type Inter<T> = interface {
+    fn keep() -> T
+}
+/// @Error(TCE120): Illegal nullable 
+type T5 = Inter<Func<u32> >
+
+
+/// @Error(TCE120): Illegal nullable 
+type T1 = Box<u32>
+
+/// @Error(TCE120): Illegal nullable 
+type T2 = Node<u32>
+
+/// @Error(TCE120): Illegal nullable 
+type T3 = Box<Node<u32> >
+
+fn test(){
+
+    /// @Error(TCE120): Illegal nullable 
+    let const a: Maybe<i32> = 
+        /// @Error(TCE120): Illegal nullable 
+        Maybe.Perhaps<i32>(1)
+}

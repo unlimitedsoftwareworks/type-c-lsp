@@ -108,7 +108,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
             ForEachIterator: this.checkForEachIterator,
             ForRangeIterator: this.checkForRangeIterator,
-            NullableType: this.checkNullableType
+            NullableType: this.checkNullableType,
+            DataType: this.checkType
         };
     }
 
@@ -382,8 +383,45 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 node,
                 code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
             });
-        } else {
-            ///console.log('[VALIDATION] Type is not an error, skipping');
+            return; // Don't check for errors field if type is already error
+        }
+
+        const baseExpr = this.typeUtils.resolveIfReference(exprType);
+        
+        // Check the errors field for any errors caught during generic substitution
+        if (baseExpr.errors && baseExpr.errors.length > 0) {
+            // Report each error found during type construction/substitution
+            for (const errorMsg of baseExpr.errors) {
+                accept('error', errorMsg, {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+        
+        // CRITICAL: For variant-constructor types, also check the baseVariant's errors
+        // This is necessary because variant-constructors can be created through multiple
+        // code paths (not just substituteGenerics), and some paths may not propagate
+        // errors from the base variant. This provides a safety net to catch all cases.
+        // Example: Maybe.Perhaps<i32>(1) where Perhaps has parameter T? and T=i32
+        if (isVariantConstructorType(baseExpr) && baseExpr.baseVariant.errors && baseExpr.baseVariant.errors.length > 0) {
+            for (const errorMsg of baseExpr.baseVariant.errors) {
+                accept('error', errorMsg, {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+        
+        // For variant-constructor types, also check the baseVariant's errors
+        // This catches errors in the variant definition that affect the constructor
+        if (isVariantConstructorType(baseExpr) && baseExpr.baseVariant.errors && baseExpr.baseVariant.errors.length > 0) {
+            for (const errorMsg of baseExpr.baseVariant.errors) {
+                accept('error', errorMsg, {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
         }
     }
 
@@ -4794,6 +4832,97 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         return undefined;
+    }
+
+    /**
+     * Check type declarations for illegal types that may be hidden in generic instantiations.
+     *
+     * This validator catches cases where generic substitution results in illegal types:
+     * - type T1 = Option<u32> where Option<T> = variant { Some(T?), None }
+     *   This would create Some(u32?), which is illegal (basic types can't be nullable)
+     * - type T2 = Wrapper<u32?> where Wrapper<T> = struct { value: T }
+     *   This would create a double nullable if T is already nullable
+     *
+     * The validation works by:
+     * 1. Get the type of the declaration (which triggers generic substitution if needed)
+     * 2. Check if the resulting type has any errors in its errors field
+     * 3. Report those errors at the declaration site
+     *
+     * Examples:
+     * ```tc
+     * type BadOption = Option<u32>           // ❌ Error if Option makes T nullable
+     * type GoodOption = Option<SomeClass>    // ✅ OK if SomeClass is a reference type
+     * ```
+     */
+    checkType = (node: ast.DataType, accept: ValidationAcceptor): void => {
+
+        // Get the type of the declaration, which will trigger substitution if it's generic
+        const type = this.typeUtils.resolveIfReference(this.typeProvider.getType(node));
+        
+        // Additionally, recursively check for errors in the type structure
+        // This catches errors in nested types
+        this.checkTypeForErrors(type, node, accept);
+    }
+    
+    /**
+     * Recursively check a type and its nested types for errors.
+     * This is used to validate type declarations and catch errors deep in the type structure.
+     */
+    private checkTypeForErrors(type: TypeDescription, node: AstNode, accept: ValidationAcceptor): void {
+        // Check if the type itself is an error
+        if (isErrorType(type)) {
+            const message = type.message;
+            
+            // Skip internal error types
+            if (message === '__recursion_placeholder__' ||
+                message === '__contextual_placeholder__' ||
+                message?.includes('placeholder')) {
+                return;
+            }
+            
+            accept('error', message || 'Type error', {
+                node,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+            return;
+        }
+        
+        // Check the errors field
+        if (type.errors && type.errors.length > 0) {
+            for (const errorMsg of type.errors) {
+                accept('error', errorMsg, {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+        
+        // Recursively check nested types
+        if (isArrayType(type)) {
+            this.checkTypeForErrors(type.elementType, node, accept);
+        } else if (isNullableType(type)) {
+            this.checkTypeForErrors(type.baseType, node, accept);
+        } else if (isUnionType(type)) {
+            for (const t of type.types) {
+                this.checkTypeForErrors(t, node, accept);
+            }
+        } else if (isJoinType(type)) {
+            for (const t of type.types) {
+                this.checkTypeForErrors(t, node, accept);
+            }
+        } else if (isTupleType(type)) {
+            for (const t of type.elementTypes) {
+                this.checkTypeForErrors(t, node, accept);
+            }
+        } else if (isStructType(type)) {
+            for (const field of type.fields) {
+                this.checkTypeForErrors(field.type, node, accept);
+            }
+        } else if (isReferenceType(type) && type.genericArgs.length > 0) {
+            for (const arg of type.genericArgs) {
+                this.checkTypeForErrors(arg, node, accept);
+            }
+        }
     }
 
 }

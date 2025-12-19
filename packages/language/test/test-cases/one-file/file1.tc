@@ -1,35 +1,9 @@
-type TestAttributeValidation = class {
-    // Valid cases - both type and initializer
-    let x: u32 = 42
-    let y: string = "hello"
-    
-    // Valid cases - only type (no initializer is ok)
-    let a: u32
-    let b: string
-    
-    // Valid cases - only initializer (inferred type)
-    let c = 100
-    let d = "world"
-    let e = [1, 2, 3]
-    
-    // Invalid case - no type, no initializer (should error)
-    let invalid
-    
-    // Valid - const with initializer
-    let const z = 42
-    
-    // Valid - const with type and initializer
-    let const w: u32 = 100
-    
-    // Invalid - type mismatch
-    let bad: u32 = "string"
-    
-    // Invalid - inferred type mismatch with nullable basic type
-    let nullBad = 42
-    
-    // Test const assignment validation
-    fn testConstAssignment(param: {x: u32}) {
-        // Invalid - assigning const parameter to non-const attribute
-        let nonConstAttr = param
-    }
+
+type Maybe<T> = variant {
+    Perhaps(value: T?),
+    Ok(value: T)
+}
+
+fn test(){
+    let const a = Maybe.Perhaps<i32>(1) 
 }

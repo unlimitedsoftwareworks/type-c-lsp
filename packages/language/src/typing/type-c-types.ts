@@ -27,6 +27,8 @@ export interface TypeDescription {
     readonly node?: AstNode;
     /** Human-readable representation of the type */
     toString(): string;
+
+    errors?: string[] | undefined;
 }
 
 /**

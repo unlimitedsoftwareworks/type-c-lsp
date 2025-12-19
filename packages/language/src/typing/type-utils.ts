@@ -1692,95 +1692,292 @@ export class TypeCTypeUtils {
     /**
      * Substitutes generic type parameters with concrete types.
      * Used when instantiating generic functions, classes, etc.
-     * 
+     *
      * @param type Type to substitute in
      * @param substitutions Map from generic parameter names to concrete types
+     * @param context Optional context string for error messages
+     * @param errors Optional array to collect errors during substitution
      * @returns New type with substitutions applied
      */
     substituteGenerics(
         type: TypeDescription,
-        substitutions: Map<string, TypeDescription>
+        substitutions: Map<string, TypeDescription>,
+        context?: string,
+        errors?: string[]
     ): TypeDescription {
         // If it's a generic type parameter, substitute it
         if (isGenericType(type)) {
-            return substitutions.get(type.name) ?? type;
+            const substitutedType = substitutions.get(type.name) ?? type;
+            
+            // If we actually substituted something (not just returning the original generic)
+            if (substitutedType !== type) {
+                // Check for illegal nullable basic types
+                if (isNullableType(substitutedType) && this.isTypeBasic(substitutedType.baseType)) {
+                    const errorMsg = `Generic parameter '${type.name}' substituted with illegal nullable basic type '${substitutedType.toString()}'${context ? ` in ${context}` : ''}`;
+                    if (errors) {
+                        errors.push(errorMsg);
+                    }
+                    // Return the type with errors attached
+                    return { ...substitutedType, errors: errors ? [...errors] : [errorMsg] };
+                }
+                
+                // Check for double nullable (shouldn't happen with direct substitution, but be safe)
+                // This would be if someone tries T -> U?? somehow
+                if (isNullableType(substitutedType) && isNullableType(substitutedType.baseType)) {
+                    const errorMsg = `Generic parameter '${type.name}' substituted with illegal double nullable type '${substitutedType.toString()}'${context ? ` in ${context}` : ''}`;
+                    if (errors) {
+                        errors.push(errorMsg);
+                    }
+                    // Return error type for double nullable (structural error)
+                    return this.typeFactory.createErrorType(errorMsg, ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE, type.node);
+                }
+            }
+            
+            return substitutedType;
         }
 
         // Recursively substitute in composite types
         if (isArrayType(type)) {
-            return this.typeFactory.createArrayType(
-                this.substituteGenerics(type.elementType, substitutions),
-                type.node
-            );
+            const substitutedElement = this.substituteGenerics(type.elementType, substitutions, context ? `${context} array element` : 'array element', errors);
+            const arrayType = this.typeFactory.createArrayType(substitutedElement, type.node);
+            
+            // Propagate errors from element type
+            if (substitutedElement.errors && substitutedElement.errors.length > 0) {
+                return { ...arrayType, errors: substitutedElement.errors };
+            }
+            
+            return arrayType;
         }
 
         if (isNullableType(type)) {
-            return this.typeFactory.createNullableType(
-                this.substituteGenerics(type.baseType, substitutions),
-                type.node
-            );
+            const substitutedBase = this.substituteGenerics(type.baseType, substitutions, context ? `${context} nullable base` : 'nullable base', errors);
+            
+            // Check for illegal nullable types during substitution
+            // 1. Check for double nullable (T? substituted with U? becomes U??)
+            if (isNullableType(substitutedBase)) {
+                const errorMsg = `Illegal double nullable type '${substitutedBase.toString()}?' - nullable types cannot be nested${context ? ` in ${context}` : ''}`;
+                if (errors) {
+                    errors.push(errorMsg);
+                }
+                // Return error type immediately for double nullable
+                return this.typeFactory.createErrorType(errorMsg, ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE, type.node);
+            }
+            
+            // 2. Check for basic types being made nullable (u32? is illegal)
+            if (this.isTypeBasic(substitutedBase)) {
+                const errorMsg = `Illegal nullable basic type '${substitutedBase.toString()}?' - basic types cannot be nullable${context ? ` in ${context}` : ''}`;
+                if (errors) {
+                    errors.push(errorMsg);
+                }
+                // Return the nullable type but with error recorded
+                const nullableType = this.typeFactory.createNullableType(substitutedBase, type.node);
+                return { ...nullableType, errors: errors ? [...errors] : [errorMsg] };
+            }
+            
+            // 3. Propagate errors from substitutedBase if it has any
+            const nullableType = this.typeFactory.createNullableType(substitutedBase, type.node);
+            if (substitutedBase.errors && substitutedBase.errors.length > 0) {
+                return { ...nullableType, errors: substitutedBase.errors };
+            }
+            
+            return nullableType;
         }
 
         if (isUnionType(type)) {
-            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions));
-            return this.typeFactory.createUnionType(substitutedTypes, type.node);
+            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const unionType = this.typeFactory.createUnionType(substitutedTypes, type.node);
+            
+            // Propagate errors from union members
+            const allErrors: string[] = [];
+            for (const memberType of substitutedTypes) {
+                if (memberType.errors && memberType.errors.length > 0) {
+                    allErrors.push(...memberType.errors);
+                }
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...unionType, errors: allErrors };
+            }
+            
+            return unionType;
         }
 
         if (isJoinType(type)) {
-            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions));
-            return this.typeFactory.createJoinType(substitutedTypes, type.node);
+            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const joinType = this.typeFactory.createJoinType(substitutedTypes, type.node);
+            
+            // Propagate errors from join members
+            const allErrors: string[] = [];
+            for (const memberType of substitutedTypes) {
+                if (memberType.errors && memberType.errors.length > 0) {
+                    allErrors.push(...memberType.errors);
+                }
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...joinType, errors: allErrors };
+            }
+            
+            return joinType;
         }
 
         if (isTupleType(type)) {
-            const substitutedTypes = type.elementTypes.map(t => this.substituteGenerics(t, substitutions));
-            return this.typeFactory.createTupleType(substitutedTypes, type.node);
+            const substitutedTypes = type.elementTypes.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const tupleType = this.typeFactory.createTupleType(substitutedTypes, type.node);
+            
+            // Propagate errors from tuple elements
+            const allErrors: string[] = [];
+            for (const elementType of substitutedTypes) {
+                if (elementType.errors && elementType.errors.length > 0) {
+                    allErrors.push(...elementType.errors);
+                }
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...tupleType, errors: allErrors };
+            }
+            
+            return tupleType;
         }
 
         if (isStructType(type)) {
             const substitutedFields = type.fields.map(f =>
                 this.typeFactory.createStructField(
                     f.name,
-                    this.substituteGenerics(f.type, substitutions),
+                    this.substituteGenerics(f.type, substitutions, `struct field '${f.name}'`, errors),
                     f.node
                 )
             );
-            return this.typeFactory.createStructType(substitutedFields, type.isAnonymous, type.node);
+            const structType = this.typeFactory.createStructType(substitutedFields, type.isAnonymous, type.node);
+            
+            // Propagate errors from any field
+            const fieldErrors = substitutedFields
+                .map(f => f.type.errors)
+                .filter(e => e && e.length > 0)
+                .flat() as string[];
+            
+            if (fieldErrors.length > 0) {
+                return { ...structType, errors: fieldErrors };
+            }
+            
+            return structType;
         }
 
         if (isFunctionType(type)) {
-            const substitutedParams = type.parameters.map(p =>
+            const substitutedParams = type.parameters.map((p, idx) =>
                 this.typeFactory.createFunctionParameterType(
                     p.name,
-                    this.substituteGenerics(p.type, substitutions),
+                    this.substituteGenerics(p.type, substitutions, p.name ? `function parameter '${p.name}'` : `function parameter ${idx + 1}`, errors),
                     p.isMut
                 )
             );
-            const substitutedReturn = this.substituteGenerics(type.returnType, substitutions);
+            const substitutedReturn = this.substituteGenerics(type.returnType, substitutions, 'function return type', errors);
             
             // Filter out generic parameters that have been substituted
             const remainingGenerics = type.genericParameters?.filter(g => !substitutions.has(g.name)) ?? [];
             
-            return this.typeFactory.createFunctionType(
+            const functionType = this.typeFactory.createFunctionType(
                 substitutedParams,
                 substitutedReturn,
                 type.fnType,
                 remainingGenerics,
                 type.node
             );
+            
+            // Propagate errors from parameters and return type
+            const allErrors: string[] = [];
+            
+            // Collect errors from parameters
+            for (const param of substitutedParams) {
+                if (param.type.errors && param.type.errors.length > 0) {
+                    allErrors.push(...param.type.errors);
+                }
+            }
+            
+            // Collect errors from return type
+            if (substitutedReturn.errors && substitutedReturn.errors.length > 0) {
+                allErrors.push(...substitutedReturn.errors);
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...functionType, errors: allErrors };
+            }
+            
+            return functionType;
         }
 
         if (isReferenceType(type) && type.genericArgs.length > 0) {
-            const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions));
-            return this.typeFactory.createReferenceType(
+            const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            
+            const refType = this.typeFactory.createReferenceType(
                 type.declaration,
                 substitutedArgs,
                 type.node
             );
+            
+            // CRITICAL: Check if the substituted reference type itself will contain errors
+            // This handles nested generic substitutions like Provider<T> with Maybe<T> where Maybe has T?
+            // We need to resolve the reference and check if it contains errors
+            // BUT we must avoid infinite recursion for recursive types like TreeNode<T> = { children: TreeNode<T>[]? }
+            let resolvedErrors: string[] = [];
+            
+            // Only resolve if we're not already checking this reference (cycle detection)
+            // Check if this reference is already in our pending checks
+            const isAlreadyChecking = this.pendingChecks.some(pair =>
+                isReferenceType(pair.from) &&
+                pair.from.declaration === type.declaration &&
+                pair.from.genericArgs.length === substitutedArgs.length &&
+                pair.from.genericArgs.every((arg, i) => this.areTypesEqual(arg, substitutedArgs[i]).success)
+            );
+            
+            if (!isAlreadyChecking) {
+                // Add to pending checks to prevent infinite recursion
+                this.addPendingCheck(refType, refType);
+                
+                try {
+                    // Resolve the reference to check if the instantiated type contains errors
+                    const resolved = this.typeProvider().resolveReference(refType);
+                    if (resolved.errors && resolved.errors.length > 0) {
+                        // Enhance error messages with context about where this reference is being used
+                        if (context) {
+                            resolvedErrors = resolved.errors.map(err =>
+                                `${err} (used in ${context})`
+                            );
+                        } else {
+                            resolvedErrors = resolved.errors;
+                        }
+                    }
+                } finally {
+                    // Always remove from pending checks
+                    this.removePendingCheck(refType, refType);
+                }
+            }
+            
+            // Propagate errors from both generic arguments AND the resolved type
+            const allErrors: string[] = [];
+            
+            // Collect errors from generic arguments themselves
+            for (const arg of substitutedArgs) {
+                if (arg.errors && arg.errors.length > 0) {
+                    allErrors.push(...arg.errors);
+                }
+            }
+            
+            // Add errors from the resolved type
+            if (resolvedErrors.length > 0) {
+                allErrors.push(...resolvedErrors);
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...refType, errors: allErrors };
+            }
+            
+            return refType;
         }
 
         if (isVariantConstructorType(type) && type.genericArgs.length > 0) {
-            const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions));
-            return this.typeFactory.createVariantConstructorType(
+            const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const variantConstructorType = this.typeFactory.createVariantConstructorType(
                 type.baseVariant,
                 type.constructorName,
                 type.parentConstructor,
@@ -1788,99 +1985,230 @@ export class TypeCTypeUtils {
                 type.node,
                 type.variantDeclaration
             );
+            
+            // Propagate errors from generic arguments AND from the base variant
+            const allErrors: string[] = [];
+            for (const arg of substitutedArgs) {
+                if (arg.errors && arg.errors.length > 0) {
+                    allErrors.push(...arg.errors);
+                }
+            }
+            
+            // CRITICAL: Propagate errors from the base variant
+            // This handles cases where generic substitution in the variant definition
+            // produces errors (e.g., T? -> i32? in variant constructor parameters)
+            if (type.baseVariant.errors && type.baseVariant.errors.length > 0) {
+                allErrors.push(...type.baseVariant.errors);
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...variantConstructorType, errors: allErrors };
+            }
+            
+            return variantConstructorType;
         }
 
         // Substitute generics in variant types
         if (isVariantType(type)) {
-            const substitutedConstructors = type.constructors.map(constructor =>
-                this.typeFactory.createVariantConstructor(
+            const substitutedConstructors = type.constructors.map(constructor => {
+                // Build the full constructor signature for better error messages
+                const constructorSig = `${constructor.name}(${constructor.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')})`;
+                
+                return this.typeFactory.createVariantConstructor(
                     constructor.name,
-                    constructor.parameters.map(param =>
-                        this.typeFactory.createStructField(
+                    constructor.parameters.map(param => {
+                        // Build context with parent context if available
+                        const paramContext = context
+                            ? `${context} variant constructor '${constructorSig}' parameter '${param.name}'`
+                            : `variant constructor '${constructorSig}' parameter '${param.name}'`;
+                        return this.typeFactory.createStructField(
                             param.name,
-                            this.substituteGenerics(param.type, substitutions),
+                            this.substituteGenerics(param.type, substitutions, paramContext, errors),
                             param.node
-                        )
-                    )
-                )
-            );
-            return this.typeFactory.createVariantType(substitutedConstructors, type.node);
+                        );
+                    })
+                );
+            });
+            const variantType = this.typeFactory.createVariantType(substitutedConstructors, type.node);
+            
+            // Propagate errors from any constructor parameter
+            const paramErrors: string[] = [];
+            for (const constructor of substitutedConstructors) {
+                for (const param of constructor.parameters) {
+                    if (param.type.errors && param.type.errors.length > 0) {
+                        paramErrors.push(...param.type.errors);
+                    }
+                }
+            }
+            
+            if (paramErrors.length > 0) {
+                return { ...variantType, errors: paramErrors };
+            }
+            
+            return variantType;
         }
         if (isClassType(type)) {
             const substitutedAttributes = type.attributes.map(a =>
                 this.typeFactory.createAttributeType(
                     a.name,
-                    this.substituteGenerics(a.type, substitutions),
+                    this.substituteGenerics(a.type, substitutions, `class attribute '${a.name}'`, errors),
                     a.isStatic,
                     a.isConst,
                     a.isLocal
                 )
             );
-            const substitutedMethods = type.methods.filter(m => !m.isStatic).map(m =>
-                this.typeFactory.createMethodType(
+            const substitutedMethods = type.methods.filter(m => !m.isStatic).map(m => {
+                // Build the full method signature for better error messages
+                const methodSig = `${m.names[0]}(${m.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${m.returnType.toString()}`;
+                
+                return this.typeFactory.createMethodType(
                     m.names,
-                    m.parameters.map(p =>
+                    m.parameters.map((p, idx) =>
                         this.typeFactory.createFunctionParameterType(
                             p.name,
-                            this.substituteGenerics(p.type, substitutions),
+                            this.substituteGenerics(p.type, substitutions, p.name ? `class method '${methodSig}' parameter '${p.name}'` : `class method '${methodSig}' parameter ${idx + 1}`, errors),
                             p.isMut
                         )
                     ),
-                    this.substituteGenerics(m.returnType, substitutions),
+                    this.substituteGenerics(m.returnType, substitutions, `class method '${methodSig}' return type`, errors),
                     m.node,
                     m.genericParameters,
                     m.isStatic,
                     m.isOverride,
                     m.isLocal
-                )
-            );
+                );
+            });
             const substitutedImplementations = type.implementations.map(i =>
-                this.substituteGenerics(i, substitutions) as TypeDescription
+                this.substituteGenerics(i, substitutions, context, errors) as TypeDescription
             );
             const substitutedSuperTypes = type.superTypes.map(t =>
-                this.substituteGenerics(t, substitutions)
+                this.substituteGenerics(t, substitutions, context, errors)
             );
-            return this.typeFactory.createClassType(
+            const classType = this.typeFactory.createClassType(
                 substitutedAttributes,
                 substitutedMethods,
                 substitutedSuperTypes,
                 substitutedImplementations,
                 type.node
             );
+            
+            // Propagate errors from attributes, method parameters/return types, implementations, and supertypes
+            const allErrors: string[] = [];
+            
+            // Collect errors from attributes
+            for (const attr of substitutedAttributes) {
+                if (attr.type.errors && attr.type.errors.length > 0) {
+                    allErrors.push(...attr.type.errors);
+                }
+            }
+            
+            // Collect errors from methods (parameters and return types)
+            for (const method of substitutedMethods) {
+                for (const param of method.parameters) {
+                    if (param.type.errors && param.type.errors.length > 0) {
+                        allErrors.push(...param.type.errors);
+                    }
+                }
+                if (method.returnType.errors && method.returnType.errors.length > 0) {
+                    allErrors.push(...method.returnType.errors);
+                }
+            }
+            
+            // Collect errors from implementations
+            for (const impl of substitutedImplementations) {
+                if (impl.errors && impl.errors.length > 0) {
+                    allErrors.push(...impl.errors);
+                }
+            }
+            
+            // Collect errors from super types
+            for (const superType of substitutedSuperTypes) {
+                if (superType.errors && superType.errors.length > 0) {
+                    allErrors.push(...superType.errors);
+                }
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...classType, errors: allErrors };
+            }
+            
+            return classType;
         }
 
         if (isInterfaceType(type)) {
-            const substitutedMethods = type.methods.map(m =>
-                this.typeFactory.createMethodType(
+            const substitutedMethods = type.methods.map(m => {
+                // Build the full method signature for better error messages
+                const methodSig = `${m.names[0]}(${m.parameters.map(p => `${p.name}: ${p.type.toString()}`).join(', ')}) -> ${m.returnType.toString()}`;
+                
+                return this.typeFactory.createMethodType(
                     m.names,
-                    m.parameters.map(p =>
-                        this.typeFactory.createFunctionParameterType(
+                    m.parameters.map((p, idx) => {
+                        const paramContext = p.name
+                            ? `interface method '${methodSig}' parameter '${p.name}'`
+                            : `interface method '${methodSig}' parameter ${idx + 1}`;
+                        return this.typeFactory.createFunctionParameterType(
                             p.name,
-                            this.substituteGenerics(p.type, substitutions),
+                            this.substituteGenerics(p.type, substitutions, paramContext, errors),
                             p.isMut
-                        )
-                    ),
-                    this.substituteGenerics(m.returnType, substitutions),
+                        );
+                    }),
+                    this.substituteGenerics(m.returnType, substitutions, `interface method '${methodSig}' return type`, errors),
                     m.node,
                     m.genericParameters,
                     m.isStatic,
                     m.isOverride,
                     m.isLocal
-                )
-            );
+                );
+            });
             const substitutedSuperTypes = type.superTypes.map(t =>
-                this.substituteGenerics(t, substitutions)
+                this.substituteGenerics(t, substitutions, context, errors)
             );
-            return this.typeFactory.createInterfaceType(substitutedMethods, substitutedSuperTypes, type.node);
+            const interfaceType = this.typeFactory.createInterfaceType(substitutedMethods, substitutedSuperTypes, type.node);
+            
+            // Propagate errors from method parameters/return types and supertypes
+            const allErrors: string[] = [];
+            
+            // Collect errors from methods (parameters and return types)
+            for (const method of substitutedMethods) {
+                for (const param of method.parameters) {
+                    if (param.type.errors && param.type.errors.length > 0) {
+                        allErrors.push(...param.type.errors);
+                    }
+                }
+                if (method.returnType.errors && method.returnType.errors.length > 0) {
+                    allErrors.push(...method.returnType.errors);
+                }
+            }
+            
+            // Collect errors from super types
+            for (const superType of substitutedSuperTypes) {
+                if (superType.errors && superType.errors.length > 0) {
+                    allErrors.push(...superType.errors);
+                }
+            }
+            
+            if (allErrors.length > 0) {
+                return { ...interfaceType, errors: allErrors };
+            }
+            
+            return interfaceType;
         }
 
         if (isTypeGuardType(type)) {
-            return this.typeFactory.createTypeGuardType(
+            const substitutedGuardedType = this.substituteGenerics(type.guardedType, substitutions, context, errors);
+            const typeGuardType = this.typeFactory.createTypeGuardType(
                 type.parameterName,
                 type.parameterIndex,
-                this.substituteGenerics(type.guardedType, substitutions),
+                substitutedGuardedType,
                 type.node
             );
+            
+            // Propagate errors from guarded type
+            if (substitutedGuardedType.errors && substitutedGuardedType.errors.length > 0) {
+                return { ...typeGuardType, errors: substitutedGuardedType.errors };
+            }
+            
+            return typeGuardType;
         }
 
         // For other types, return as-is

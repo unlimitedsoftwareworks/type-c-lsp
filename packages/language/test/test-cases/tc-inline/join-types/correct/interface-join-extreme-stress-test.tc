@@ -182,17 +182,17 @@ type Provider<T> = interface {
     fn provideArray() -> Maybe<T>[]
 }
 
-type F32Provider = interface Provider<f32> {
+type F32Provider = interface Provider<{x: f32}> {
     fn getDefault() -> f32
 }
 
 fn test19() {
     let prov: F32Provider? = null
 
-    /// @Type(maybe): Maybe<f32>
+    /// @Type(maybe): Maybe<{ x: f32 }>
     let maybe = prov!.provide()
     
-    /// @Type(maybes): Maybe<f32>[]
+    /// @Type(maybes): Maybe<{ x: f32 }>[]
     let maybes = prov!.provideArray()
 }
 

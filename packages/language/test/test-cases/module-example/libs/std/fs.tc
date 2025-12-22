@@ -89,7 +89,7 @@ type FileAttributes = {
 type InputFileStream = class SeekableStream, InputStream {
     let const handler: u64
     let const path: string
-    let const open: bool
+    let open: bool
 
     fn init(path: string) {
         let (handler, error) = fs_api.fs_open(
@@ -100,7 +100,7 @@ type InputFileStream = class SeekableStream, InputStream {
             throw "Error opening file `"+path+"`, error code "+error
         }
 
-        this += {handler: handler, path: path, open: true}
+        this.{handler: handler, path: path, open: true}
     }
 
     /**

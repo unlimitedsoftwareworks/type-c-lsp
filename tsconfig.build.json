@@ -11,6 +11,9 @@
             "path": "./packages/cli/tsconfig.json"
         },
         {
+            "path": "./packages/compiler/tsconfig.json"
+        },
+        {
             "path": "./packages/extension/tsconfig.json"
         }
     ]

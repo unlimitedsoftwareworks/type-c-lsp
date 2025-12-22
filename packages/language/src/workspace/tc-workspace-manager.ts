@@ -3,6 +3,7 @@ import { LangiumSharedServices } from "langium/lsp";
 import * as path from "node:path";
 import { builtins } from "../builtins/index.js";
 import { TypeCModuleConfig } from "./tc-module.js";
+import { CancellationToken } from "vscode-jsonrpc";
 
 export class TCWorkspaceManager extends DefaultWorkspaceManager {
     private readonly documentFactory: LangiumDocumentFactory;
@@ -22,12 +23,19 @@ export class TCWorkspaceManager extends DefaultWorkspaceManager {
         }
     }
 
+    override async initializeWorkspace(folders: WorkspaceFolder[], cancelToken = CancellationToken.None): Promise<void> {
+        this.folders = folders;
+        await super.initializeWorkspace(folders, cancelToken);
+        this.getModuleConfig()
+    }
+
     public getModuleConfig(): TypeCModuleConfig | undefined {
         if (this.moduleConfig) {
             return this.moduleConfig;
         }
 
         const workingDirs = this.folders?.map(folder => URI.parse(folder.uri).fsPath);
+
         if(!workingDirs) {
             return undefined;
         }
@@ -88,6 +96,7 @@ export class TCWorkspaceManager extends DefaultWorkspaceManager {
         if (this.fileSystemProvider.existsSync(libsLibrary)) {
             return libsLibrary;
         }
+        
         return undefined;
     }
 }

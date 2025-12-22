@@ -28,6 +28,7 @@
     "workspaces": [
         "packages/language",
         "packages/cli",
+        "packages/compiler",
         "packages/extension"
     ]
 }

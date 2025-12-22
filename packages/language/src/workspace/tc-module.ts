@@ -6,7 +6,8 @@ export type TypeCModuleConfig = {
 	license: string;
 	dependencies: Record<string, string>;
 	compiler: {
-		"target": "library" | "runnable"		
+		"target": "library" | "runnable",
+		"entry": string
 	}
 
 	dependenciesFolder: string;

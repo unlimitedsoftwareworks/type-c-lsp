@@ -1762,6 +1762,13 @@ export class TypeCTypeProvider {
             return this.typeFactory.createReferenceType(declaration, genericArgs, node);
         }
 
+        // Handle references to namespaces (e.g., math in math.Animal)
+        // Namespaces can contain type declarations that are accessed via member access
+        if (ast.isNamespaceDecl(declaration)) {
+            // Return the namespace type so member access can continue
+            return this.typeFactory.createNamespaceType(declaration.name, declaration, node);
+        }
+
         // We could also reference a variant constructor directly
         if (ast.isVariantConstructor(declaration) && node.parent) {
             let baseVariant = this.resolveReference(this.inferReferenceType(node.parent));

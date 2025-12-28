@@ -471,3 +471,8 @@ export interface ThrowInstruction extends Instruction {
     readonly kind: 'throw';
     readonly value: string;
 }
+
+export interface DebugInstruction extends Instruction {
+    readonly kind: 'debug';
+    readonly comment: string;
+}

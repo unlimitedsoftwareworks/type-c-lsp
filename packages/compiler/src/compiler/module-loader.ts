@@ -58,5 +58,5 @@ export async function buildWorkspace(dirPath: string, services: TypeCServices): 
     return {
         entry: document!,
         documents: allDocs
-    }!;
+    };
 }

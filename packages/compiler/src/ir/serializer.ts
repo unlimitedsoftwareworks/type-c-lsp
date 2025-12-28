@@ -12,6 +12,7 @@ import type {
 } from './types.js';
 
 import type {
+    DebugInstruction,
     Instruction,
     PhiPair
 } from './instructions.js';
@@ -408,6 +409,11 @@ function serializeInstruction(instruction: Instruction): string {
         case 'throw': {
             const inst = instruction as any;
             return `    throw ${inst.value};`;
+        }
+
+        case 'debug': {
+            const inst = instruction as DebugInstruction;
+            return `    debug ${inst.comment}`;
         }
 
         default:

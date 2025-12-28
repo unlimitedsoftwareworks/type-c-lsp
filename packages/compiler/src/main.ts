@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as url from 'node:url';
 import { createTypeCServices } from 'type-c-language';
-import { buildWorkspace } from './compiler/compiler.js';
+import { buildWorkspace } from './compiler/module-loader.js';
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
 
 const packagePath = path.resolve(__dirname, '..', 'package.json');

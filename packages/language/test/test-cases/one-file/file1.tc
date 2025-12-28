@@ -1,9 +1,29 @@
 
-type Maybe<T> = variant {
-    Perhaps(value: T?),
-    Ok(value: T)
+type Array<T> = class {
+    let data: T[] = []
+    let size: u64 = 0
+    let capacity: u64 = 0
+
+    fn init(){}
+    fn init(mut data: T[]) {
+        this.{
+            data: data,
+            size: data.length,
+            capacity: data.length
+        }
+    }
+
+    fn map<U>(f: fn(T) -> U) -> Array<U>{
+        let arr: U[] = []
+        arr.resize(size)
+
+        foreach key, value in data {
+            arr[key] = f(value)
+        }
+
+        return new Array<U>(arr)
+    }
 }
 
-fn test(){
-    let const a = Maybe.Perhaps<i32>(1) 
-}
+let arr1: Array<u32> = new Array<u32>([1, 2, 3])
+let arr2 = arr1.map(fn(x: u32) = "hi")

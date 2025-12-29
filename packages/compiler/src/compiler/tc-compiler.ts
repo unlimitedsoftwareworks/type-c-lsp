@@ -3,7 +3,7 @@
  * Generates Low-Level Intermediate Representation from Type-C AST
  */
 
-import { AstNode } from 'langium';
+import { AstNode, LangiumDocument } from 'langium';
 import * as ast from 'type-c-language';
 import {
     BinaryOp,
@@ -21,6 +21,7 @@ import {
     stringLiteral
 } from '../ir/index.js';
 import { TypeCTypeProvider } from '../../../language/src/typing/type-c-type-provider.js';
+import { MonomorphizationRegistry } from '../../../language/src/typing/monomorphization-service.js';
 
 /**
  * Context for tracking code generation state
@@ -58,11 +59,13 @@ export class LIRGenerator {
     private program: LIRProgram;
     private context: GenerationContext;
     readonly typeProvider: TypeCTypeProvider;
+    readonly monoMorph: MonomorphizationRegistry;
 
-    constructor(typeProvider: TypeCTypeProvider) {
+    constructor(services: ast.TypeCServices) {
         this.program = new LIRProgram();
         this.context = this.createContext();
-        this.typeProvider = typeProvider;
+        this.typeProvider = services.typing.TypeProvider;
+        this.monoMorph = services.typing.MonomorphizationRegistry;
     }
 
     /**
@@ -82,8 +85,17 @@ export class LIRGenerator {
     /**
      * Generate LIR from a Type-C module
      */
-    public generate(module: ast.Module): LIRProgram {
-        this.visitModule(module);
+    public generate(documents: LangiumDocument<AstNode>[]): LIRProgram {
+        // Visits each module and generates code for each one.
+        for(const doc of documents) {
+            if(!ast.isModule(doc.parseResult.value)){
+                // Unreachable .. in theory.
+                console.log("Invalid node")
+                continue;
+            }
+
+            this.visitModule(doc.parseResult.value)
+        }
         return this.program;
     }
 
@@ -92,21 +104,15 @@ export class LIRGenerator {
     // ============================================================================
 
     private visitModule(node: ast.Module): void {
-        // TODO: Process imports
-        for (const imp of node.imports) {
-            this.visitImport(imp);
-        }
-
-        // Process all definitions
-        for (const def of node.definitions) {
-            this.visitDefinition(def);
-        }
+        /**
+         * Generate code for all:
+         * 1. Global variabels initializations
+         * 2. All FFI loads
+         * 1. Classes (class methods)
+         * 2. Functions
+         */
     }
 
-    private visitImport(node: ast.Import): void {
-        // TODO: Handle imports (may need module linking)
-        console.warn('Import handling not yet implemented');
-    }
 
     private visitDefinition(node: AstNode): void {
         if (ast.isFunctionDeclaration(node)) {

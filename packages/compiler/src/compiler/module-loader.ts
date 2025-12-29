@@ -26,11 +26,11 @@ export async function buildWorkspace(dirPath: string, services: TypeCServices): 
 
     const folderPath = path.dirname(configPath)
     const folderName = path.basename(folderPath);;
-    console.log({name: folderName, uri: URI.file(path.resolve(folderName)).fsPath})
+    //console.log({name: folderName, uri: URI.file(path.resolve(folderName)).fsPath})
     await services.shared.workspace.WorkspaceManager.initializeWorkspace([{name: folderName, uri: URI.file(path.resolve(folderPath)).fsPath}])
 
-    const docs = (await services.shared.workspace.LangiumDocuments.all).toArray();
-    console.log(docs.length, "Documents found", docs.map(e => e.uri.fsPath).join('\n'))
+    // const docs = (await services.shared.workspace.LangiumDocuments.all).toArray();
+    //console.log(docs.length, "Documents found", docs.map(e => e.uri.fsPath).join('\n'))
     
     const document = await services.shared.workspace.LangiumDocuments.getDocument(URI.file(path.resolve(
         path.join(dirPath, config.sourceFolder, config.compiler.entry)

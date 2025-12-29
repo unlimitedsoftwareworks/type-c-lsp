@@ -266,7 +266,7 @@ describe('Monomorphization Service', () => {
             }
             
             type Matrix<T> = class {
-                let rows: Array<Array<T>> = new Array<Array<T>>()
+                let rows: Array<Array<T> > = new Array<Array<T> >()
             }
 
             let mat: Matrix<f32> = new Matrix<f32>()
@@ -274,9 +274,9 @@ describe('Monomorphization Service', () => {
 
         const registry = setup.services.TypeC.typing.MonomorphizationRegistry;
         
-        // Find Array<Array<f32>> instantiation
+        // Find Array<Array<f32> > instantiation
         const allClasses = registry.getAllClassInstantiations();
-        const nestedArray = allClasses.find((c: ClassInstantiation) => c.key.includes('Array<Array<f32>>'));
+        const nestedArray = allClasses.find((c: ClassInstantiation) => c.key.includes('Array<Array<f32> >'));
         
         if (nestedArray) {
             const mangledName = registry.mangleName(nestedArray.key);
@@ -412,14 +412,14 @@ describe('Monomorphization Service', () => {
                 let value: T? = null
             }
             
-            // Array<Result<Array<u32>, string>>
-            let nested: Array<Result<Array<u32>, string>> = new Array<Result<Array<u32>, string>>()
+            // Array<Result<Array<u32>, string> >
+            let nested: Array<Result<Array<u32>, string> > = new Array<Result<Array<u32>, string> >()
         `);
 
         const registry = setup.services.TypeC.typing.MonomorphizationRegistry;
         const allClasses = registry.getAllClassInstantiations();
         
-        // Should have Array<u32>, Result<Array<u32>,string>, Array<Result<Array<u32>,string>>
+        // Should have Array<u32>, Result<Array<u32>,string>, Array<Result<Array<u32>,string> >
         expect(allClasses.length).toBeGreaterThanOrEqual(3);
         
         const keys = allClasses.map((c: ClassInstantiation) => c.key);
@@ -440,14 +440,14 @@ describe('Monomorphization Service', () => {
                 let data: T[] = []
             }
             
-            // Box<Array<Box<Array<u32>>>>
-            let deep: Box<Array<Box<Array<u32>>>> = new Box<Array<Box<Array<u32>>>>()
+            // Box<Array<Box<Array<u32> > > >
+            let deep: Box<Array<Box<Array<u32> > > > = new Box<Array<Box<Array<u32 > > > >()
         `);
 
         const registry = setup.services.TypeC.typing.MonomorphizationRegistry;
         const allClasses = registry.getAllClassInstantiations();
         
-        // Should register multiple levels: Array<u32>, Box<Array<u32>>, Array<Box<Array<u32>>>, Box<Array<Box<Array<u32>>>>
+        // Should register multiple levels: Array<u32>, Box<Array<u32> >, Array<Box<Array<u32> > >, Box<Array<Box<Array<u32> > > >
         expect(allClasses.length).toBeGreaterThanOrEqual(4);
     });
 
@@ -463,8 +463,8 @@ describe('Monomorphization Service', () => {
             type Array<T> = class {
                 let data: T[] = []
                 
-                fn zip<U>(other: Array<U>) -> Array<Array<T>> {
-                    return new Array<Array<T>>()
+                fn zip<U>(other: Array<U>) -> Array<Array<T> > {
+                    return new Array<Array<T> >()
                 }
             }
 
@@ -955,7 +955,7 @@ describe('Monomorphization Service', () => {
                 let data: T[] = []
             }
 
-            let complex: Array<Result<u32, string>> = new Array<Result<u32, string>>()
+            let complex: Array<Result<u32, string> > = new Array<Result<u32, string> >()
         `);
 
         const registry = setup.services.TypeC.typing.MonomorphizationRegistry;

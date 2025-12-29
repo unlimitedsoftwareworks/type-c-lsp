@@ -2461,6 +2461,7 @@ export class TypeCTypeProvider {
 
                 // Build substitution map and validate constraints
                 const substitutions = new Map<string, TypeDescription>();
+                const typeArgs: TypeDescription[] = [];
                 
                 for (let index = 0; index < genericParams.length; index++) {
                     const param = genericParams[index];
@@ -2477,6 +2478,15 @@ export class TypeCTypeProvider {
                     }
                     
                     substitutions.set(param.name, concreteType);
+                    typeArgs.push(concreteType);
+                }
+
+                // MONOMORPHIZATION: Register function instantiation with explicit generic args
+                if (refNode && ast.isFunctionDeclaration(refNode) && refNode.genericParameters && refNode.genericParameters.length > 0) {
+                    this.services.typing.MonomorphizationRegistry.registerFunctionInstantiation(
+                        refNode,
+                        typeArgs
+                    );
                 }
 
                 // Apply substitutions to the function type
@@ -3401,34 +3411,79 @@ export class TypeCTypeProvider {
                 }
             }
 
-            // MONOMORPHIZATION: Register method or function instantiation if we have substitutions
-            if (substitutions && substitutions.size > 0) {
-                // Check if this is a method call on a class instance
-                if (ast.isMemberAccess(node.expr)) {
-                    const baseType = this.inferExpression(node.expr.expr);
-                    if (isReferenceType(baseType) && ast.isClassType(baseType.declaration.definition)) {
-                        // This is a method call on a generic class
-                        const classKey = this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
-                            baseType.declaration,
-                            baseType.genericArgs
-                        );
-                        
-                        // Get the method declaration from the member access
-                        const methodRef = node.expr.element.ref;
-                        if (methodRef && ast.isMethodHeader(methodRef)) {
-                            const methodTypeArgs = Array.from(substitutions.values());
-                            this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
-                                classKey,
-                                methodRef,
-                                methodTypeArgs
-                            );
+            // MONOMORPHIZATION: Register method or function instantiation
+            // IMPORTANT: Skip during method inference to avoid cyclic reference errors
+            const isInMethodInferenceContext = this.inferringMethods.size > 0 || this.inferringImplMethods.size > 0;
+            
+            // Handle method calls on generic class instances
+            if (ast.isMemberAccess(node.expr) && !isInMethodInferenceContext) {
+                // Get the base type - we need to find the underlying class and its generic args
+                let baseType = this.inferExpression(node.expr.expr);
+                let classDeclaration: ast.TypeDeclaration | undefined;
+                let classGenericArgs: TypeDescription[] = [];
+                
+                // Helper to extract class info from a reference type (handles aliases)
+                const extractClassInfo = (refType: ReferenceTypeDescription): boolean => {
+                    const def = refType.declaration.definition;
+                    if (ast.isClassType(def)) {
+                        // Direct class reference
+                        classDeclaration = refType.declaration;
+                        classGenericArgs = [...refType.genericArgs];
+                        return true;
+                    } else if (ast.isReferenceType(def)) {
+                        // Type alias - get the aliased type and recurse
+                        const aliasedType = this.getType(def);
+                        if (isReferenceType(aliasedType)) {
+                            return extractClassInfo(aliasedType);
                         }
                     }
+                    return false;
+                };
+                
+                // Check if it's a ReferenceType
+                if (isReferenceType(baseType)) {
+                    extractClassInfo(baseType);
                 }
-                // Check if this is a direct function call (not a method)
-                else if (ast.isQualifiedReference(node.expr) && node.expr.reference.ref) {
-                    const funcRef = node.expr.reference.ref;
-                    if (ast.isFunctionDeclaration(funcRef) && funcRef.genericParameters) {
+                
+                // Register if we have a generic class instantiation
+                if (classDeclaration && classGenericArgs.length > 0) {
+                    // Register the class instantiation
+                    const classKey = this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
+                        classDeclaration,
+                        classGenericArgs
+                    );
+                    
+                    // Get the method declaration from the member access
+                    const methodRef = node.expr.element.ref;
+                    let methodHeader: ast.MethodHeader | undefined;
+                    
+                    // The ref could be a ClassMethod or a MethodHeader directly
+                    if (methodRef && ast.isClassMethod(methodRef)) {
+                        methodHeader = methodRef.method;
+                    } else if (methodRef && ast.isMethodHeader(methodRef)) {
+                        methodHeader = methodRef;
+                    }
+                    
+                    if (methodHeader) {
+                        // Extract method's generic parameters from substitutions if it has any
+                        // For non-generic methods, pass empty array (they still need monomorphization since class is generic)
+                        const methodTypeArgs = (substitutions && substitutions.size > 0)
+                            ? Array.from(substitutions.values())
+                            : [];
+                        this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
+                            classKey,
+                            methodHeader,
+                            methodTypeArgs
+                        );
+                    }
+                }
+            }
+            
+            // Handle direct function calls (not methods) with generic instantiation
+            if (substitutions && substitutions.size > 0) {
+                if (ast.isQualifiedReference(node.expr)) {
+                    const funcRef = node.expr.reference?.ref;
+                    if (funcRef && ast.isFunctionDeclaration(funcRef) && funcRef.genericParameters && funcRef.genericParameters.length > 0) {
                         const typeArgs = Array.from(substitutions.values());
                         this.services.typing.MonomorphizationRegistry.registerFunctionInstantiation(
                             funcRef,

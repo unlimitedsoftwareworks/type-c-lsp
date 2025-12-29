@@ -98,6 +98,22 @@ export class TypeCTypeUtils {
     readonly typeProvider: () => TypeCTypeProvider;
     readonly typeFactory: TypeCTypeFactory;
     readonly pendingChecks: Array<{ from: TypeDescription; to: TypeDescription }> = [];
+    
+    /**
+     * Tracks reference types currently being resolved during substitution.
+     * This prevents infinite recursion when substituteGenerics tries to resolve
+     * a reference that is already being substituted.
+     *
+     * Key: A unique identifier for the reference (declaration + generic args)
+     */
+    private readonly resolvingReferences = new Set<string>();
+    
+    /**
+     * Tracks the current depth of substituteGenerics recursion.
+     * This provides a safety limit to prevent stack overflow in pathological cases.
+     */
+    private substitutionDepth = 0;
+    private readonly MAX_SUBSTITUTION_DEPTH = 50;
 
     constructor(services: TypeCServices) {
         this.typeProvider = () => services.typing.TypeProvider;
@@ -1705,6 +1721,34 @@ export class TypeCTypeUtils {
         context?: string,
         errors?: string[]
     ): TypeDescription {
+        // Safety check: prevent excessive recursion depth
+        this.substitutionDepth++;
+        if (this.substitutionDepth > this.MAX_SUBSTITUTION_DEPTH) {
+            this.substitutionDepth--;
+            const errorMsg = `Maximum substitution depth exceeded (${this.MAX_SUBSTITUTION_DEPTH}) - possible infinite recursion in type ${type.toString()}${context ? ` in ${context}` : ''}`;
+            if (errors) {
+                errors.push(errorMsg);
+            }
+            return this.typeFactory.createErrorType(errorMsg, undefined, type.node);
+        }
+        
+        try {
+            return this.substituteGenericsImpl(type, substitutions, context, errors);
+        } finally {
+            this.substitutionDepth--;
+        }
+    }
+    
+    /**
+     * Internal implementation of substituteGenerics with recursion depth tracking.
+     * DO NOT call this directly - use substituteGenerics() instead.
+     */
+    private substituteGenericsImpl(
+        type: TypeDescription,
+        substitutions: Map<string, TypeDescription>,
+        context?: string,
+        errors?: string[]
+    ): TypeDescription {
         // If it's a generic type parameter, substitute it
         if (isGenericType(type)) {
             const substitutedType = substitutions.get(type.name) ?? type;
@@ -1738,7 +1782,15 @@ export class TypeCTypeUtils {
 
         // Recursively substitute in composite types
         if (isArrayType(type)) {
-            const substitutedElement = this.substituteGenerics(type.elementType, substitutions, context ? `${context} array element` : 'array element', errors);
+            const substitutedElement = this.substituteGenericsImpl(type.elementType, substitutions, context ? `${context} array element` : 'array element', errors);
+            
+            // CRITICAL: Detect if we created a recursive array type
+            // Example: T[] where T -> U[] would create U[][] which when T=U causes infinite recursion
+            if (isArrayType(substitutedElement) && substitutedElement.elementType === type) {
+                // Recursive array type detected - return without creating cycle
+                return type;
+            }
+            
             const arrayType = this.typeFactory.createArrayType(substitutedElement, type.node);
             
             // Propagate errors from element type
@@ -1750,7 +1802,14 @@ export class TypeCTypeUtils {
         }
 
         if (isNullableType(type)) {
-            const substitutedBase = this.substituteGenerics(type.baseType, substitutions, context ? `${context} nullable base` : 'nullable base', errors);
+            const substitutedBase = this.substituteGenericsImpl(type.baseType, substitutions, context ? `${context} nullable base` : 'nullable base', errors);
+            
+            // CRITICAL: Detect if we created a recursive nullable type
+            // Example: T? where T -> U? would create U?? which is illegal
+            if (isNullableType(substitutedBase) && substitutedBase.baseType === type) {
+                // Recursive nullable type detected - return without creating cycle
+                return type;
+            }
             
             // Check for illegal nullable types during substitution
             // 1. Check for double nullable (T? substituted with U? becomes U??)
@@ -1784,7 +1843,7 @@ export class TypeCTypeUtils {
         }
 
         if (isUnionType(type)) {
-            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const substitutedTypes = type.types.map(t => this.substituteGenericsImpl(t, substitutions, context, errors));
             const unionType = this.typeFactory.createUnionType(substitutedTypes, type.node);
             
             // Propagate errors from union members
@@ -1803,7 +1862,7 @@ export class TypeCTypeUtils {
         }
 
         if (isJoinType(type)) {
-            const substitutedTypes = type.types.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const substitutedTypes = type.types.map(t => this.substituteGenericsImpl(t, substitutions, context, errors));
             const joinType = this.typeFactory.createJoinType(substitutedTypes, type.node);
             
             // Propagate errors from join members
@@ -1822,7 +1881,7 @@ export class TypeCTypeUtils {
         }
 
         if (isTupleType(type)) {
-            const substitutedTypes = type.elementTypes.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const substitutedTypes = type.elementTypes.map(t => this.substituteGenericsImpl(t, substitutions, context, errors));
             const tupleType = this.typeFactory.createTupleType(substitutedTypes, type.node);
             
             // Propagate errors from tuple elements
@@ -1844,7 +1903,7 @@ export class TypeCTypeUtils {
             const substitutedFields = type.fields.map(f =>
                 this.typeFactory.createStructField(
                     f.name,
-                    this.substituteGenerics(f.type, substitutions, `struct field '${f.name}'`, errors),
+                    this.substituteGenericsImpl(f.type, substitutions, `struct field '${f.name}'`, errors),
                     f.node
                 )
             );
@@ -1867,11 +1926,11 @@ export class TypeCTypeUtils {
             const substitutedParams = type.parameters.map((p, idx) =>
                 this.typeFactory.createFunctionParameterType(
                     p.name,
-                    this.substituteGenerics(p.type, substitutions, p.name ? `function parameter '${p.name}'` : `function parameter ${idx + 1}`, errors),
+                    this.substituteGenericsImpl(p.type, substitutions, p.name ? `function parameter '${p.name}'` : `function parameter ${idx + 1}`, errors),
                     p.isMut
                 )
             );
-            const substitutedReturn = this.substituteGenerics(type.returnType, substitutions, 'function return type', errors);
+            const substitutedReturn = this.substituteGenericsImpl(type.returnType, substitutions, 'function return type', errors);
             
             // Filter out generic parameters that have been substituted
             const remainingGenerics = type.genericParameters?.filter(g => !substitutions.has(g.name)) ?? [];
@@ -1907,7 +1966,20 @@ export class TypeCTypeUtils {
         }
 
         if (isReferenceType(type) && type.genericArgs.length > 0) {
-            const substitutedArgs = type.genericArgs.map(t => this.substituteGenerics(t, substitutions, context, errors));
+            const substitutedArgs = type.genericArgs.map(t => this.substituteGenericsImpl(t, substitutions, context, errors));
+            
+            // Create a unique key for this reference + substituted args combination
+            const refKey = `${type.declaration.name}|${substitutedArgs.map(a => a.toString()).join(',')}`;
+            
+            // Check if we're already resolving this exact reference (prevents infinite recursion)
+            if (this.resolvingReferences.has(refKey)) {
+                // We're in a recursive resolution - return the reference without error checking
+                return this.typeFactory.createReferenceType(
+                    type.declaration,
+                    substitutedArgs,
+                    type.node
+                );
+            }
             
             const refType = this.typeFactory.createReferenceType(
                 type.declaration,
@@ -1921,35 +1993,93 @@ export class TypeCTypeUtils {
             // BUT we must avoid infinite recursion for recursive types like TreeNode<T> = { children: TreeNode<T>[]? }
             let resolvedErrors: string[] = [];
             
-            // Only resolve if we're not already checking this reference (cycle detection)
-            // Check if this reference is already in our pending checks
-            const isAlreadyChecking = this.pendingChecks.some(pair =>
-                isReferenceType(pair.from) &&
-                pair.from.declaration === type.declaration &&
-                pair.from.genericArgs.length === substitutedArgs.length &&
-                pair.from.genericArgs.every((arg, i) => this.areTypesEqual(arg, substitutedArgs[i]).success)
-            );
-            
-            if (!isAlreadyChecking) {
-                // Add to pending checks to prevent infinite recursion
-                this.addPendingCheck(refType, refType);
-                
-                try {
-                    // Resolve the reference to check if the instantiated type contains errors
-                    const resolved = this.typeProvider().resolveReference(refType);
-                    if (resolved.errors && resolved.errors.length > 0) {
-                        // Enhance error messages with context about where this reference is being used
-                        if (context) {
-                            resolvedErrors = resolved.errors.map(err =>
-                                `${err} (used in ${context})`
-                            );
-                        } else {
-                            resolvedErrors = resolved.errors;
-                        }
+            // FIXED: Check for recursive generic instantiation before resolving
+            // If any of the substituted generic arguments references the same declaration,
+            // we have a recursive type (e.g., Array<Array<T>>). Skip error checking in this case
+            // to avoid infinite recursion.
+            const hasRecursiveGeneric = substitutedArgs.some(arg => {
+                // Helper function to check if a type contains unsubstituted generics or recursive references
+                const containsRecursiveOrGeneric = (t: TypeDescription): boolean => {
+                    // Check if the type is a reference to the same declaration
+                    if (isReferenceType(t) && t.declaration === type.declaration) {
+                        return true;
                     }
-                } finally {
-                    // Always remove from pending checks
-                    this.removePendingCheck(refType, refType);
+                    // Check if the type is an unsubstituted generic (could cause recursion when resolved)
+                    if (isGenericType(t)) {
+                        return true;
+                    }
+                    // Check arrays recursively
+                    if (isArrayType(t)) {
+                        return containsRecursiveOrGeneric(t.elementType);
+                    }
+                    // Check nullables recursively
+                    if (isNullableType(t)) {
+                        return containsRecursiveOrGeneric(t.baseType);
+                    }
+                    // Check reference types with generic args recursively
+                    if (isReferenceType(t) && t.genericArgs.length > 0) {
+                        return t.genericArgs.some(arg => containsRecursiveOrGeneric(arg));
+                    }
+                    return false;
+                };
+                
+                return containsRecursiveOrGeneric(arg);
+            });
+            
+            // CRITICAL FIX: Skip error checking entirely if we have ANY unsubstituted generics
+            // or recursive type patterns. Error checking will happen at a higher level when
+            // the type is fully instantiated and used in context.
+            // This prevents infinite recursion when resolving references during substitution.
+            
+            // Check if any substituted args still contain generics (not fully resolved yet)
+            const hasUnresolvedGenerics = substitutedArgs.some(arg => {
+                const checkForGenerics = (t: TypeDescription): boolean => {
+                    if (isGenericType(t)) return true;
+                    if (isArrayType(t)) return checkForGenerics(t.elementType);
+                    if (isNullableType(t)) return checkForGenerics(t.baseType);
+                    if (isReferenceType(t)) return t.genericArgs.some(checkForGenerics);
+                    if (isTupleType(t)) return t.elementTypes.some(checkForGenerics);
+                    return false;
+                };
+                return checkForGenerics(arg);
+            });
+            
+            // Only attempt error checking if:
+            // 1. No recursive generics detected
+            // 2. All generics are fully resolved (no generic types remaining)
+            // 3. Not already in a pending check for this reference
+            if (!hasRecursiveGeneric && !hasUnresolvedGenerics) {
+                // Check if this exact reference+substitution combo is already being checked
+                const isAlreadyChecking = this.pendingChecks.some(pair =>
+                    isReferenceType(pair.from) &&
+                    pair.from.declaration === type.declaration &&
+                    pair.from.genericArgs.length === substitutedArgs.length &&
+                    pair.from.genericArgs.every((arg, i) => this.areTypesEqual(arg, substitutedArgs[i]).success)
+                );
+                
+                if (!isAlreadyChecking) {
+                    // Add to pending checks AND resolution tracking to prevent infinite recursion
+                    this.addPendingCheck(refType, refType);
+                    this.resolvingReferences.add(refKey);
+                    
+                    try {
+                        // Resolve the reference to check if the instantiated type contains errors
+                        const resolved = this.typeProvider().resolveReference(refType);
+                        if (resolved.errors && resolved.errors.length > 0) {
+                            // Enhance error messages with context about where this reference is being used
+                            if (context) {
+                                resolvedErrors = resolved.errors.map(err =>
+                                    `${err} (used in ${context})`
+                                );
+                            } else {
+                                resolvedErrors = resolved.errors;
+                            }
+                        }
+                    } finally {
+                        // Always remove from pending checks and resolution tracking
+                        this.removePendingCheck(refType, refType);
+                        this.resolvingReferences.delete(refKey);
+                    }
                 }
             }
             
@@ -2023,7 +2153,7 @@ export class TypeCTypeUtils {
                             : `variant constructor '${constructorSig}' parameter '${param.name}'`;
                         return this.typeFactory.createStructField(
                             param.name,
-                            this.substituteGenerics(param.type, substitutions, paramContext, errors),
+                            this.substituteGenericsImpl(param.type, substitutions, paramContext, errors),
                             param.node
                         );
                     })
@@ -3918,4 +4048,5 @@ export class TypeCTypeUtils {
         return true;
     }
 }
+
 

@@ -175,6 +175,7 @@ export class LIRGenerator {
         // May require global storage instructions
         for (const varDecl of node.declarations.variables) {
             const globalId = this.getGlobalVariableName(varDecl);
+            console.log(globalId)
             // TODO: Generate global_store instructions if initialized
         }
     }
@@ -739,6 +740,7 @@ export class LIRGenerator {
     }
 
     private visitTypeCastExpression(node: ast.TypeCastExpression): ExpressionResult {
+        /// @ts-ignore
         const expr = this.visitExpression(node.left);
         const temp = this.generateTemp();
         // TODO: Generate cast instruction based on castType

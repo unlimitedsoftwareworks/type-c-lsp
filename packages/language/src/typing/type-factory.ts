@@ -636,7 +636,7 @@ function createReferenceType(
                 ? `<${genericArgs.map(a => a.toString()).join(', ')}>`
                 : '';
             return `${declaration.name}${argsStr}`;
-        }
+        },
     };
 }
 

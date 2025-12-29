@@ -17,6 +17,7 @@ import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
 import { TypeCTypeUtils } from './typing/type-utils.js';
 import { TypeCTypeFactory } from './typing/type-factory.js';
+import { MonomorphizationRegistry } from './typing/monomorphization-service.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -31,6 +32,7 @@ export type TypeCAddedServices = {
         TypeProvider: TypeCTypeProvider
         TypeUtils: TypeCTypeUtils
         TypeFactory: TypeCTypeFactory
+        MonomorphizationRegistry: MonomorphizationRegistry
     },
     validation: {
         TypeSystemValidator: TypeCTypeSystemValidator,
@@ -73,7 +75,8 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
     typing: {
         TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services),
         TypeUtils: (services: TypeCServices) => new TypeCTypeUtils(services),
-        TypeFactory: (services: TypeCServices) => new TypeCTypeFactory(services)
+        TypeFactory: (services: TypeCServices) => new TypeCTypeFactory(services),
+        MonomorphizationRegistry: () => new MonomorphizationRegistry()
     },
     documentation: {
         DocumentationProvider: (services: TypeCServices) => new TypeCDocumentationProvider(services)

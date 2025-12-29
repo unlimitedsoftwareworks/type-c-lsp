@@ -1811,11 +1811,20 @@ export class TypeCTypeProvider {
             return refType.actualType;
         }
 
+
         // Get the actual type from the declaration
-        const actualType = this.getType(refType.declaration.definition);
+        let actualType = this.getType(refType.declaration.definition);
 
         // If there are generic arguments, substitute them
         if (refType.genericArgs.length > 0 && refType.declaration.genericParameters) {
+            // MONOMORPHIZATION: Register class instantiation
+            if (ast.isClassType(refType.declaration.definition)) {
+                this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
+                    refType.declaration,
+                    refType.genericArgs
+                );
+            }
+
             const substitutions = new Map<string, TypeDescription>();
             refType.declaration.genericParameters.forEach((param, i) => {
                 if (i < refType.genericArgs.length) {
@@ -1823,7 +1832,16 @@ export class TypeCTypeProvider {
                 }
             });
 
-            return this.typeUtils.substituteGenerics(actualType, substitutions);
+            actualType = this.typeUtils.substituteGenerics(actualType, substitutions);
+        }
+
+        if(actualType.errors) {
+            if(refType.errors){
+                refType.errors.push(...(actualType.errors ?? []))
+            }
+            else {
+                refType.errors = [...actualType.errors]
+            }
         }
 
         return actualType;
@@ -3379,6 +3397,43 @@ export class TypeCTypeProvider {
                                 node
                             );
                         }
+                    }
+                }
+            }
+
+            // MONOMORPHIZATION: Register method or function instantiation if we have substitutions
+            if (substitutions && substitutions.size > 0) {
+                // Check if this is a method call on a class instance
+                if (ast.isMemberAccess(node.expr)) {
+                    const baseType = this.inferExpression(node.expr.expr);
+                    if (isReferenceType(baseType) && ast.isClassType(baseType.declaration.definition)) {
+                        // This is a method call on a generic class
+                        const classKey = this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
+                            baseType.declaration,
+                            baseType.genericArgs
+                        );
+                        
+                        // Get the method declaration from the member access
+                        const methodRef = node.expr.element.ref;
+                        if (methodRef && ast.isMethodHeader(methodRef)) {
+                            const methodTypeArgs = Array.from(substitutions.values());
+                            this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
+                                classKey,
+                                methodRef,
+                                methodTypeArgs
+                            );
+                        }
+                    }
+                }
+                // Check if this is a direct function call (not a method)
+                else if (ast.isQualifiedReference(node.expr) && node.expr.reference.ref) {
+                    const funcRef = node.expr.reference.ref;
+                    if (ast.isFunctionDeclaration(funcRef) && funcRef.genericParameters) {
+                        const typeArgs = Array.from(substitutions.values());
+                        this.services.typing.MonomorphizationRegistry.registerFunctionInstantiation(
+                            funcRef,
+                            typeArgs
+                        );
                     }
                 }
             }

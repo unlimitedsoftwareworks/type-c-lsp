@@ -1,82 +1,42 @@
-// Test file to verify static template validation
+type Array<T> = class {
+    let data: T[]
+    let capacity: u64
+    let length: u64
 
-// ❌ Error: Static attribute using class template
-type BadClass1<T> = class {
-    let static instance: T  // Should error: static cannot use template T
-}
-
-// ✅ OK: Non-static attribute can use class template
-type GoodClass1<T> = class {
-    let instance: T  // OK: non-static can use template
-}
-
-// ❌ Error: Static method parameter using class template
-type BadClass2<T> = class {
-    static fn process(value: T) -> void { }  // Should error: parameter uses template T
-}
-
-// ❌ Error: Static method return type using class template
-type BadClass3<T> = class {
-    static fn getInstance() -> T { 
-        return new T()
-    }  // Should error: return type uses template T
-}
-
-// ✅ OK: Static method with its own generic parameter
-type GoodClass2<T> = class {
-    static fn get<U>(x: U) -> U = x  // OK: U is method's own generic, not class template
-}
-
-// ✅ OK: Instance method can use class template
-type GoodClass3<T> = class {
-    fn process(value: T) -> T { return value }  // OK: non-static method can use class template
-}
-
-// ❌ Error: Complex type using class template in static
-type BadClass4<T> = class {
-    let static items: T[]  // Should error: array of template T
-}
-
-// ❌ Error: Nested template usage in static
-type BadClass5<T> = class {
-    let static wrapper: {value: T}  // Should error: struct with template T
-}
-
-// ✅ OK: Static method using its own template with class template in scope
-type GoodClass4<T> = class {
-    let data: T  // OK: instance member
-    static fn convert<U>(froms: U) -> U { return froms }  // OK: U is method's own template
-}
-
-// Edge case: Multiple class templates
-type BadClass6<A, B> = class {
-    static fn combine(x: A, y: B) -> void { }  // Should error: uses both A and B
-}
-
-// Edge case: Nested generics in static method
-type BadClass7<T> = class {
-    let property: T
-    let static instance: BadClass7<u32>
-
-    static fn wrap()  {
-        /// NOT OK
-        let c = property
-
-        /// Not OK
-        let c2 = this.property
-
-        return {
-            value: c
+    fn init(mut inital: T[]) {
+        this.{
+            data: inital,
+            capacity: inital.length,
+            length: inital.length,
         }
-     }
+    }
 
-     static {
-        BadClass7.instance = new BadClass7<u32>()
-        
-        /// NOT OK
-        this.property = this.property
+    fn map<U>(f: fn(T) -> U) -> Array<U>{
+        let arr: U[] = []
+        arr.resize(this.length)
 
-        /// THis is OK
-        BadClass7.instance.property = BadClass7.instance.property
-     }
+        foreach i, v in data {
+            arr[i] = f(v)
+        }
+
+        return new Array<U>(arr)
+    }
 }
+
+fn vec<T>(mut initial: T[]) {
+    return new Array<T>(initial)
+}
+
+local namespace MathUtils = {
+    fn abs(x: i32) -> i32 {
+        if x < 0 {
+            return -x
+        }
+        return x
+    }
+}
+
+fn main(args: i32[]) {
+    let values = vec(args).map(fn(x: i32) = MathUtils.abs(x))
+}
+

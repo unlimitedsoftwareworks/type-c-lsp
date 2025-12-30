@@ -44,7 +44,7 @@ ExternMethodHeader infers FFIMethodHeader:
 
 
 NamespaceDecl:
-    isLocal?='local'? 'namespace' name=ID '{'
+    isLocal?='local'? 'namespace' name=ID '='? '{'
         GlobalDefinition*
     '}';
 

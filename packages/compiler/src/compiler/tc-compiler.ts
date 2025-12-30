@@ -113,7 +113,7 @@ export class LIRGenerator {
     // Module & Program Level
     // ============================================================================
 
-    private visitModule(node: ast.Module): void {
+    private visitModule(node: ast.Module | ast.NamespaceDecl): void {
         /**
          * Generate code for all:
          * 1. Global variabels initializations
@@ -124,7 +124,13 @@ export class LIRGenerator {
         console.log("Visiting module!")
 
         this.generateFFILoads(node);
-        //this.generateGlobalSymbols(node);
+        this.generateGlobalSymbols(node);
+
+        for(const n of node.definitions) {
+            if(ast.isNamespaceDecl(n)) {
+                this.visitModule(n)
+            }
+        }
         //this.generateClasses(node);
         //this.generateFunctions(node);
     }
@@ -132,7 +138,7 @@ export class LIRGenerator {
     /**
      * Generate bytecode to load all FFI
      */
-    private generateFFILoads(node: ast.Module){
+    private generateFFILoads(node: ast.Module | ast.NamespaceDecl){
         const ffiDecls = AstUtils.streamAllContents(node).filter(ast.isExternFFIDecl).toArray();
 
         for(const decl of ffiDecls) {
@@ -147,6 +153,9 @@ export class LIRGenerator {
         }
     }
 
+    private generateGlobalSymbols(node: ast.Module | ast.NamespaceDecl) {
+
+    }
 
     private visitDefinition(node: AstNode): void {
         if (ast.isFunctionDeclaration(node)) {

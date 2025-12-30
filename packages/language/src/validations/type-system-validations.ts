@@ -98,12 +98,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             ArraySpreadExpression: this.checkArraySpreadExpression,
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
             TupleExpression: this.checkExpressionForErrors,
-            QualifiedReference: [this.checkQualifiedReferenceGenerics, this.checkExpressionForErrors],
             ThrowExpression: this.checkExpressionForErrors,
             MutateExpression: this.checkExpressionForErrors,
             CoroutineExpression: this.checkExpressionForErrors,
             InstanceCheckExpression: [this.checkInstanceCheckExpression, this.checkExpressionForErrors],
-            ThisExpression: this.checkExpressionForErrors,
+            ThisExpression: [this.checkThisInStaticContext, this.checkExpressionForErrors],
+            QualifiedReference: [this.checkQualifiedReferenceGenerics, this.checkInstanceMemberInStaticContext, this.checkExpressionForErrors],
             MatchCasePattern: this.checkPatternErrors,
             ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
             ForEachIterator: this.checkForEachIterator,
@@ -5384,6 +5384,206 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 this.checkTypeForErrors(arg, node, accept);
             }
         }
+    }
+
+    /**
+     * Check that `this` is not used in static contexts (static methods or static blocks).
+     *
+     * The `this` keyword refers to the current instance, so it cannot be used in static
+     * contexts which don't have access to an instance.
+     *
+     * Examples:
+     * ```tc
+     * class C {
+     *     let value: u32
+     *
+     *     static fn bad() {
+     *         let x = this.value  // ❌ Error: `this` in static method
+     *     }
+     *
+     *     fn good() {
+     *         let x = this.value  // ✅ OK: `this` in instance method
+     *     }
+     *
+     *     static {
+     *         let x = this.value  // ❌ Error: `this` in static block
+     *     }
+     * }
+     * ```
+     */
+    checkThisInStaticContext = (node: ast.ThisExpression, accept: ValidationAcceptor): void => {
+        // Check if we're in a static method
+        const staticMethod = this.getContainingStaticMethod(node);
+        if (staticMethod) {
+            accept('error',
+                `Cannot use 'this' in static method. Static methods exist at the class level and don't have access to instance members.`,
+                {
+                    node,
+                    code: ErrorCode.TC_STATIC_CONTEXT_INSTANCE_MEMBER_ACCESS
+                }
+            );
+            return;
+        }
+        
+        // Check if we're in a static block
+        const staticBlock = this.getContainingStaticBlock(node);
+        if (staticBlock) {
+            accept('error',
+                `Cannot use 'this' in static block. Static blocks execute at class initialization and don't have access to instance members.`,
+                {
+                    node,
+                    code: ErrorCode.TC_STATIC_BLOCK_INSTANCE_MEMBER_ACCESS
+                }
+            );
+        }
+    }
+
+    /**
+     * Check that instance members are not accessed in static contexts.
+     *
+     * Static methods and blocks cannot access instance attributes or non-static methods
+     * because they don't have an instance to work with.
+     *
+     * Examples:
+     * ```tc
+     * class C<T> {
+     *     let property: T
+     *     let static instance: C<u32>
+     *
+     *     static fn wrap() {
+     *         let c = property           // ❌ Error: accessing instance attribute
+     *         let c2 = this.property     // ❌ Error: using `this`
+     *         let c3 = C.instance        // ✅ OK: accessing static attribute
+     *     }
+     *
+     *     static {
+     *         this.property = ...        // ❌ Error: accessing instance via `this`
+     *         C.instance.property = ...  // ✅ OK: accessing via instance reference
+     *     }
+     * }
+     * ```
+     */
+    checkInstanceMemberInStaticContext = (node: ast.QualifiedReference, accept: ValidationAcceptor): void => {
+        const ref = node.reference?.ref;
+        if (!ref) {
+            return; // Unresolved reference, will be caught elsewhere
+        }
+        
+        // Check if we're accessing a class attribute or method
+        const isInstanceMember = (ast.isClassAttributeDecl(ref) && !ref.isStatic) ||
+                                 (ast.isClassMethod(ref) && !ref.isStatic);
+        
+        if (!isInstanceMember) {
+            return; // Not an instance member, no validation needed
+        }
+        
+        // Check if we're in a static method
+        const staticMethod = this.getContainingStaticMethod(node);
+        if (staticMethod) {
+            const memberName = ast.isClassAttributeDecl(ref) ? ref.name :
+                              ast.isClassMethod(ref) ? (ref.method?.names[0] || 'method') : 'member';
+            const memberKind = ast.isClassAttributeDecl(ref) ? 'attribute' : 'method';
+            
+            accept('error',
+                `Cannot access instance ${memberKind} '${memberName}' in static method. ` +
+                `Static methods exist at the class level and don't have access to instance members. ` +
+                `Use 'ClassName.${memberName}' if it's a static member, or access it through an instance.`,
+                {
+                    node,
+                    property: 'reference',
+                    code: ErrorCode.TC_STATIC_CONTEXT_INSTANCE_MEMBER_ACCESS
+                }
+            );
+            return;
+        }
+        
+        // Check if we're in a static block
+        const staticBlock = this.getContainingStaticBlock(node);
+        if (staticBlock) {
+            const memberName = ast.isClassAttributeDecl(ref) ? ref.name :
+                              ast.isClassMethod(ref) ? (ref.method?.names[0] || 'method') : 'member';
+            const memberKind = ast.isClassAttributeDecl(ref) ? 'attribute' : 'method';
+            
+            accept('error',
+                `Cannot access instance ${memberKind} '${memberName}' in static block. ` +
+                `Static blocks execute at class initialization and don't have access to instance members. ` +
+                `Access it through an instance reference instead.`,
+                {
+                    node,
+                    property: 'reference',
+                    code: ErrorCode.TC_STATIC_BLOCK_INSTANCE_MEMBER_ACCESS
+                }
+            );
+        }
+    }
+
+    /**
+     * Helper method to check if a node is contained within a static method.
+     *
+     * @param node The AST node to check
+     * @returns The static method if found, undefined otherwise
+     */
+    private getContainingStaticMethod(node: AstNode): ast.ClassMethod | undefined {
+        let current: AstNode | undefined = node.$container;
+        
+        while (current) {
+            // Check if we're in a class method
+            if (ast.isClassMethod(current)) {
+                // Check if it's static
+                if (current.isStatic) {
+                    return current;
+                }
+                // If we hit a non-static method, we're not in a static context
+                return undefined;
+            }
+            
+            // Stop if we hit a class boundary (don't traverse into nested classes)
+            if (ast.isClassType(current)) {
+                return undefined;
+            }
+            
+            current = current.$container;
+        }
+        
+        return undefined;
+    }
+
+    /**
+     * Helper method to check if a node is contained within a static block.
+     *
+     * @param node The AST node to check
+     * @returns The static block if found, undefined otherwise
+     */
+    private getContainingStaticBlock(node: AstNode): ast.BlockStatement | undefined {
+        let current: AstNode | undefined = node.$container;
+        
+        while (current) {
+            // Check if we're in a block statement
+            if (ast.isBlockStatement(current)) {
+                // Check if the parent is a ClassType (static block is a direct child of ClassType)
+                const parent = current.$container;
+                if (ast.isClassType(parent)) {
+                    // Check if this block is in the staticBlock array
+                    if (parent.staticBlock && parent.staticBlock.includes(current)) {
+                        return current;
+                    }
+                }
+            }
+            
+            // Stop if we hit a method (static or not)
+            if (ast.isClassMethod(current)) {
+                return undefined;
+            }
+            
+            // Stop if we hit a class boundary
+            if (ast.isClassType(current)) {
+                return undefined;
+            }
+            
+            current = current.$container;
+        }
+        
+        return undefined;
     }
 
 }

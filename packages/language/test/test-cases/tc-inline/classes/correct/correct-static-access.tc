@@ -1,0 +1,16 @@
+type BadClass7<T> = class {
+    let property: T
+    let static instance: BadClass7<u32>
+
+    static fn wrap()  {
+        BadClass7.instance = new BadClass7<u32>()
+        /// This is OK
+        BadClass7.instance.property = BadClass7.instance.property
+     }
+
+     static {
+        BadClass7.instance = new BadClass7<u32>()
+        /// This is OK
+        BadClass7.instance.property = BadClass7.instance.property
+     }
+}

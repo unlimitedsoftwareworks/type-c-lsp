@@ -1,0 +1,55 @@
+// Test file to verify static context validation for instance member access
+
+type BadClass7<T> = class {
+    let property: T
+    let static instance: BadClass7<u32>
+
+    static fn wrap()  {
+        /// @Error(TCE222): Cannot access instance attribute 'property' in static method
+        let c = property
+
+        /// @Error(TCE222): Cannot use 'this' in static method
+        let c2 = this.property
+
+        return {
+            value: c
+        }
+     }
+
+     static {
+        BadClass7.instance = new BadClass7<u32>()
+        
+        /// @Error(TCE223): Cannot use 'this' in static block
+        this.property = this.property
+
+        /// @NoError
+        BadClass7.instance.property = BadClass7.instance.property
+     }
+}
+
+// More test cases
+type TestClass<T> = class {
+    let instanceAttr: T
+    let static staticAttr: u32
+    
+    fn instanceMethod() -> T {
+        /// @NoError
+        return this.instanceAttr
+    }
+    
+    static fn staticMethod() -> u32 {
+        /// @Error(TCE222): Cannot use 'this' in static method
+        let x = this.instanceAttr
+        
+        /// @NoError
+        return TestClass.staticAttr
+    }
+    
+    static fn anotherStaticMethod() {
+        /// @Error(TCE222): Cannot access instance attribute 'instanceAttr' in static method
+        let a = instanceAttr
+        
+        /// @NoError
+        let b = staticAttr
+    }
+}

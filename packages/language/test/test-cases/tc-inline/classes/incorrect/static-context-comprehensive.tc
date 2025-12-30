@@ -1,0 +1,204 @@
+// ============================================================
+// COMPREHENSIVE STATIC CONTEXT VALIDATION TESTS
+// ============================================================
+
+// Test 1: Basic static method accessing instance members
+type TestClass1<T> = class {
+    let instanceAttr: T
+    let static staticAttr: u32
+    
+    static fn badStaticMethod1() {
+        /// @Error(TCE222): Cannot access instance attribute 'instanceAttr' in static method
+        let x = instanceAttr
+        
+        /// @NoError
+        let y = staticAttr
+    }
+}
+
+// Test 2: Using 'this' in static method
+type TestClass2 = class {
+    let value: u32
+    
+    static fn badStaticMethod2() {
+        /// @Error(TCE222): Cannot use 'this' in static method
+        let x = this.value
+        
+        /// @Error(TCE222): Cannot use 'this' in static method
+        let y = this
+    }
+}
+
+// Test 3: Static block accessing instance members
+type TestClass3<T> = class {
+    let property: T
+    let static instance: TestClass3<u32>
+    
+    static {
+        TestClass3.instance = new TestClass3<u32>()
+        
+        /// @Error(TCE223): Cannot use 'this' in static block
+        this.property = this.property
+        
+        /// @NoError
+        TestClass3.instance.property = TestClass3.instance.property
+    }
+}
+
+// Test 4: Static block with direct instance member access
+type TestClass4 = class {
+    let value: u32
+    let static count: u32
+    
+    static {
+        /// @Error(TCE223): Cannot access instance attribute 'value' in static block
+        let x = value
+        
+        /// @NoError
+        let y = count
+    }
+}
+
+// Test 5: Mixed static and instance methods
+type TestClass5 = class {
+    let instanceData: u32
+    let static staticData: u32
+    
+    fn instanceMethod() -> u32 {
+        /// @NoError
+        return this.instanceData
+    }
+    
+    static fn staticMethod() -> u32 {
+        /// @NoError
+        return TestClass5.staticData
+    }
+    
+    static fn badStaticMethod() -> u32 {
+        /// @Error(TCE222): Cannot access instance attribute 'instanceData' in static method
+        return instanceData
+    }
+}
+
+// Test 6: Nested functions in static methods
+type TestClass6 = class {
+    let value: u32
+    
+    static fn outer() {
+        fn nested() {
+            /// @Error(TCE222): Cannot access instance attribute 'value' in static method
+            let x = value
+        }
+        nested()
+    }
+}
+
+// Test 7: Lambdas in static methods  
+type TestClass7 = class {
+    let data: u32
+    
+    static fn withLambda() {
+        let f = fn() {
+            /// @Error(TCE222): Cannot access instance attribute 'data' in static method
+            return data
+        }
+        f()
+    }
+}
+
+// Test 8: Accessing instance members through an instance (should be OK)
+type TestClass8<T> = class {
+    let property: T
+    let static singleton: TestClass8<u32>
+    
+    static fn goodAccess() {
+        /// @NoError
+        let inst = TestClass8.singleton
+        
+        /// @NoError
+        let value = inst.property
+    }
+}
+
+// Test 9: Complex member access chains
+type TestClass9 = class {
+    let nested: { value: u32 }
+    
+    static fn badChain() {
+        /// @Error(TCE222): Cannot use 'this' in static method
+        let x = this.nested.value
+    }
+}
+
+// Test 10: Calling instance methods from static methods
+type TestClass10 = class {
+    fn instanceMethod() -> u32 = 42u32
+    
+    static fn staticMethod() {
+        /// @Error(TCE222): Cannot access instance method 'instanceMethod' in static method
+        let x = instanceMethod()
+    }
+}
+
+// Test 11: Static method calling other static methods (should be OK)
+type TestClass11 = class {
+    static fn helper() -> u32 = 42u32
+    
+    static fn caller() {
+        /// @NoError
+        let x = helper()
+    }
+}
+
+// Test 12: Static block with complex expressions
+type TestClass12 = class {
+    let count: u32
+    let static total: u32 = 0u32
+    
+    static {
+        /// @Error(TCE223): Cannot access instance attribute 'count' in static block
+        TestClass12.total = count + 1u32
+        
+        /// @NoError
+        TestClass12.total = TestClass12.total + 1u32
+    }
+}
+
+// Test 13: this in assignment position in static block
+type TestClass13<T> = class {
+    let property: T
+    
+    static {
+        /// @Error(TCE223): Cannot use 'this' in static block
+        this.property = this.property
+    }
+}
+
+// Test 14: Static method with instance member in complex expression
+type TestClass14 = class {
+    let x: u32
+    let y: u32
+    let static result: u32
+    
+    static fn compute() {
+        /// @Error(TCE222): Cannot access instance attribute 'x' in static method
+        TestClass14.result = x + y
+    }
+}
+
+// Test 15: Instance method can access both static and instance members (baseline)
+type TestClass15 = class {
+    let instanceVal: u32
+    let static staticVal: u32
+    
+    fn canAccessBoth() {
+        /// @NoError
+        let a = this.instanceVal
+        
+        /// @NoError
+        let b = TestClass15.staticVal
+        
+        /// @NoError  
+        let c = instanceVal
+    }
+}

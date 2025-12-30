@@ -1,16 +1,156 @@
-type BadClass7<T> = class {
+// ============================================================
+// VALID STATIC CONTEXT TESTS (should have no errors)
+// ============================================================
+
+// Test 1: Static methods accessing static members - OK
+type GoodClass1 = class {
+    let static count: u32 = 0u32
+    let static name: string = "test"
+    
+    /// @NoError
+    static fn increment() {
+        GoodClass1.count = GoodClass1.count + 1u32
+    }
+    
+    /// @NoError
+    static fn getName() -> string {
+        return GoodClass1.name
+    }
+}
+
+// Test 2: Static methods with local variables - OK
+type GoodClass2<T> = class {
     let property: T
-    let static instance: BadClass7<u32>
+    
+    /// @NoError
+    static fn createLocal() {
+        let local_: u32 = 42u32
+        let result = local_ + 10u32
+    }
+}
 
-    static fn wrap()  {
-        BadClass7.instance = new BadClass7<u32>()
-        /// This is OK
-        BadClass7.instance.property = BadClass7.instance.property
-     }
+// Test 3: Static methods accessing through instance parameter - OK
+type GoodClass3<T> = class {
+    let value: T
+    
+    /// @NoError
+    static fn processInstance(inst: GoodClass3<u32>) -> u32 {
+        return inst.value
+    }
+}
 
-     static {
-        BadClass7.instance = new BadClass7<u32>()
-        /// This is OK
-        BadClass7.instance.property = BadClass7.instance.property
-     }
+// Test 4: Instance methods accessing instance members - OK
+type GoodClass4<T> = class {
+    let data: T
+    
+    /// @NoError
+    fn getData() -> T {
+        return this.data
+    }
+    
+    /// @NoError
+    fn setData(newData: T) {
+        this.data = newData
+    }
+}
+
+// Test 5: Static block accessing static members - OK
+type GoodClass5 = class {
+    let static initialized: bool = false
+    let static config: u32 = 100u32
+    
+    /// @NoError
+    static {
+        GoodClass5.initialized = true
+        GoodClass5.config = 200u32
+    }
+}
+
+// Test 6: Static block with instance created and accessed - OK
+type GoodClass6<T> = class {
+    let value: T
+    let static singleton: GoodClass6<u32>
+    
+    /// @NoError
+    static {
+        GoodClass6.singleton = new GoodClass6<u32>()
+        GoodClass6.singleton.value = 42u32
+    }
+}
+
+// Test 7: Static method with its own generic parameters - OK
+type GoodClass7<T> = class {
+    let data: T
+    
+    /// @NoError
+    static fn convert<U>(value: U) -> U {
+        return value
+    }
+    
+    /// @NoError
+    static fn identity<U, V>(a: U, b: V) -> U {
+        return a
+    }
+}
+
+// Test 8: Instance method can access both static and instance - OK
+type GoodClass8 = class {
+    let instanceVal: u32 = 10u32
+    let static staticVal: u32 = 20u32
+    
+    /// @NoError
+    fn sum() -> u32 {
+        return this.instanceVal + GoodClass8.staticVal
+    }
+}
+
+// Test 9: Static method calling another static method - OK
+type GoodClass9 = class {
+    let static counter: u32 = 0u32
+    
+    /// @NoError
+    static fn increment() {
+        GoodClass9.counter = GoodClass9.counter + 1u32
+    }
+    
+    /// @NoError
+    static fn reset() {
+        GoodClass9.counter = 0u32
+        increment()
+    }
+}
+
+// Test 10: Constructor (init) accessing instance members - OK
+type GoodClass10<T> = class {
+    let value: T
+    let static defaultValue: u32 = 0u32
+    
+    /// @NoError
+    fn init(val: T) {
+        this.value = val
+    }
+}
+
+// Test 11: Non-generic class with static methods - OK
+type GoodClass11 = class {
+    let x: u32
+    let static y: u32
+    
+    /// @NoError
+    static fn getY() -> u32 {
+        return GoodClass11.y
+    }
+}
+
+// Test 12: Static method with new expression - OK  
+type GoodClass12 = class {
+    let value: u32
+    let static instances: GoodClass12[] = []
+    
+    /// @NoError
+    static fn createInstance(val: u32) -> GoodClass12 {
+        let inst = new GoodClass12()
+        inst.value = val
+        return inst
+    }
 }

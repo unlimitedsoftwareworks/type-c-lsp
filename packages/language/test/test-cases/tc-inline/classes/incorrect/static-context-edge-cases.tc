@@ -1,0 +1,148 @@
+// ============================================================
+// EDGE CASE TESTS FOR STATIC CONTEXT VALIDATION
+// ============================================================
+
+// Test 1: Static method with instance parameter - accessing through parameter should be OK
+type EdgeCase1<T> = class {
+    let value: T
+    let static count: u32
+    
+    /// @NoError
+    static fn processInstance(obj: EdgeCase1<u32>) -> u32 {
+        // OK: accessing through parameter (not directly)
+        return obj.value
+    }
+    
+    static fn badDirect() -> u32 {
+        /// @Error(TCE222): Cannot access instance attribute 'value' in static method
+        return value
+    }
+}
+
+// Test 2: Static method creating and accessing new instance - OK
+type EdgeCase2 = class {
+    let data: u32
+    
+    /// @NoError
+    static fn createAndAccess() -> u32 {
+        let inst = new EdgeCase2()
+        inst.data = 42u32
+        return inst.data
+    }
+}
+
+// Test 3: Static method in nested class context
+type Outer = class {
+    let outerValue: u32
+    
+    static fn outerStatic() {
+        /// @Error(TCE222): Cannot access instance attribute 'outerValue' in static method
+        let x = outerValue
+    }
+}
+
+// Test 4: Deeply nested lambda in static method
+type EdgeCase4 = class {
+    let prop: u32
+    
+    static fn withNestedLambda() {
+        let f1 = fn() {
+            let f2 = fn() {
+                /// @Error(TCE222): Cannot access instance attribute 'prop' in static method
+                return prop
+            }
+            return f2()
+        }
+        f1()
+    }
+}
+
+// Test 5: Static block with do expression
+type EdgeCase5 = class {
+    let value: u32
+    let static result: u32
+    
+    static {
+        EdgeCase5.result = do {
+            /// @Error(TCE223): Cannot access instance attribute 'value' in static block  
+            return value
+        }
+    }
+}
+
+// Test 6: Accessing instance method (not just attributes)
+type EdgeCase6 = class {
+    fn instanceMethod() -> u32 = 42u32
+    static fn staticMethod() -> u32 = 100u32
+    
+    static fn callStatic() -> u32 {
+        /// @NoError
+        return staticMethod()
+    }
+    
+    static fn callInstance() {
+        /// @Error(TCE222): Cannot access instance method 'instanceMethod' in static method
+        let x = instanceMethod()
+    }
+}
+
+// Test 7: Multiple static blocks (if supported)
+type EdgeCase7 = class {
+    let value: u32
+    let static config: u32 = 0u32
+    
+    static {
+        EdgeCase7.config = 1u32
+    }
+    
+    static {
+        /// @Error(TCE223): Cannot access instance attribute 'value' in static block
+        EdgeCase7.config = value
+    }
+}
+
+// Test 8: Verifying scoping - static method doesn't affect inner functions
+type EdgeCase8 = class {
+    let data: u32
+    
+    fn instanceMethod() {
+        let f = fn() {
+            /// @NoError
+            // Inside instance method, lambda can access instance members
+            return data
+        }
+        f()
+    }
+}
+
+// Test 9: Mixed access patterns in one static method
+type EdgeCase9<T> = class {
+    let instanceVal: T
+    let static staticVal: u32
+    let static singleton: EdgeCase9<u32>
+    
+    static fn mixed() {
+        /// @Error(TCE222): Cannot access instance attribute 'instanceVal' in static method
+        let bad1 = instanceVal
+        
+        /// @NoError
+        let good1 = staticVal
+        
+        /// @NoError
+        let good2 = EdgeCase9.singleton.instanceVal
+    }
+}
+
+// Test 10: Assignment to instance member in static context
+type EdgeCase10 = class {
+    let value: u32
+    let static count: u32
+    
+    static fn badAssign() {
+        /// @Error(TCE222): Cannot access instance attribute 'value' in static method
+        value = 42u32
+        
+        /// @NoError
+        count = 10u32
+    }
+}

@@ -2,6 +2,7 @@
 
 // ❌ Error: Static attribute using class template
 type BadClass1<T> = class {
+    /// @Error(TCE220): cannot use class template parameter(s)
     let static instance: T  // Should error: static cannot use template T
 }
 
@@ -12,12 +13,15 @@ type GoodClass1<T> = class {
 
 // ❌ Error: Static method parameter using class template
 type BadClass2<T> = class {
+    /// @Error(TCE221): cannot use class template parameter(s)
     static fn process(value: T) -> void { }  // Should error: parameter uses template T
 }
 
 // ❌ Error: Static method return type using class template
 type BadClass3<T> = class {
+    /// @Error(TCE221): cannot use class template parameter(s)
     static fn getInstance() -> T { 
+        /// @Error(TCE221): cannot use class template parameter(s)
         return new T()
     }  // Should error: return type uses template T
 }
@@ -34,11 +38,13 @@ type GoodClass3<T> = class {
 
 // ❌ Error: Complex type using class template in static
 type BadClass4<T> = class {
+    /// @Error(TCE220): cannot use class template parameter(s)
     let static items: T[]  // Should error: array of template T
 }
 
 // ❌ Error: Nested template usage in static
 type BadClass5<T> = class {
+    /// @Error(TCE220): cannot use class template parameter(s)
     let static wrapper: {value: T}  // Should error: struct with template T
 }
 
@@ -50,33 +56,21 @@ type GoodClass4<T> = class {
 
 // Edge case: Multiple class templates
 type BadClass6<A, B> = class {
+    /// @Error(TCE221): cannot use class template parameter(s)
     static fn combine(x: A, y: B) -> void { }  // Should error: uses both A and B
 }
 
 // Edge case: Nested generics in static method
 type BadClass7<T> = class {
-    let property: T
-    let static instance: BadClass7<u32>
-
-    static fn wrap()  {
-        /// NOT OK
-        let c = property
-
-        /// Not OK
-        let c2 = this.property
+    /// @Error(TCE221): cannot use class template parameter(s)
+    static fn wrap(mut v: T) -> 
+        /// @Error(TCE221): cannot use class template parameter(s)
+        { value: T } {
+        /// @Error(TCE221): cannot use class template parameter(s)
+        let c: T = v
 
         return {
-            value: c
+            value: v
         }
-     }
-
-     static {
-        BadClass7.instance = new BadClass7<u32>()
-        
-        /// NOT OK
-        this.property = this.property
-
-        /// THis is OK
-        BadClass7.instance.property = BadClass7.instance.property
-     }
+     }  // Should error: return struct contains T
 }

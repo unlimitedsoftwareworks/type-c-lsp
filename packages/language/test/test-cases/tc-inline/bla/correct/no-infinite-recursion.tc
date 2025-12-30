@@ -1,0 +1,13 @@
+type Array<T> = class {
+    let data: T[] = []
+    
+    fn zip<U>(other: Array<U>) -> Array<Array<T> > {
+        return new Array<Array<T> >()
+    }
+}
+
+let arr1: Array<u32> = new Array<u32>()
+let arr2: Array<string> = new Array<string>()
+
+/// @Type(zipped): Array<Array<u32>>
+let zipped = arr1.zip<string>(arr2)

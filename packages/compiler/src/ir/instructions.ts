@@ -446,10 +446,8 @@ export interface CoroFinishInstruction extends Instruction {
 
 export interface FFIRegisterInstruction extends Instruction {
     readonly kind: 'ffi_register';
-    readonly dest: string;
-    readonly type?: DataType;
-    readonly libPath: string;
-    readonly funcName: string;
+    readonly libname: string;
+    readonly id: number;
 }
 
 export interface FFICallInstruction extends Instruction {

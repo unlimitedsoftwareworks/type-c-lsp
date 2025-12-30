@@ -3,7 +3,7 @@
  * Generates Low-Level Intermediate Representation from Type-C AST
  */
 
-import { AstNode, LangiumDocument } from 'langium';
+import { AstNode, AstUtils, LangiumDocument } from 'langium';
 import * as ast from 'type-c-language';
 import {
     BinaryOp,
@@ -22,6 +22,7 @@ import {
 } from '../ir/index.js';
 import { TypeCTypeProvider } from '../../../language/src/typing/type-c-type-provider.js';
 import { MonomorphizationRegistry } from '../../../language/src/typing/monomorphization-service.js';
+import { FFIRegistery } from './ffi-registry.js';
 
 /**
  * Context for tracking code generation state
@@ -60,6 +61,15 @@ export class LIRGenerator {
     private context: GenerationContext;
     readonly typeProvider: TypeCTypeProvider;
     readonly monoMorph: MonomorphizationRegistry;
+
+    ffiRegistery: FFIRegistery = new FFIRegistery();
+
+    /**
+     * Despite this being wrapped as a function, is it a global init entry that will be unwrapped from the function during 
+     * code gen later on
+     */
+    globalFunc: LIRFunction = new LIRFunction("$G", [], undefined);
+
 
     constructor(services: ast.TypeCServices) {
         this.program = new LIRProgram();
@@ -111,6 +121,30 @@ export class LIRGenerator {
          * 1. Classes (class methods)
          * 2. Functions
          */
+        console.log("Visiting module!")
+
+        this.generateFFILoads(node);
+        //this.generateGlobalSymbols(node);
+        //this.generateClasses(node);
+        //this.generateFunctions(node);
+    }
+
+    /**
+     * Generate bytecode to load all FFI
+     */
+    private generateFFILoads(node: ast.Module){
+        const ffiDecls = AstUtils.streamAllContents(node).filter(ast.isExternFFIDecl).toArray();
+
+        for(const decl of ffiDecls) {
+            const libname = decl.dynlib;
+            if(this.ffiRegistery.has(libname)) {
+                continue;
+            }
+
+            const id = this.ffiRegistery.register(libname);
+            console.log(`Registering lib ${libname}=${id}`)
+            this.globalFunc.ffiRegister(libname, id);
+        }
     }
 
 

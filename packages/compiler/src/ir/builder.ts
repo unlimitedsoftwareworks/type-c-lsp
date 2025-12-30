@@ -770,13 +770,11 @@ export class LIRFunction {
 
     // ===== FFI Operations =====
 
-    ffiRegister(dest: string, libPath: string, funcName: string, type?: DataType): this {
+    ffiRegister(libname: string, id: number): this {
         const instruction: FFIRegisterInstruction = {
             kind: 'ffi_register',
-            dest,
-            type,
-            libPath,
-            funcName
+            libname,
+            id
         };
         this.instructions.push(instruction);
         return this;

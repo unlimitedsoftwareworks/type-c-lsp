@@ -1868,7 +1868,7 @@ export class TypeCTypeProvider {
 
         return this.typeFactory.createFFIType(
             node.name,
-            node.dynlib.substring(1, node.dynlib.length - 1), // Remove quotes
+            node.dynlib,
             methods,
             node.isLocal ?? false,
             node

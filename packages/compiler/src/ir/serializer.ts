@@ -13,6 +13,7 @@ import type {
 
 import type {
     DebugInstruction,
+    FFIRegisterInstruction,
     Instruction,
     PhiPair
 } from './instructions.js';
@@ -389,9 +390,8 @@ function serializeInstruction(instruction: Instruction): string {
         }
 
         case 'ffi_register': {
-            const inst = instruction as any;
-            const typeStr = inst.type ? `: ${serializeDataType(inst.type)}` : '';
-            return `    ${inst.dest}${typeStr} = ffi_register ${inst.libPath} ${inst.funcName};`;
+            const inst = instruction as FFIRegisterInstruction;
+            return `    ffi_register ${inst.libname} ${inst.id};`;
         }
 
         case 'ffi_call': {
@@ -423,7 +423,7 @@ function serializeInstruction(instruction: Instruction): string {
 
 // ===== Function Serialization =====
 
-function serializeFunction(func: LIRFunction): string {
+export function serializeFunction(func: LIRFunction): string {
     const lines: string[] = [];
 
     // Function signature

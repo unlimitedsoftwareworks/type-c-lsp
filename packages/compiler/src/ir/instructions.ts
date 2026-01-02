@@ -36,6 +36,21 @@ export interface ConstInstruction extends Instruction {
     readonly value: Literal;
 }
 
+export interface VarInstruction extends Instruction {
+    readonly kind: 'var';
+    readonly dest: string;
+    readonly type?: DataType;
+    readonly value: string;
+}
+
+
+export interface ArgInstruction extends Instruction {
+    readonly kind: 'arg';
+    readonly dest: string;
+    readonly type?: DataType;
+    readonly value: string;
+}
+
 // ===== Binary Operation =====
 
 export interface BinaryOpInstruction extends Instruction {

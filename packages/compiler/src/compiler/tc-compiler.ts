@@ -4,7 +4,8 @@
  */
 
 import { AstNode, AstUtils, LangiumDocument } from 'langium';
-import * as ast from 'type-c-language';
+import * as ast from 'type-c-language/ast';
+import { TypeCServices } from 'type-c-language';
 import {
     BinaryOp,
     DataType,
@@ -20,9 +21,27 @@ import {
     nullableType,
     stringLiteral
 } from '../ir/index.js';
-import { TypeCTypeProvider } from '../../../language/src/typing/type-c-type-provider.js';
-import { MonomorphizationRegistry } from '../../../language/src/typing/monomorphization-service.js';
+import {
+    TypeDescription,
+    isGenericType,
+    isArrayType,
+    isNullableType,
+    isTupleType,
+    isReferenceType,
+    isStructType,
+    isFunctionType,
+    isUnionType,
+    isJoinType
+} from 'type-c-language/types';
+import {
+    TypeCTypeProvider,
+    MonomorphizationRegistry,
+    TypeCTypeUtils
+} from 'type-c-language/services';
 import { FFIRegistery } from './ffi-registry.js';
+import { GlobalVariablesRegistery } from './global-vars-registry.js';
+import { CallableRegistry } from './callable-registry.js';
+import { serializeFunction } from '../ir/serializer.js';
 
 /**
  * Context for tracking code generation state
@@ -61,21 +80,175 @@ export class LIRGenerator {
     private context: GenerationContext;
     readonly typeProvider: TypeCTypeProvider;
     readonly monoMorph: MonomorphizationRegistry;
+    readonly typeUtils: TypeCTypeUtils;
 
     ffiRegistery: FFIRegistery = new FFIRegistery();
+    
+    
+    globalVariablesRegistry: GlobalVariablesRegistery = new GlobalVariablesRegistery()
+    G(node: AstNode, name?: string){
+        return this.globalVariablesRegistry.G(node, name)
+    }
+
+    callableRegistry!: CallableRegistry;
+    /**
+     * Get mangled name for a callable (function or method).
+     * For generic callables, use the specific methods in callableRegistry instead.
+     */
+    C(node: AstNode, name?: string){
+        return this.callableRegistry.C(node, name)
+    }
 
     /**
-     * Despite this being wrapped as a function, is it a global init entry that will be unwrapped from the function during 
+     * Despite this being wrapped as a function, is it a global init entry that will be unwrapped from the function during
      * code gen later on
      */
     globalFunc: LIRFunction = new LIRFunction("$G", [], undefined);
 
+    /**
+     * Stack of generic substitutions.
+     * Each entry maps generic parameter names to concrete types.
+     * The stack allows nested generic contexts (e.g., generic class with generic methods).
+     */
+    private substitutionStack: Map<string, TypeDescription>[] = [];
 
-    constructor(services: ast.TypeCServices) {
+    constructor(services: TypeCServices) {
         this.program = new LIRProgram();
         this.context = this.createContext();
         this.typeProvider = services.typing.TypeProvider;
         this.monoMorph = services.typing.MonomorphizationRegistry;
+        this.typeUtils = services.typing.TypeUtils;
+        this.callableRegistry = new CallableRegistry(this.monoMorph);
+    }
+
+    /**
+     * Push a new substitution context onto the stack,
+     * Used to generate generic functions/classes
+     */
+    private pushSubstitutions(substitutions: Map<string, TypeDescription>): void {
+        this.substitutionStack.push(substitutions);
+    }
+
+    /**
+     * Pop the current substitution context from the stack
+     */
+    private popSubstitutions(): void {
+        this.substitutionStack.pop();
+    }
+
+    /**
+     * Get the current active substitutions (merging all levels in the stack)
+     */
+    private getCurrentSubstitutions(): Map<string, TypeDescription> {
+        if (this.substitutionStack.length === 0) {
+            return new Map();
+        }
+        
+        // Merge all substitutions from bottom to top (later entries override earlier ones)
+        const merged = new Map<string, TypeDescription>();
+        for (const subs of this.substitutionStack) {
+            for (const [key, value] of subs.entries()) {
+                merged.set(key, value);
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * Get the type of an AST node with automatic generic substitution from the stack.
+     *
+     * This method:
+     * 1. Gets the type from the type provider
+     * 2. Applies substitutions from the current stack
+     * 3. Validates that all generics are resolved
+     * 4. Throws an error if any generic remains unresolved
+     *
+     * @param node The AST node to get the type for
+     * @returns The fully resolved type with all generics substituted
+     * @throws Error if any generic type parameters remain unresolved
+     *
+     * @example
+     * ```typescript
+     * // In context where T → u32
+     * const type = this.getType(paramNode);  // Returns u32, not T
+     * ```
+     */
+    private getType(node: AstNode): TypeDescription {
+        // Get the type from the type provider
+        const type = this.typeProvider.getType(node);
+        
+
+        if(isGenericType(type)){
+
+            // Get current substitutions from stack
+            const substitutions = this.getCurrentSubstitutions();
+            
+            // If we have substitutions, apply them
+            if (substitutions.size > 0) {
+                const resolvedType = this.typeUtils.substituteGenerics(type, substitutions);
+                
+                // Check if there are still unresolved generics
+                const unresolvedGenerics = this.getUnresolvedGenerics(resolvedType);
+                if (unresolvedGenerics.length > 0) {
+                    throw new Error(
+                        `Unresolved generic type parameters in ${node.$type}: ${unresolvedGenerics.join(', ')}. ` +
+                        `Available substitutions: ${Array.from(substitutions.keys()).join(', ') || 'none'}`
+                    );
+                }
+                
+                return resolvedType;
+            }
+            
+            // No substitutions - check if type contains any generics (which would be an error)
+            const unresolvedGenerics = this.getUnresolvedGenerics(type);
+            if (unresolvedGenerics.length > 0) {
+                throw new Error(
+                    `Found generic type parameters but no substitution context: ${unresolvedGenerics.join(', ')} in ${node.$type}`
+                );
+            }
+        }
+        
+        return type;
+    }
+
+    /**
+     * Recursively find all unresolved generic type parameters in a type.
+     *
+     * @param type The type to check
+     * @returns Array of generic parameter names that are not yet resolved
+     */
+    private getUnresolvedGenerics(type: TypeDescription): string[] {
+        const generics: string[] = [];
+        
+        const traverse = (t: TypeDescription): void => {
+            if (isGenericType(t)) {
+                // Found an unresolved generic
+                generics.push(t.name);
+            } else if (isArrayType(t)) {
+                traverse(t.elementType);
+            } else if (isNullableType(t)) {
+                traverse(t.baseType);
+            } else if (isTupleType(t)) {
+                t.elementTypes.forEach(traverse);
+            } else if (isUnionType(t)) {
+                t.types.forEach(traverse);
+            } else if (isJoinType(t)) {
+                t.types.forEach(traverse);
+            } else if (isReferenceType(t)) {
+                t.genericArgs.forEach(traverse);
+            } else if (isStructType(t)) {
+                t.fields.forEach(field => traverse(field.type));
+            } else if (isFunctionType(t)) {
+                t.parameters.forEach(param => traverse(param.type));
+                traverse(t.returnType);
+            }
+            // Add more composite types as needed
+        };
+        
+        traverse(type);
+        
+        // Return unique generic names
+        return Array.from(new Set(generics));
     }
 
     /**
@@ -121,18 +294,17 @@ export class LIRGenerator {
          * 1. Classes (class methods)
          * 2. Functions
          */
-        console.log("Visiting module!")
 
         this.generateFFILoads(node);
-        this.generateGlobalSymbols(node);
 
         for(const n of node.definitions) {
             if(ast.isNamespaceDecl(n)) {
                 this.visitModule(n)
             }
         }
-        //this.generateClasses(node);
-        //this.generateFunctions(node);
+        this.generateGlobalSymbols(node);
+        this.generateClasses(node);
+        this.generateFunctions(node);
     }
 
     /**
@@ -148,46 +320,291 @@ export class LIRGenerator {
             }
 
             const id = this.ffiRegistery.register(libname);
-            console.log(`Registering lib ${libname}=${id}`)
             this.globalFunc.ffiRegister(libname, id);
         }
     }
 
     private generateGlobalSymbols(node: ast.Module | ast.NamespaceDecl) {
-
+        const globals = AstUtils.streamContents(node).filter(ast.isVariableDeclarationStatement);
+        for(const gvar of globals) {
+            for(const variable of gvar.declarations.variables) {
+                if(ast.isVariableDeclSingle(variable)) {
+                    const exprResult = this.tmp();
+                    this.assert(variable.initializer != undefined, `No initializer for variable ${variable.name}`)
+                    this.visitExpression(variable.initializer!, exprResult);
+                    this.globalFunc.globalStore(
+                        this.G(variable),
+                        exprResult
+                    )
+                }
+                else {
+                    throw "Not implemented"
+                }
+            }
+        }
     }
 
-    private visitDefinition(node: AstNode): void {
-        if (ast.isFunctionDeclaration(node)) {
-            this.visitFunctionDeclaration(node);
-        } else if (ast.isVariableDeclarationStatement(node)) {
-            this.visitGlobalVariableDeclaration(node);
-        } else if (ast.isTypeDeclaration(node)) {
-            this.visitTypeDeclaration(node);
-        } else if (ast.isNamespaceDecl(node)) {
-            this.visitNamespaceDecl(node);
-        } else if (ast.isClassType(node)) {
-            this.visitClassType(node);
-        } else if (ast.isImplementationType(node)) {
-            this.visitImplementationType(node);
-        } else if (ast.isExternFFIDecl(node)) {
-            this.visitExternFFIDecl(node);
-        } else if (ast.isBuiltinDefinition(node)) {
-            this.visitBuiltinDefinition(node);
+    private generateClasses(node: ast.Module | ast.NamespaceDecl) {
+        const classes = AstUtils.streamContents(node)
+            .filter(n => ast.isTypeDeclaration(n) && (ast.isClassType(n.definition)))
+            .map(e => e as ast.TypeDeclaration)
+
+        for (const classDecl of classes) {
+            if(classDecl.genericParameters.length > 0) {
+                // Generic class - generate code for each instantiation
+                this.generateGenericClassInstantiations(classDecl);
+            }
+            else {
+                // Non-generic class - generate directly
+                const classType = classDecl.definition as ast.ClassType;
+                this.generateClass(classDecl, classType);
+            }
+        }
+    }
+
+    /**
+     * Generate code for all instantiations of a generic class
+     */
+    private generateGenericClassInstantiations(classDecl: ast.TypeDeclaration) {
+        // Get all instantiations of this generic class
+        const allInstantiations = this.monoMorph.getAllClassInstantiations();
+        const classInstantiations = allInstantiations.filter(
+            inst => inst.declaration === classDecl
+        );
+
+        // Generate code for each instantiation
+        for (const instantiation of classInstantiations) {
+            // Build substitution map: generic parameter name → concrete type
+            const substitutions = new Map<string, TypeDescription>();
+            
+            classDecl.genericParameters.forEach((param, index) => {
+                if (index < instantiation.typeArgs.length) {
+                    substitutions.set(param.name, instantiation.typeArgs[index]);
+                }
+            });
+
+            // Push substitutions onto stack
+            this.pushSubstitutions(substitutions);
+            
+            try {
+                // Generate the class with substitutions active
+                const classType = classDecl.definition as ast.ClassType;
+                this.generateClass(classDecl, classType);
+            } finally {
+                // Always pop, even if there's an error
+                this.popSubstitutions();
+            }
+        }
+    }
+
+    /**
+     * Generate code for a class (either non-generic or a specific instantiation of a generic)
+     * Uses the current substitution stack for generic types.
+     *
+     * @param classDecl The class declaration node
+     * @param classType The class type node
+     */
+    private generateClass(
+        classDecl: ast.TypeDeclaration,
+        classType: ast.ClassType
+    ) {
+        // Get current substitutions from stack
+        const substitutions = this.getCurrentSubstitutions();
+        
+        // Generate a mangled name for the class
+        const className = substitutions.size > 0
+            ? this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions))
+            : classDecl.name;
+
+        console.log(`Generating class: ${className}`);
+
+        // Generate methods
+        for (const method of classType.methods) {
+            if (method.method) {
+                this.generateMethod(className, method);
+            }
+        }
+    }
+
+    /**
+     * Generate code for a class method using the substitution stack
+     */
+    private generateMethod(
+        className: string,
+        classMethod: ast.ClassMethod
+    ) {
+        if (!classMethod.method) return;
+        
+        const methodHeader = classMethod.method;
+        
+        // Use the callable registry to get the mangled method name
+        // For generic class instantiations, className is already mangled
+        const fullMethodName = this.callableRegistry.getMethodNameForClass(
+            className,
+            methodHeader
+        );
+        
+        console.log(`  Generating method: ${fullMethodName}`);
+
+        // If method has its own generic parameters, handle them here
+        // TODO: Add method-level generic instantiation support
+
+        // Create the LIR function with parameter types resolved
+        const args = this.convertMethodParameters(methodHeader);
+        const returnType = methodHeader.header.returnType
+            ? this.convertTypeWithSubstitution(methodHeader.header.returnType)
+            : undefined;
+
+        const lirFunc = this.program.createFunction(fullMethodName, args, returnType);
+        const prevFunction = this.context.currentFunction;
+        this.context.currentFunction = lirFunc;
+
+        // Reset context for method
+        this.context.variables.clear();
+        this.context.tempCounter = 0;
+        this.context.labelCounter = 0;
+        this.context.scopeDepth = 0;
+
+        // Map parameters to registers
+        for (const arg of methodHeader.header.args) {
+            this.context.variables.set(arg.name, arg.name);
         }
 
-        throw "Invalid node "+node.$type;
+        // Generate method body (substitutions already on stack via getType())
+        if (classMethod.body) {
+            this.generateMethodBody(classMethod.body);
+        } else if (classMethod.expr) {
+            const result = this.visitExpression(classMethod.expr, undefined);
+            lirFunc.ret(result.register);
+        }
+
+        this.context.currentFunction = prevFunction;
+    }
+
+    /**
+     * Convert method parameters using the substitution stack
+     */
+    private convertMethodParameters(
+        methodHeader: ast.MethodHeader
+    ): FunctionArg[] {
+        return methodHeader.header.args.map((param: ast.FunctionParameter) => ({
+            name: param.name,
+            type: param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : undefined
+        }));
+    }
+
+    /**
+     * Convert an AST type to IR DataType, applying substitutions from the stack
+     * This is THE KEY METHOD that resolves T → u32 or T → SomeObject
+     */
+    private convertTypeWithSubstitution(
+        astType: ast.DataType
+    ): DataType | undefined {
+        // Get the fully resolved type (with all generics substituted and validated)
+        const resolvedType = this.getType(astType);
+        
+        // Now convert the CONCRETE type to IR DataType
+        return this.convertTypeDescriptionToIR(resolvedType);
+    }
+
+    /**
+     * Convert a Type-C TypeDescription to IR DataType
+     * This handles the concrete types after substitution
+     */
+    private convertTypeDescriptionToIR(type: TypeDescription): DataType | undefined {
+        switch (type.kind) {
+            case 'u8': return basicType('u8');
+            case 'u16': return basicType('u16');
+            case 'u32': return basicType('u32');
+            case 'u64': return basicType('u64');
+            case 'i8': return basicType('i8');
+            case 'i16': return basicType('i16');
+            case 'i32': return basicType('i32');
+            case 'i64': return basicType('i64');
+            case 'f32': return basicType('f32');
+            case 'f64': return basicType('f64');
+            case 'bool': return basicType('bool');
+            case 'string': return basicType('string');
+            case 'array': {
+                const elementType = this.convertTypeDescriptionToIR((type as any).elementType);
+                return elementType ? arrayType(elementType) : undefined;
+            }
+            case 'nullable': {
+                const baseType = this.convertTypeDescriptionToIR((type as any).baseType);
+                return baseType ? nullableType(baseType) : undefined;
+            }
+            case 'struct':
+            case 'class':
+                return basicType('struct'); // Or however you represent objects
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * Generate method body (substitutions already on stack via getType())
+     */
+    private generateMethodBody(
+        body: ast.BlockStatement
+    ): void {
+        this.enterScope();
+        for (const stmt of body.statements) {
+            this.visitStatement(stmt);
+        }
+        this.exitScope();
+    }
+
+    /**
+     * Check if a type is a value type (vs reference type)
+     */
+    private isValueType(type: TypeDescription): boolean {
+        const kind = type.kind;
+        return kind === 'u8' || kind === 'u16' || kind === 'u32' || kind === 'u64' ||
+               kind === 'i8' || kind === 'i16' || kind === 'i32' || kind === 'i64' ||
+               kind === 'f32' || kind === 'f64' || kind === 'bool';
+    }
+
+    /**
+     * Helper to create a class key similar to MonomorphizationRegistry
+     */
+    private makeClassKey(
+        classDecl: ast.TypeDeclaration,
+        substitutions: Map<string, TypeDescription>
+    ): string {
+        if (substitutions.size === 0) {
+            return classDecl.name;
+        }
+        
+        const typeArgStrings = classDecl.genericParameters
+            .map(param => {
+                const type = substitutions.get(param.name);
+                return type ? type.toString() : param.name;
+            });
+            
+        return `${classDecl.name}<${typeArgStrings.join(',')}>`;
     }
 
     // ============================================================================
     // Declarations
     // ============================================================================
 
+    private generateFunctions(node: ast.Module | ast.NamespaceDecl) {
+        for( const n of node.definitions) {
+            if(ast.isFunctionDeclaration(n)) {
+                this.visitFunctionDeclaration(n)
+            }
+        }
+    }
+
     private visitFunctionDeclaration(node: ast.FunctionDeclaration): void {
-        const funcName = this.getFunctionName(node);
+        // Use callable registry for function name mangling
+        // For generic functions, this should be called with specific type args
+        const funcName = this.C(node);
         const args = this.convertFunctionParameters(node.header.args);
-        const returnType = node.header.returnType 
-            ? this.convertType(node.header.returnType) 
+        const returnType = node.header.returnType
+            ? this.convertType(node.header.returnType)
             : undefined;
 
         // Create LIR function
@@ -211,57 +628,14 @@ export class LIRGenerator {
             this.visitBlockStatement(node.body);
         } else if (node.expr) {
             // Expression-bodied function
-            const result = this.visitExpression(node.expr);
+            const result = this.visitExpression(node.expr, undefined);
             lirFunc.ret(result.register);
         }
 
+        console.log(serializeFunction(this.context.currentFunction));
         // Restore previous context
         this.context.currentFunction = prevFunction;
     }
-
-    private visitGlobalVariableDeclaration(node: ast.VariableDeclarationStatement): void {
-        // TODO: Handle global variables
-        // May require global storage instructions
-        for (const varDecl of node.declarations.variables) {
-            const globalId = this.getGlobalVariableName(varDecl);
-            console.log(globalId)
-            // TODO: Generate global_store instructions if initialized
-        }
-    }
-
-    private visitTypeDeclaration(node: ast.TypeDeclaration): void {
-        // TODO: Register type definitions (may be needed for struct/class allocation)
-        console.warn('Type declaration handling not yet fully implemented');
-    }
-
-    private visitNamespaceDecl(node: ast.NamespaceDecl): void {
-        // TODO: Handle namespace definitions
-        // Process nested definitions with namespace prefix
-        for (const def of node.definitions) {
-            this.visitDefinition(def);
-        }
-    }
-
-    private visitClassType(node: ast.ClassType): void {
-        // TODO: Generate class metadata and methods
-        console.warn('Class type generation not yet implemented');
-    }
-
-    private visitImplementationType(node: ast.ImplementationType): void {
-        // TODO: Generate implementation methods
-        console.warn('Implementation type generation not yet implemented');
-    }
-
-    private visitExternFFIDecl(node: ast.ExternFFIDecl): void {
-        // TODO: Register FFI declarations
-        console.warn('FFI declaration handling not yet implemented');
-    }
-
-    private visitBuiltinDefinition(node: ast.BuiltinDefinition): void {
-        // TODO: Handle builtin prototypes (array, coroutine, string)
-        console.warn('Builtin definition handling not yet implemented');
-    }
-
     // ============================================================================
     // Statements
     // ============================================================================
@@ -276,7 +650,7 @@ export class LIRGenerator {
 
     private visitStatement(node: ast.Statement): void {
         if (ast.isExpressionStatement(node)) {
-            this.visitExpression(node.expr);
+            this.visitExpression(node.expr, undefined);
         } else if (ast.isVariableDeclarationStatement(node)) {
             this.visitLocalVariableDeclaration(node);
         } else if (ast.isReturnStatement(node)) {
@@ -307,9 +681,23 @@ export class LIRGenerator {
     private visitLocalVariableDeclaration(node: ast.VariableDeclarationStatement): void {
         for (const varDecl of node.declarations.variables) {
             if (ast.isVariableDeclaration(varDecl) && varDecl.initializer) {
-                const result = this.visitExpression(varDecl.initializer);
+                const result = this.visitExpression(varDecl.initializer, undefined);
+                
+                // Get the fully resolved type (with all generics substituted automatically by getType)
+                const resolvedVarType = this.getType(varDecl);
+                
+                // Generate the appropriate IR instruction based on the CONCRETE type
                 const varReg = this.allocateVariable(varDecl.name);
-                this.context.currentFunction?.set(varReg, result.register);
+                
+                // Choose the right instruction based on the concrete type
+                if (this.isValueType(resolvedVarType)) {
+                    // For value types (u32, f64, etc.), use direct assignment
+                    this.context.currentFunction?.set(varReg, result.register);
+                } else {
+                    // For reference types (objects, arrays), might need ref counting or other logic
+                    this.context.currentFunction?.set(varReg, result.register);
+                    // Could add: this.context.currentFunction?.addRef(varReg);
+                }
             }
             // TODO: Handle destructuring patterns
         }
@@ -317,7 +705,7 @@ export class LIRGenerator {
 
     private visitReturnStatement(node: ast.ReturnStatement): void {
         if (node.expr) {
-            const result = this.visitExpression(node.expr);
+            const result = this.visitExpression(node.expr, undefined);
             this.context.currentFunction?.ret(result.register);
         } else {
             this.context.currentFunction?.ret();
@@ -328,7 +716,7 @@ export class LIRGenerator {
         const func = this.context.currentFunction;
         if (!func) return;
 
-        const condition = this.visitExpression(node.condition);
+        const condition = this.visitExpression(node.condition, undefined);
         const thenLabel = this.generateLabel('then');
         const elseLabel = this.generateLabel('else');
         const endLabel = this.generateLabel('endif');
@@ -368,7 +756,7 @@ export class LIRGenerator {
         this.pushLoop(loopEnd, loopStart);
 
         func.label(loopStart);
-        const condition = this.visitExpression(node.condition);
+        const condition = this.visitExpression(node.condition, undefined);
         func.br(condition.register, loopBody, loopEnd);
 
         func.label(loopBody);
@@ -393,7 +781,7 @@ export class LIRGenerator {
         this.visitBlockStatement(node.body);
 
         func.label(loopCheck);
-        const condition = this.visitExpression(node.condition);
+        const condition = this.visitExpression(node.condition, undefined);
         func.br(condition.register, loopStart, loopEnd);
 
         func.label(loopEnd);
@@ -419,7 +807,7 @@ export class LIRGenerator {
         // Condition check
         func.label(loopStart);
         if (node.condition) {
-            const condition = this.visitExpression(node.condition);
+            const condition = this.visitExpression(node.condition, undefined);
             func.br(condition.register, loopBody, loopEnd);
         }
 
@@ -430,7 +818,7 @@ export class LIRGenerator {
         // Update
         func.label(loopUpdate);
         if (node.update) {
-            this.visitExpression(node.update);
+            this.visitExpression(node.update, undefined);
         }
         func.jmp(loopStart);
 
@@ -468,184 +856,185 @@ export class LIRGenerator {
     // Expressions
     // ============================================================================
 
-    private visitExpression(node: ast.Expression): ExpressionResult {
+    private visitExpression(node: ast.Expression, varname?: string): ExpressionResult {
         // Literal expressions
-        if (ast.isDecimalIntegerLiteral(node) || 
-            ast.isHexadecimalIntegerLiteral(node) || 
-            ast.isBinaryIntegerLiteral(node) || 
+        if (ast.isDecimalIntegerLiteral(node) ||
+            ast.isHexadecimalIntegerLiteral(node) ||
+            ast.isBinaryIntegerLiteral(node) ||
             ast.isOctalIntegerLiteral(node)) {
-            return this.visitIntegerLiteral(node);
+            return this.visitIntegerLiteral(node, varname);
         }
         if (ast.isFloatLiteral(node) || ast.isDoubleLiteral(node)) {
-            return this.visitFloatingPointLiteral(node);
+            return this.visitFloatingPointLiteral(node, varname);
         }
         if (ast.isTrueBooleanLiteral(node) || ast.isFalseBooleanLiteral(node)) {
-            return this.visitBooleanLiteral(node);
+            return this.visitBooleanLiteral(node, varname);
         }
         if (ast.isStringLiteralExpression(node)) {
-            return this.visitStringLiteral(node);
+            return this.visitStringLiteral(node, varname);
         }
         if (ast.isNullLiteralExpression(node)) {
-            return this.visitNullLiteral(node);
+            return this.visitNullLiteral(node, varname);
         }
 
         // Binary operations
         if (ast.isBinaryExpression(node)) {
-            return this.visitBinaryExpression(node);
+            return this.visitBinaryExpression(node, varname);
         }
 
         // Unary operations
         if (ast.isUnaryExpression(node)) {
-            return this.visitUnaryExpression(node);
+            return this.visitUnaryExpression(node, varname);
         }
 
         // Variable reference
         if (ast.isQualifiedReference(node)) {
-            return this.visitQualifiedReference(node);
+            return this.visitQualifiedReference(node, varname);
         }
 
         // Function call
         if (ast.isFunctionCall(node)) {
-            return this.visitFunctionCall(node);
+            return this.visitFunctionCall(node, varname);
         }
 
         // Member access
         if (ast.isMemberAccess(node)) {
-            return this.visitMemberAccess(node);
+            return this.visitMemberAccess(node, varname);
         }
 
         // Array/Index access
         if (ast.isIndexAccess(node)) {
-            return this.visitIndexAccess(node);
+            return this.visitIndexAccess(node, varname);
         }
 
         // Array construction
         if (ast.isArrayConstructionExpression(node)) {
-            return this.visitArrayConstruction(node);
+            return this.visitArrayConstruction(node, varname);
         }
 
         // Struct construction
-        if (ast.isNamedStructConstructionExpression(node) || 
+        if (ast.isNamedStructConstructionExpression(node) ||
             ast.isAnonymousStructConstructionExpression(node)) {
-            return this.visitStructConstruction(node);
+            return this.visitStructConstruction(node, varname);
         }
 
         // Control flow expressions
         if (ast.isConditionalExpression(node)) {
-            return this.visitConditionalExpression(node);
+            return this.visitConditionalExpression(node, varname);
         }
 
         if (ast.isMatchExpression(node)) {
-            return this.visitMatchExpression(node);
+            return this.visitMatchExpression(node, varname);
         }
 
         if (ast.isLetInExpression(node)) {
-            return this.visitLetInExpression(node);
+            return this.visitLetInExpression(node, varname);
         }
 
         // Special expressions
         if (ast.isThisExpression(node)) {
-            return this.visitThisExpression(node);
+            return this.visitThisExpression(node, varname);
         }
 
         if (ast.isNewExpression(node)) {
-            return this.visitNewExpression(node);
+            return this.visitNewExpression(node, varname);
         }
 
         if (ast.isLambdaExpression(node)) {
-            return this.visitLambdaExpression(node);
+            return this.visitLambdaExpression(node, varname);
         }
 
         if (ast.isDoExpression(node)) {
-            return this.visitDoExpression(node);
+            return this.visitDoExpression(node, varname);
         }
 
         if (ast.isThrowExpression(node)) {
-            return this.visitThrowExpression(node);
+            return this.visitThrowExpression(node, varname);
         }
 
         if (ast.isYieldExpression(node)) {
-            return this.visitYieldExpression(node);
+            return this.visitYieldExpression(node, varname);
         }
 
         if (ast.isCoroutineExpression(node)) {
-            return this.visitCoroutineExpression(node);
+            return this.visitCoroutineExpression(node, varname);
         }
 
         if (ast.isTupleExpression(node)) {
-            return this.visitTupleExpression(node);
+            return this.visitTupleExpression(node, varname);
         }
 
         // Type operations
         if (ast.isInstanceCheckExpression(node)) {
-            return this.visitInstanceCheckExpression(node);
+            return this.visitInstanceCheckExpression(node, varname);
         }
 
         if (ast.isTypeCastExpression(node)) {
-            return this.visitTypeCastExpression(node);
+            return this.visitTypeCastExpression(node, varname);
         }
 
         // Default: return a placeholder
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         this.context.currentFunction?.undef(temp);
         return { register: temp };
     }
 
-    private visitIntegerLiteral(node: ast.IntegerLiteral): ExpressionResult {
-        const temp = this.generateTemp();
+    private visitIntegerLiteral(node: ast.IntegerLiteral, varname?: string): ExpressionResult {
+        const temp = this.tmp();
         const value = this.parseIntegerLiteral(node.value);
-        this.context.currentFunction?.const(temp, intLiteral(value), basicType('i32'));
-        return { register: temp, type: basicType('i32') };
+        const type = this.convertTypeDescriptionToIR(this.getType(node));
+        this.context.currentFunction?.const(temp, intLiteral(value), type);
+        return { register: temp, type: type };
     }
 
-    private visitFloatingPointLiteral(node: ast.FloatingPointLiteral): ExpressionResult {
-        const temp = this.generateTemp();
+    private visitFloatingPointLiteral(node: ast.FloatingPointLiteral, varname?: string): ExpressionResult {
+        const temp = this.tmp();
         const value = parseFloat(node.value);
         const type = ast.isFloatLiteral(node) ? basicType('f32') : basicType('f64');
         this.context.currentFunction?.const(temp, floatLiteral(value), type);
         return { register: temp, type };
     }
 
-    private visitBooleanLiteral(node: ast.BooleanLiteral): ExpressionResult {
-        const temp = this.generateTemp();
+    private visitBooleanLiteral(node: ast.BooleanLiteral, varname?: string): ExpressionResult {
+        const temp = this.tmp();
         const value = ast.isTrueBooleanLiteral(node);
         this.context.currentFunction?.const(temp, boolLiteral(value), basicType('bool'));
         return { register: temp, type: basicType('bool') };
     }
 
-    private visitStringLiteral(node: ast.StringLiteralExpression): ExpressionResult {
-        const temp = this.generateTemp();
-        const value = node.value.slice(1, -1); // Remove quotes
+    private visitStringLiteral(node: ast.StringLiteralExpression, varname?: string): ExpressionResult {
+        const temp = this.tmp();
+        const value = node.value; // Remove quotes
         this.context.currentFunction?.const(temp, stringLiteral(value), basicType('string'));
         return { register: temp, type: basicType('string') };
     }
 
-    private visitNullLiteral(node: ast.NullLiteralExpression): ExpressionResult {
-        const temp = this.generateTemp();
+    private visitNullLiteral(node: ast.NullLiteralExpression, varname?: string): ExpressionResult {
+        const temp = this.tmp();
         this.context.currentFunction?.const(temp, intLiteral(0)); // Represent null as 0
         return { register: temp };
     }
 
-    private visitBinaryExpression(node: ast.BinaryExpression): ExpressionResult {
-        const left = this.visitExpression(node.left);
-        const right = this.visitExpression(node.right);
-        const temp = this.generateTemp();
+    private visitBinaryExpression(node: ast.BinaryExpression, varname?: string): ExpressionResult {
+        const left = this.visitExpression(node.left, undefined);
+        const right = this.visitExpression(node.right, undefined);
+        const temp = this.tmp();
         const op = this.convertBinaryOp(node.op);
 
         this.context.currentFunction?.binaryOp(temp, op, left.register, right.register);
         return { register: temp };
     }
 
-    private visitUnaryExpression(node: ast.UnaryExpression): ExpressionResult {
-        const operand = this.visitExpression(node.expr);
-        const temp = this.generateTemp();
+    private visitUnaryExpression(node: ast.UnaryExpression, varname?: string): ExpressionResult {
+        const operand = this.visitExpression(node.expr, undefined);
+        const temp = this.tmp();
         const op = this.convertUnaryOp(node.op);
 
         this.context.currentFunction?.unaryOp(temp, op, operand.register);
         return { register: temp };
     }
 
-    private visitQualifiedReference(node: ast.QualifiedReference): ExpressionResult {
+    private visitQualifiedReference(node: ast.QualifiedReference, varname?: string): ExpressionResult {
         // Look up variable in context
         const ref = node.reference?.ref;
         const varName = this.getReferenceName(ref) ?? 'unknown';
@@ -653,145 +1042,145 @@ export class LIRGenerator {
         return { register };
     }
 
-    private visitFunctionCall(node: ast.FunctionCall): ExpressionResult {
+    private visitFunctionCall(node: ast.FunctionCall, varname?: string): ExpressionResult {
         const func = this.context.currentFunction;
         if (!func) return { register: 'undefined' };
 
         // Evaluate function expression
-        const funcExpr = this.visitExpression(node.expr);
+        const funcExpr = this.visitExpression(node.expr, undefined);
 
         // Evaluate arguments
         const argRegs: string[] = [];
         if (node.args) {
             for (const arg of node.args) {
-                const argResult = this.visitExpression(arg);
+                const argResult = this.visitExpression(arg, undefined);
                 argRegs.push(argResult.register);
             }
         }
 
         // Generate call
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         func.call(funcExpr.register, argRegs, temp);
         return { register: temp };
     }
 
-    private visitMemberAccess(node: ast.MemberAccess): ExpressionResult {
+    private visitMemberAccess(node: ast.MemberAccess, varname?: string): ExpressionResult {
         // TODO: Generate struct_get, class_get, or array access
-        const obj = this.visitExpression(node.expr);
+        const obj = this.visitExpression(node.expr, undefined);
         const ref = node.element?.ref;
         const memberName = this.getReferenceName(ref) ?? 'unknown';
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         
         // Placeholder: assume struct access
         this.context.currentFunction?.structGet(temp, obj.register, memberName);
         return { register: temp };
     }
 
-    private visitIndexAccess(node: ast.IndexAccess): ExpressionResult {
-        const array = this.visitExpression(node.expr);
-        const temp = this.generateTemp();
+    private visitIndexAccess(node: ast.IndexAccess, varname?: string): ExpressionResult {
+        const array = this.visitExpression(node.expr, undefined);
+        const temp = this.tmp();
         
         if (node.indexes && node.indexes.length > 0) {
-            const index = this.visitExpression(node.indexes[0]);
+            const index = this.visitExpression(node.indexes[0], undefined);
             this.context.currentFunction?.arrayGet(temp, array.register, index.register);
         }
         
         return { register: temp };
     }
 
-    private visitArrayConstruction(node: ast.ArrayConstructionExpression): ExpressionResult {
+    private visitArrayConstruction(node: ast.ArrayConstructionExpression, varname?: string): ExpressionResult {
         // TODO: Implement array construction
         // Need to allocate array and set elements
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitStructConstruction(node: ast.Expression): ExpressionResult {
+    private visitStructConstruction(node: ast.Expression, varname?: string): ExpressionResult {
         // TODO: Implement struct construction
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitConditionalExpression(node: ast.ConditionalExpression): ExpressionResult {
+    private visitConditionalExpression(node: ast.ConditionalExpression, varname?: string): ExpressionResult {
         // TODO: Implement if expression (different from if statement)
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitMatchExpression(node: ast.MatchExpression): ExpressionResult {
+    private visitMatchExpression(node: ast.MatchExpression, varname?: string): ExpressionResult {
         // TODO: Implement match expression
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitLetInExpression(node: ast.LetInExpression): ExpressionResult {
+    private visitLetInExpression(node: ast.LetInExpression, varname?: string): ExpressionResult {
         // TODO: Implement let-in expression
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitThisExpression(node: ast.ThisExpression): ExpressionResult {
+    private visitThisExpression(node: ast.ThisExpression, varname?: string): ExpressionResult {
         // Return 'this' register
         return { register: 'this' };
     }
 
-    private visitNewExpression(node: ast.NewExpression): ExpressionResult {
+    private visitNewExpression(node: ast.NewExpression, varname?: string): ExpressionResult {
         // TODO: Generate class_alloc or struct_alloc
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitLambdaExpression(node: ast.LambdaExpression): ExpressionResult {
+    private visitLambdaExpression(node: ast.LambdaExpression, varname?: string): ExpressionResult {
         // TODO: Generate closure_alloc
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitDoExpression(node: ast.DoExpression): ExpressionResult {
+    private visitDoExpression(node: ast.DoExpression, varname?: string): ExpressionResult {
         this.visitBlockStatement(node.body);
         // TODO: Capture block result
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitThrowExpression(node: ast.ThrowExpression): ExpressionResult {
-        const expr = this.visitExpression(node.expr);
+    private visitThrowExpression(node: ast.ThrowExpression, varname?: string): ExpressionResult {
+        const expr = this.visitExpression(node.expr, undefined);
         this.context.currentFunction?.throw(expr.register);
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitYieldExpression(node: ast.YieldExpression): ExpressionResult {
+    private visitYieldExpression(node: ast.YieldExpression, varname?: string): ExpressionResult {
         // TODO: Generate coro_yield
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitCoroutineExpression(node: ast.CoroutineExpression): ExpressionResult {
+    private visitCoroutineExpression(node: ast.CoroutineExpression, varname?: string): ExpressionResult {
         // TODO: Generate coro_alloc
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitTupleExpression(node: ast.TupleExpression): ExpressionResult {
+    private visitTupleExpression(node: ast.TupleExpression, varname?: string): ExpressionResult {
         // TODO: Handle tuple expressions (multiple values)
         if (node.expressions.length === 1) {
-            return this.visitExpression(node.expressions[0]);
+            return this.visitExpression(node.expressions[0], varname);
         }
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitInstanceCheckExpression(node: ast.InstanceCheckExpression): ExpressionResult {
+    private visitInstanceCheckExpression(node: ast.InstanceCheckExpression, varname?: string): ExpressionResult {
         // TODO: Generate type check instruction
-        const temp = this.generateTemp();
+        const temp = this.tmp();
         return { register: temp };
     }
 
-    private visitTypeCastExpression(node: ast.TypeCastExpression): ExpressionResult {
+    private visitTypeCastExpression(node: ast.TypeCastExpression, varname?: string): ExpressionResult {
         /// @ts-ignore
-        const expr = this.visitExpression(node.left);
-        const temp = this.generateTemp();
+        const expr = this.visitExpression(node.left, undefined);
+        const temp = this.tmp();
         // TODO: Generate cast instruction based on castType
         return { register: temp };
     }
@@ -876,16 +1265,12 @@ export class LIRGenerator {
     // Helper Methods
     // ============================================================================
 
-    private getFunctionName(node: ast.FunctionDeclaration): string {
-        // Prefix with @ for main-like functions, or use qualified name
-        return node.name === 'main' ? '@main' : node.name;
-    }
 
-    private getGlobalVariableName(node: ast.VariableDeclaration): string {
-        return `@global_${node.name}`;
-    }
+    /**
+     * @returns a new vregister name
+     */
 
-    private generateTemp(): string {
+    private tmp(): string {
         return `%t${this.context.tempCounter++}`;
     }
 
@@ -953,5 +1338,11 @@ export class LIRGenerator {
         }
         
         return undefined;
+    }
+
+    assert(condition: boolean, message: string) {
+        if(!condition) {
+            throw "Error: "+message
+        }
     }
 }

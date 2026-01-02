@@ -17,12 +17,33 @@
         ".": {
             "types": "./out/index.d.ts",
             "default": "./out/index.js"
+        },
+        "./ast": {
+            "types": "./out/ast.d.ts",
+            "default": "./out/ast.js"
+        },
+        "./types": {
+            "types": "./out/types.d.ts",
+            "default": "./out/types.js"
+        },
+        "./services": {
+            "types": "./out/services.d.ts",
+            "default": "./out/services.js"
         }
     },
     "typesVersions": {
         "*": {
             ".": [
                 "out/index"
+            ],
+            "ast": [
+                "out/ast"
+            ],
+            "types": [
+                "out/types"
+            ],
+            "services": [
+                "out/services"
             ]
         }
     },

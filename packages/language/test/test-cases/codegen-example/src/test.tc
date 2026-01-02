@@ -1,0 +1,18 @@
+type Array<T> = class {
+    let data: T[]
+
+    fn init(values: T[]) {
+        let c = values[0]
+    }
+
+    fn get(x: T) -> T {
+        return x
+    }
+}
+
+let arr: Array<u32> = new Array<u32>([1,2])
+
+fn main() {
+    let z = "hi"
+    return z
+}

@@ -32,6 +32,22 @@
                 "${workspaceFolder}/packages/extension/out/**/*.js",
                 "${workspaceFolder}/node_modules/langium"
             ]
+        },
+        {
+            "name": "Run TypeC Compiler - codegen-example",
+            "type": "node",
+            "request": "launch",
+            "program": "${workspaceFolder}/packages/compiler/bin/cli.js",
+            "args": [
+                "compile",
+                "./packages/language/test/test-cases/codegen-example"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "sourceMaps": true,
+            "outFiles": [
+                "${workspaceFolder}/packages/compiler/out/**/*.js"
+            ]
         }
     ]
 }

@@ -7,6 +7,7 @@ import * as url from 'node:url';
 import { createTypeCServices } from 'type-c-language';
 import { buildWorkspace } from './compiler/module-loader.js';
 import { LIRGenerator } from './compiler/tc-compiler.js';
+import { serializeFunction } from './ir/serializer.js';
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
 
 const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -29,6 +30,7 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
 
     let generator = new LIRGenerator(services);
     generator.generate(documents);
+    console.log(serializeFunction(generator.globalFunc));
 };
 
 export type GenerateOptions = {

@@ -109,7 +109,7 @@ interface FunctionParameter {
 }
 FnParam<regular> returns FunctionParameter:
     (<regular> (isMut?='mut')? name=ID ':' type=DataType<false>) |
-    (isMut?='mut')? name=ID( ':' type=DataType<false>)?
+    (isMut?='mut')? name=ID (':' type=DataType<false>)?
     ;
    
 

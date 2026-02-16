@@ -11,8 +11,11 @@ type Array<T> = class {
 }
 
 let arr: Array<u32> = new Array<u32>([1,2])
+let arr2: Array<i32> = new Array<i32>([1,2])
 
-fn main() {
-    let z = "hi"
-    return z
+let gx = {x: 1}
+
+fn add(x: u32) {
+    let x: u32 = 1
+    return x + gx.x
 }

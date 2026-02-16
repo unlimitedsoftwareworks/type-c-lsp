@@ -543,6 +543,11 @@ export class LIRGenerator {
         }
     }
 
+    private getNodeIRType(node: AstNode) {
+        const nodetype = this.getType(node);
+        return this.convertTypeDescriptionToIR(nodetype)
+    }
+
     /**
      * Generate method body (substitutions already on stack via getType())
      */
@@ -1037,9 +1042,26 @@ export class LIRGenerator {
     private visitQualifiedReference(node: ast.QualifiedReference, varname?: string): ExpressionResult {
         // Look up variable in context
         const ref = node.reference?.ref;
-        const varName = this.getReferenceName(ref) ?? 'unknown';
-        const register = this.context.variables.get(varName) ?? varName;
-        return { register };
+        this.assert(ref !== undefined, "Invalid refrence");
+
+        // Check if straight symbol: arg, vardecl
+        if(ast.isFunctionParameter(ref) || ast.isVariableDeclSingle(ref)) {
+            const varName = this.getReferenceName(ref);
+            let register: string = ""
+            // We need to check if the variable is global
+            if(ast.isVariableDeclSingle(ref) && ast.isModule(ref.$container?.$container?.$container) || ast.isNamespaceDecl(ref.$container?.$container?.$container)) {
+                register = this.tmp();
+                const type = this.getNodeIRType(ref);
+                this.context.currentFunction?.globalLoad(register, this.G(ref), type);
+            }
+            else {
+                // No load instruction needed, variables/arguments live in regsiters.
+                register = this.context.variables.get(varName) ?? varName;
+            }
+            return { register };
+        }
+    
+        throw "Not implement for "+ref?.$type;
     }
 
     private visitFunctionCall(node: ast.FunctionCall, varname?: string): ExpressionResult {
@@ -1323,8 +1345,8 @@ export class LIRGenerator {
     /**
      * Extract name from various IdentifiableReference types
      */
-    private getReferenceName(ref: ast.IdentifiableReference | undefined): string | undefined {
-        if (!ref) return undefined;
+    private getReferenceName(ref: ast.IdentifiableReference | undefined): string {
+        if (!ref) throw "Invalid ref";
         
         // Most reference types have a 'name' property
         if ('name' in ref && typeof ref.name === 'string') {
@@ -1337,7 +1359,7 @@ export class LIRGenerator {
             return ref.method.names?.[0];
         }
         
-        return undefined;
+        throw "Ref has no name attribute!";
     }
 
     assert(condition: boolean, message: string) {

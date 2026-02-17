@@ -1,21 +1,3 @@
-type Array<T> = class {
-    let data: T[]
-
-    fn init(values: T[]) {
-        let c = values[0]
-    }
-
-    fn get(x: T) -> T {
-        return x
-    }
-}
-
-let arr: Array<u32> = new Array<u32>([1,2])
-let arr2: Array<i32> = new Array<i32>([1,2])
-
-let gx = {x: 1}
-
-fn add(x: u32) {
-    let x: u32 = 1
-    return x + gx.x
+fn main(){
+    println("hello")
 }

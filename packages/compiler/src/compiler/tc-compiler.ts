@@ -1,28 +1,41 @@
 /**
- * LIR Generator for Type-C
- * Generates Low-Level Intermediate Representation from Type-C AST
+ * IR Generator for Type-C
+ * Generates typed Intermediate Representation from Type-C AST
  */
 
 import { AstNode, AstUtils, LangiumDocument } from 'langium';
 import * as ast from 'type-c-language/ast';
 import { TypeCServices } from 'type-c-language';
 import {
-    BinaryOp,
-    DataType,
-    FunctionArg,
-    LIRFunction,
-    LIRProgram,
-    UnaryOp,
-    arrayType,
-    basicType,
-    boolLiteral,
-    floatLiteral,
-    intLiteral,
-    nullableType,
-    stringLiteral
+    IRFunction,
+    IRProgram,
+    scalarType,
+    ptrType,
+    voidType,
+    isSignedInt,
+    isInteger,
+    isScalar,
+    isFloat,
+    isDouble,
+    serializeFunction,
+    serializeIRType
+} from '../ir/index.js';
+import type {
+    IRType,
+    NumericType,
+    CmpType,
+    IntType,
+    FloatType,
+    CastKind,
+    FunctionParam,
+    VReg,
+    ScalarIRType,
+    ClassFieldShape,
+    ClassMethodShape
 } from '../ir/index.js';
 import {
     TypeDescription,
+    TypeKind,
     isGenericType,
     isArrayType,
     isNullableType,
@@ -31,7 +44,24 @@ import {
     isStructType,
     isFunctionType,
     isUnionType,
-    isJoinType
+    isJoinType,
+    isClassType,
+    isInterfaceType,
+    isVariantType,
+    isVariantConstructorType,
+    isFFIType,
+    isCoroutineType,
+    isStringType,
+    isStringLiteralType
+} from 'type-c-language/types';
+import type {
+    VariantConstructorTypeDescription,
+    EnumTypeDescription,
+    ClassTypeDescription,
+    InterfaceTypeDescription,
+    StructTypeDescription,
+    ArrayTypeDescription,
+    FFITypeDescription
 } from 'type-c-language/types';
 import {
     TypeCTypeProvider,
@@ -41,79 +71,100 @@ import {
 import { FFIRegistery } from './ffi-registry.js';
 import { GlobalVariablesRegistery } from './global-vars-registry.js';
 import { CallableRegistry } from './callable-registry.js';
-import { serializeFunction } from '../ir/serializer.js';
+
+// ============================================================================
+// Core Types
+// ============================================================================
 
 /**
  * Context for tracking code generation state
  */
 interface GenerationContext {
-    /** Current function being generated */
-    currentFunction: LIRFunction | null;
-    /** Variable name to LIR register mapping */
-    variables: Map<string, string>;
-    /** Counter for generating unique temporary variables */
+    currentFunction: IRFunction | null;
+    variables: Map<string, { register: VReg; type: IRType }>;
     tempCounter: number;
-    /** Counter for generating unique labels */
     labelCounter: number;
-    /** Stack of loop contexts for break/continue */
     loopStack: Array<{ breakLabel: string; continueLabel: string }>;
-    /** Current scope depth for variable naming */
     scopeDepth: number;
+    /** Stack of variable scopes for cleanup on scope exit */
+    scopeVarStack: string[][];
 }
 
 /**
  * Result of expression generation
  */
 interface ExpressionResult {
-    /** The register/variable name holding the result */
-    register: string;
-    /** The type of the result (optional) */
-    type?: DataType;
+    register: VReg;
+    type: IRType;
 }
 
 /**
- * LIR Generator
- * Converts Type-C AST nodes into LIR instructions
+ * Upvalue captured by a closure
  */
-export class LIRGenerator {
-    private program: LIRProgram;
+interface CapturedUpvalue {
+    name: string;
+    register: VReg;
+    type: IRType;
+}
+
+// ============================================================================
+// IR Generator
+// ============================================================================
+
+/**
+ * IR Generator
+ * Converts Type-C AST nodes into typed IR instructions
+ */
+export class IRGenerator {
+    private program: IRProgram;
     private context: GenerationContext;
     readonly typeProvider: TypeCTypeProvider;
     readonly monoMorph: MonomorphizationRegistry;
     readonly typeUtils: TypeCTypeUtils;
 
     ffiRegistery: FFIRegistery = new FFIRegistery();
-    
-    
-    globalVariablesRegistry: GlobalVariablesRegistery = new GlobalVariablesRegistery()
-    G(node: AstNode, name?: string){
-        return this.globalVariablesRegistry.G(node, name)
+
+    globalVariablesRegistry: GlobalVariablesRegistery = new GlobalVariablesRegistery();
+    G(node: AstNode, name?: string) {
+        return this.globalVariablesRegistry.G(node, name);
     }
 
     callableRegistry!: CallableRegistry;
-    /**
-     * Get mangled name for a callable (function or method).
-     * For generic callables, use the specific methods in callableRegistry instead.
-     */
-    C(node: AstNode, name?: string){
-        return this.callableRegistry.C(node, name)
+    C(node: AstNode, name?: string) {
+        return this.callableRegistry.C(node, name);
     }
 
     /**
-     * Despite this being wrapped as a function, is it a global init entry that will be unwrapped from the function during
-     * code gen later on
+     * Global init function - instructions will be unwrapped later
      */
-    globalFunc: LIRFunction = new LIRFunction("$G", [], undefined);
+    globalFunc: IRFunction = new IRFunction("$G", [], []);
 
     /**
      * Stack of generic substitutions.
-     * Each entry maps generic parameter names to concrete types.
-     * The stack allows nested generic contexts (e.g., generic class with generic methods).
      */
     private substitutionStack: Map<string, TypeDescription>[] = [];
 
+    /** Counter for generating unique closure names */
+    private closureCounter = 0;
+
+    private structShapeCounter = 0;
+    private classShapeCounter = 0;
+
+    /** Maps field name string → unique numeric ID for graph coloring */
+    private fieldNameToId = new Map<string, number>();
+    private fieldNameIdCounter = 0;
+
+    private getOrCreateFieldNameId(name: string): number {
+        let id = this.fieldNameToId.get(name);
+        if (id === undefined) {
+            id = this.fieldNameIdCounter++;
+            this.fieldNameToId.set(name, id);
+        }
+        return id;
+    }
+
     constructor(services: TypeCServices) {
-        this.program = new LIRProgram();
+        this.program = new IRProgram();
         this.context = this.createContext();
         this.typeProvider = services.typing.TypeProvider;
         this.monoMorph = services.typing.MonomorphizationRegistry;
@@ -121,30 +172,22 @@ export class LIRGenerator {
         this.callableRegistry = new CallableRegistry(this.monoMorph);
     }
 
-    /**
-     * Push a new substitution context onto the stack,
-     * Used to generate generic functions/classes
-     */
+    // ============================================================================
+    // Generic Substitution Stack
+    // ============================================================================
+
     private pushSubstitutions(substitutions: Map<string, TypeDescription>): void {
         this.substitutionStack.push(substitutions);
     }
 
-    /**
-     * Pop the current substitution context from the stack
-     */
     private popSubstitutions(): void {
         this.substitutionStack.pop();
     }
 
-    /**
-     * Get the current active substitutions (merging all levels in the stack)
-     */
     private getCurrentSubstitutions(): Map<string, TypeDescription> {
         if (this.substitutionStack.length === 0) {
             return new Map();
         }
-        
-        // Merge all substitutions from bottom to top (later entries override earlier ones)
         const merged = new Map<string, TypeDescription>();
         for (const subs of this.substitutionStack) {
             for (const [key, value] of subs.entries()) {
@@ -155,39 +198,15 @@ export class LIRGenerator {
     }
 
     /**
-     * Get the type of an AST node with automatic generic substitution from the stack.
-     *
-     * This method:
-     * 1. Gets the type from the type provider
-     * 2. Applies substitutions from the current stack
-     * 3. Validates that all generics are resolved
-     * 4. Throws an error if any generic remains unresolved
-     *
-     * @param node The AST node to get the type for
-     * @returns The fully resolved type with all generics substituted
-     * @throws Error if any generic type parameters remain unresolved
-     *
-     * @example
-     * ```typescript
-     * // In context where T → u32
-     * const type = this.getType(paramNode);  // Returns u32, not T
-     * ```
+     * Get the type of an AST node with automatic generic substitution.
      */
     private getType(node: AstNode): TypeDescription {
-        // Get the type from the type provider
         const type = this.typeProvider.getType(node);
-        
 
-        if(isGenericType(type)){
-
-            // Get current substitutions from stack
+        if (isGenericType(type)) {
             const substitutions = this.getCurrentSubstitutions();
-            
-            // If we have substitutions, apply them
             if (substitutions.size > 0) {
                 const resolvedType = this.typeUtils.substituteGenerics(type, substitutions);
-                
-                // Check if there are still unresolved generics
                 const unresolvedGenerics = this.getUnresolvedGenerics(resolvedType);
                 if (unresolvedGenerics.length > 0) {
                     throw new Error(
@@ -195,11 +214,8 @@ export class LIRGenerator {
                         `Available substitutions: ${Array.from(substitutions.keys()).join(', ') || 'none'}`
                     );
                 }
-                
                 return resolvedType;
             }
-            
-            // No substitutions - check if type contains any generics (which would be an error)
             const unresolvedGenerics = this.getUnresolvedGenerics(type);
             if (unresolvedGenerics.length > 0) {
                 throw new Error(
@@ -207,22 +223,14 @@ export class LIRGenerator {
                 );
             }
         }
-        
+
         return type;
     }
 
-    /**
-     * Recursively find all unresolved generic type parameters in a type.
-     *
-     * @param type The type to check
-     * @returns Array of generic parameter names that are not yet resolved
-     */
     private getUnresolvedGenerics(type: TypeDescription): string[] {
         const generics: string[] = [];
-        
         const traverse = (t: TypeDescription): void => {
             if (isGenericType(t)) {
-                // Found an unresolved generic
                 generics.push(t.name);
             } else if (isArrayType(t)) {
                 traverse(t.elementType);
@@ -242,18 +250,234 @@ export class LIRGenerator {
                 t.parameters.forEach(param => traverse(param.type));
                 traverse(t.returnType);
             }
-            // Add more composite types as needed
         };
-        
         traverse(type);
-        
-        // Return unique generic names
         return Array.from(new Set(generics));
     }
 
+    // ============================================================================
+    // Type Conversion Helpers
+    // ============================================================================
+
     /**
-     * Create a fresh generation context
+     * Central mapping: TypeDescription → IRType
      */
+    private convertTypeDescriptionToIR(type: TypeDescription): IRType {
+        switch (type.kind) {
+            case TypeKind.U8: return scalarType('u8');
+            case TypeKind.U16: return scalarType('u16');
+            case TypeKind.U32: return scalarType('u32');
+            case TypeKind.U64: return scalarType('u64');
+            case TypeKind.I8: return scalarType('i8');
+            case TypeKind.I16: return scalarType('i16');
+            case TypeKind.I32: return scalarType('i32');
+            case TypeKind.I64: return scalarType('i64');
+            case TypeKind.F32: return scalarType('f32');
+            case TypeKind.F64: return scalarType('f64');
+            case TypeKind.Bool: return scalarType('bool');
+            case TypeKind.Void: return voidType();
+            case TypeKind.String: return ptrType('string');
+            case TypeKind.StringLiteral: return ptrType('string');
+            case TypeKind.Null: return ptrType('struct'); // null ptr
+            case TypeKind.Array: return ptrType('array');
+            case TypeKind.Nullable: return this.convertTypeDescriptionToIR((type as any).baseType);
+            case TypeKind.Struct: return ptrType('struct');
+            case TypeKind.Class: return ptrType('class');
+            case TypeKind.Interface: return ptrType('interface');
+            case TypeKind.Variant: return ptrType('struct'); // variants are structs with tag
+            case TypeKind.VariantConstructor: return ptrType('struct');
+            case TypeKind.Enum: {
+                const enumType = type as EnumTypeDescription;
+                if (enumType.encoding) {
+                    return this.convertTypeDescriptionToIR(enumType.encoding);
+                }
+                return scalarType('u32');
+            }
+            case TypeKind.Function: return ptrType('closure');
+            case TypeKind.Coroutine: return ptrType('coroutine');
+            case TypeKind.FFI: return ptrType('ffi_handle');
+            case TypeKind.Reference: {
+                // Resolve through type provider
+                const resolved = this.typeUtils.resolveIfReference(type);
+                if (resolved !== type) {
+                    return this.convertTypeDescriptionToIR(resolved);
+                }
+                // Fallback for unresolvable references
+                return ptrType('struct');
+            }
+            case TypeKind.Tuple: {
+                // Tuples are only for returns - shouldn't typically hit this
+                return voidType();
+            }
+            case TypeKind.Never: return voidType();
+            default: return voidType();
+        }
+    }
+
+    /**
+     * Get IRType for an AST node (resolves type then converts)
+     */
+    private getNodeIRType(node: AstNode): IRType {
+        return this.convertTypeDescriptionToIR(this.getType(node));
+    }
+
+    /**
+     * Convert AST DataType node to IRType using substitution stack
+     */
+    private convertTypeWithSubstitution(astType: ast.DataType): IRType {
+        const resolvedType = this.getType(astType);
+        return this.convertTypeDescriptionToIR(resolvedType);
+    }
+
+    /**
+     * Get the current function or throw
+     */
+    private func(): IRFunction {
+        if (!this.context.currentFunction) {
+            throw new Error('No current function in context');
+        }
+        return this.context.currentFunction;
+    }
+
+    /**
+     * Extract NumericType string from an IRType (for arithmetic/comparison)
+     */
+    private extractNumericType(irType: IRType): NumericType {
+        if (irType.tag === 'scalar') {
+            const s = irType.scalar;
+            if (s === 'bool') {
+                return 'u8'; // treat bool as u8 for arithmetic
+            }
+            return s as NumericType;
+        }
+        throw new Error(`Cannot extract NumericType from ${serializeIRType(irType)}`);
+    }
+
+    /**
+     * Extract CmpType from an IRType (numeric or 'ptr')
+     */
+    private extractCmpType(irType: IRType): CmpType {
+        if (irType.tag === 'ptr') return 'ptr';
+        return this.extractNumericType(irType);
+    }
+
+    /**
+     * Check if IRType is a string pointer
+     */
+    private isStringIRType(irType: IRType): boolean {
+        return irType.tag === 'ptr' && irType.kind === 'string';
+    }
+
+    // isValueType removed - use IRType tag checks instead
+
+    /**
+     * Check if a type has an operator overload method.
+     * Returns the method index and return type if found, undefined otherwise.
+     * Mirrors the logic from TypeCTypeProvider.resolveOperatorOverload.
+     */
+    private resolveOperatorMethod(
+        lhsTd: TypeDescription,
+        operator: string,
+        rhsTypes: TypeDescription[]
+    ): { methodId: number; returnType: TypeDescription } | undefined {
+        let resolved = isReferenceType(lhsTd) ? this.typeUtils.resolveIfReference(lhsTd) : lhsTd;
+
+        // Unwrap nullable
+        if (isNullableType(resolved)) {
+            resolved = resolved.baseType;
+        }
+
+        // Resolve generic constraints (e.g., T: Addable → Addable)
+        resolved = this.typeUtils.resolveIfGeneric(resolved);
+
+        if (!isClassType(resolved) && !isInterfaceType(resolved)) {
+            return undefined;
+        }
+
+        const typedDesc = resolved as ClassTypeDescription | InterfaceTypeDescription;
+        const methods = typedDesc.methods;
+
+        // Collect matching methods
+        const candidates = methods
+            .map((m, idx) => ({ method: m, index: idx }))
+            .filter(({ method }) => method.names.includes(operator));
+
+        if (candidates.length === 0) return undefined;
+
+        // Filter by argument count
+        const argFiltered = candidates.filter(
+            ({ method }) => method.parameters.length === rhsTypes.length
+        );
+
+        if (argFiltered.length === 0) return undefined;
+
+        if (argFiltered.length === 1) {
+            let returnType = argFiltered[0].method.returnType;
+            // Apply generic substitutions if in generic context
+            const subs = this.getCurrentSubstitutions();
+            if (subs.size > 0) {
+                returnType = this.typeUtils.substituteGenerics(returnType, subs);
+            }
+            return { methodId: argFiltered[0].index, returnType };
+        }
+
+        // Multiple candidates: try exact match first, then assignable
+        for (const { method, index } of argFiltered) {
+            if (method.parameters.every(
+                (param, i) => this.typeUtils.areTypesEqual(rhsTypes[i], param.type).success
+            )) {
+                let returnType = method.returnType;
+                const subs = this.getCurrentSubstitutions();
+                if (subs.size > 0) {
+                    returnType = this.typeUtils.substituteGenerics(returnType, subs);
+                }
+                return { methodId: index, returnType };
+            }
+        }
+
+        for (const { method, index } of argFiltered) {
+            if (method.parameters.every(
+                (param, i) => this.typeUtils.isAssignable(rhsTypes[i], param.type).success
+            )) {
+                let returnType = method.returnType;
+                const subs = this.getCurrentSubstitutions();
+                if (subs.size > 0) {
+                    returnType = this.typeUtils.substituteGenerics(returnType, subs);
+                }
+                return { methodId: index, returnType };
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Emit a callMethod for an operator overload and return the result.
+     */
+    private emitOperatorCall(
+        obj: ExpressionResult,
+        methodId: number,
+        returnTd: TypeDescription,
+        argRegs: VReg[],
+        argTypes: IRType[]
+    ): ExpressionResult {
+        const f = this.func();
+        const retType = this.convertTypeDescriptionToIR(returnTd);
+        const retTypes = retType.tag === 'void' ? [] : [retType];
+        const dests = retType.tag === 'void' ? [] : [this.tmp()];
+
+        f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+
+        if (dests.length > 0) {
+            return { register: dests[0], type: retTypes[0] };
+        }
+        return { register: this.tmp(), type: voidType() };
+    }
+
+    // ============================================================================
+    // Context Management
+    // ============================================================================
+
     private createContext(): GenerationContext {
         return {
             currentFunction: null,
@@ -261,24 +485,152 @@ export class LIRGenerator {
             tempCounter: 0,
             labelCounter: 0,
             loopStack: [],
-            scopeDepth: 0
+            scopeDepth: 0,
+            scopeVarStack: []
         };
     }
 
+    private tmp(): VReg {
+        return `%t${this.context.tempCounter++}`;
+    }
+
+    private generateLabel(prefix: string): string {
+        return `${prefix}_${this.context.labelCounter++}`;
+    }
+
+    private allocateVariable(name: string, type: IRType): VReg {
+        const varReg: VReg = `%${name}_${this.context.scopeDepth}`;
+        this.context.variables.set(name, { register: varReg, type });
+        // Track in current scope for cleanup
+        const currentScope = this.context.scopeVarStack[this.context.scopeVarStack.length - 1];
+        if (currentScope) {
+            currentScope.push(name);
+        }
+        return varReg;
+    }
+
+    private lookupVariable(name: string): { register: VReg; type: IRType } | undefined {
+        return this.context.variables.get(name);
+    }
+
+    private enterScope(): void {
+        this.context.scopeDepth++;
+        this.context.scopeVarStack.push([]);
+    }
+
+    private exitScope(): void {
+        const scopeVars = this.context.scopeVarStack.pop();
+        if (scopeVars) {
+            for (const name of scopeVars) {
+                this.context.variables.delete(name);
+            }
+        }
+        this.context.scopeDepth--;
+    }
+
+    private pushLoop(breakLabel: string, continueLabel: string): void {
+        this.context.loopStack.push({ breakLabel, continueLabel });
+    }
+
+    private popLoop(): void {
+        this.context.loopStack.pop();
+    }
+
+    private currentLoop(): { breakLabel: string; continueLabel: string } | undefined {
+        return this.context.loopStack[this.context.loopStack.length - 1];
+    }
+
+    private parseIntegerLiteral(value: string): bigint {
+        const cleanValue = value.replace(/[ui](8|16|32|64)$/, '');
+        if (cleanValue.startsWith('0x') || cleanValue.startsWith('0X')) {
+            return BigInt(cleanValue);
+        } else if (cleanValue.startsWith('0b') || cleanValue.startsWith('0B')) {
+            return BigInt(cleanValue);
+        } else if (cleanValue.startsWith('0o') || cleanValue.startsWith('0O')) {
+            return BigInt(cleanValue);
+        } else {
+            return BigInt(cleanValue);
+        }
+    }
+
+    private getReferenceName(ref: ast.IdentifiableReference | undefined): string {
+        if (!ref) throw new Error("Invalid ref");
+        if ('name' in ref && typeof ref.name === 'string') {
+            return ref.name;
+        }
+        if (ast.isClassMethod(ref) && ref.method) {
+            return ref.method.names?.[0];
+        }
+        throw new Error("Ref has no name attribute!");
+    }
+
+    private assert(condition: boolean, message: string): void {
+        if (!condition) {
+            throw new Error("Assertion failed: " + message);
+        }
+    }
+
+    private makeClassKey(
+        classDecl: ast.TypeDeclaration,
+        substitutions: Map<string, TypeDescription>
+    ): string {
+        if (substitutions.size === 0) {
+            return classDecl.name;
+        }
+        const typeArgStrings = classDecl.genericParameters
+            .map(param => {
+                const type = substitutions.get(param.name);
+                return type ? type.toString() : param.name;
+            });
+        return `${classDecl.name}<${typeArgStrings.join(',')}>`;
+    }
+
     /**
-     * Generate LIR from a Type-C module
+     * Check if a variable reference is global
      */
-    public generate(documents: LangiumDocument<AstNode>[]): LIRProgram {
-        // Visits each module and generates code for each one.
-        for(const doc of documents) {
-            if(!ast.isModule(doc.parseResult.value)){
-                // Unreachable .. in theory.
-                console.log("Invalid node")
+    private isGlobalVar(ref: AstNode): boolean {
+        if (ast.isVariableDeclSingle(ref)) {
+            const container = ref.$container?.$container?.$container;
+            return ast.isModule(container) || ast.isNamespaceDecl(container);
+        }
+        return false;
+    }
+
+    // ============================================================================
+    // Public API
+    // ============================================================================
+
+    public generate(documents: LangiumDocument<AstNode>[]): IRProgram {
+        for (const doc of documents) {
+            if (!ast.isModule(doc.parseResult.value)) {
+                console.log("Invalid node");
                 continue;
             }
-
-            this.visitModule(doc.parseResult.value)
+            this.visitModule(doc.parseResult.value);
         }
+
+        // Finalize the global init function
+        // If a "main" function exists, call it and use its return as exit code
+        const mainFunc = this.program.functions.find(f => f.name === 'main');
+        if (mainFunc && mainFunc.returnTypes.length > 0) {
+            const exitReg = `%$G_exit`;
+            this.globalFunc.call([exitReg], 'main', [], [], mainFunc.returnTypes);
+            this.globalFunc.exit(exitReg);
+        } else if (mainFunc) {
+            // main returns void — exit with 0
+            const exitReg = `%$G_exit`;
+            this.globalFunc.constInt(exitReg, 0, 'u32');
+            this.globalFunc.call([], 'main', [], [], []);
+            this.globalFunc.exit(exitReg);
+        } else {
+            // No main — just exit 0
+            const exitReg = `%$G_exit`;
+            this.globalFunc.constInt(exitReg, 0, 'u32');
+            this.globalFunc.exit(exitReg);
+        }
+        this.program.addFunction(this.globalFunc);
+        this.program.entryFunction = '$G';
+
         return this.program;
     }
 
@@ -287,19 +639,11 @@ export class LIRGenerator {
     // ============================================================================
 
     private visitModule(node: ast.Module | ast.NamespaceDecl): void {
-        /**
-         * Generate code for all:
-         * 1. Global variabels initializations
-         * 2. All FFI loads
-         * 1. Classes (class methods)
-         * 2. Functions
-         */
-
         this.generateFFILoads(node);
 
-        for(const n of node.definitions) {
-            if(ast.isNamespaceDecl(n)) {
-                this.visitModule(n)
+        for (const n of node.definitions) {
+            if (ast.isNamespaceDecl(n)) {
+                this.visitModule(n);
             }
         }
         this.generateGlobalSymbols(node);
@@ -307,340 +651,428 @@ export class LIRGenerator {
         this.generateFunctions(node);
     }
 
-    /**
-     * Generate bytecode to load all FFI
-     */
-    private generateFFILoads(node: ast.Module | ast.NamespaceDecl){
+    private generateFFILoads(node: ast.Module | ast.NamespaceDecl): void {
         const ffiDecls = AstUtils.streamAllContents(node).filter(ast.isExternFFIDecl).toArray();
-
-        for(const decl of ffiDecls) {
+        for (const decl of ffiDecls) {
             const libname = decl.dynlib;
-            if(this.ffiRegistery.has(libname)) {
-                continue;
-            }
-
+            if (this.ffiRegistery.has(libname)) continue;
             const id = this.ffiRegistery.register(libname);
-            this.globalFunc.ffiRegister(libname, id);
+            // ffiRegister takes dest (handle register) and libName
+            const handleReg = `%ffi_${id}`;
+            this.globalFunc.ffiRegister(handleReg, libname);
         }
     }
 
-    private generateGlobalSymbols(node: ast.Module | ast.NamespaceDecl) {
+    private generateGlobalSymbols(node: ast.Module | ast.NamespaceDecl): void {
         const globals = AstUtils.streamContents(node).filter(ast.isVariableDeclarationStatement);
-        for(const gvar of globals) {
-            for(const variable of gvar.declarations.variables) {
-                if(ast.isVariableDeclSingle(variable)) {
-                    const exprResult = this.tmp();
-                    this.assert(variable.initializer != undefined, `No initializer for variable ${variable.name}`)
-                    this.visitExpression(variable.initializer!, exprResult);
-                    this.globalFunc.globalStore(
-                        this.G(variable),
-                        exprResult
-                    )
-                }
-                else {
-                    throw "Not implemented"
+        for (const gvar of globals) {
+            for (const variable of gvar.declarations.variables) {
+                if (ast.isVariableDeclSingle(variable)) {
+                    this.assert(variable.initializer != undefined, `No initializer for variable ${variable.name}`);
+
+                    const varType = this.getNodeIRType(variable);
+                    const globalId = this.G(variable);
+
+                    // Declare global in program metadata
+                    this.program.declareGlobal({ id: globalId, type: varType });
+
+                    // Generate initializer in global func
+                    const prevFunc = this.context.currentFunction;
+                    this.context.currentFunction = this.globalFunc;
+
+                    const exprResult = this.visitExpression(variable.initializer!, undefined);
+                    this.globalFunc.globalStore(globalId, exprResult.register, exprResult.type);
+
+                    this.context.currentFunction = prevFunc;
+                } else if (ast.isVariableDeclTupleDestructuring(variable) && variable.initializer) {
+                    // Tuple destructuring in globals: each element becomes a separate global
+                    const initTd = this.getType(variable.initializer);
+                    const elementTypes: IRType[] = [];
+                    if (isTupleType(initTd)) {
+                        for (const elemTd of initTd.elementTypes) {
+                            elementTypes.push(this.convertTypeDescriptionToIR(elemTd));
+                        }
+                    }
+
+                    // Declare globals for each element
+                    for (let i = 0; i < variable.elements.length; i++) {
+                        const elem = variable.elements[i];
+                        if (elem.name) {
+                            const varType = i < elementTypes.length ? elementTypes[i] : voidType();
+                            const globalId = this.globalVariablesRegistry.G(variable, elem.name);
+                            this.program.declareGlobal({ id: globalId, type: varType });
+                        }
+                    }
+
+                    // Generate initializer in global func
+                    const prevFunc = this.context.currentFunction;
+                    this.context.currentFunction = this.globalFunc;
+
+                    // Evaluate tuple-returning expression
+                    const result = this.visitExpression(variable.initializer, undefined);
+                    // For a single-value fallback, store to first element
+                    if (variable.elements.length > 0 && variable.elements[0].name) {
+                        const globalId = this.globalVariablesRegistry.G(variable, variable.elements[0].name);
+                        const varType = elementTypes.length > 0 ? elementTypes[0] : result.type;
+                        this.globalFunc.globalStore(globalId, result.register, varType);
+                    }
+
+                    this.context.currentFunction = prevFunc;
                 }
             }
         }
     }
 
-    private generateClasses(node: ast.Module | ast.NamespaceDecl) {
+    // ============================================================================
+    // Class Generation
+    // ============================================================================
+
+    private generateClasses(node: ast.Module | ast.NamespaceDecl): void {
         const classes = AstUtils.streamContents(node)
-            .filter(n => ast.isTypeDeclaration(n) && (ast.isClassType(n.definition)))
-            .map(e => e as ast.TypeDeclaration)
+            .filter(n => ast.isTypeDeclaration(n) && ast.isClassType(n.definition))
+            .map(e => e as ast.TypeDeclaration);
 
         for (const classDecl of classes) {
-            if(classDecl.genericParameters.length > 0) {
-                // Generic class - generate code for each instantiation
+            if (classDecl.genericParameters.length > 0) {
                 this.generateGenericClassInstantiations(classDecl);
-            }
-            else {
-                // Non-generic class - generate directly
+            } else {
                 const classType = classDecl.definition as ast.ClassType;
                 this.generateClass(classDecl, classType);
             }
         }
     }
 
-    /**
-     * Generate code for all instantiations of a generic class
-     */
-    private generateGenericClassInstantiations(classDecl: ast.TypeDeclaration) {
-        // Get all instantiations of this generic class
+    private generateGenericClassInstantiations(classDecl: ast.TypeDeclaration): void {
         const allInstantiations = this.monoMorph.getAllClassInstantiations();
         const classInstantiations = allInstantiations.filter(
             inst => inst.declaration === classDecl
         );
 
-        // Generate code for each instantiation
         for (const instantiation of classInstantiations) {
-            // Build substitution map: generic parameter name → concrete type
             const substitutions = new Map<string, TypeDescription>();
-            
             classDecl.genericParameters.forEach((param, index) => {
                 if (index < instantiation.typeArgs.length) {
                     substitutions.set(param.name, instantiation.typeArgs[index]);
                 }
             });
 
-            // Push substitutions onto stack
             this.pushSubstitutions(substitutions);
-            
             try {
-                // Generate the class with substitutions active
                 const classType = classDecl.definition as ast.ClassType;
                 this.generateClass(classDecl, classType);
             } finally {
-                // Always pop, even if there's an error
                 this.popSubstitutions();
             }
         }
     }
 
-    /**
-     * Generate code for a class (either non-generic or a specific instantiation of a generic)
-     * Uses the current substitution stack for generic types.
-     *
-     * @param classDecl The class declaration node
-     * @param classType The class type node
-     */
     private generateClass(
         classDecl: ast.TypeDeclaration,
         classType: ast.ClassType
-    ) {
-        // Get current substitutions from stack
+    ): void {
         const substitutions = this.getCurrentSubstitutions();
-        
-        // Generate a mangled name for the class
         const className = substitutions.size > 0
             ? this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions))
             : classDecl.name;
 
         console.log(`Generating class: ${className}`);
 
-        // Generate methods
+        // Declare class shape in program metadata
+        const classTd = this.getType(classDecl) as ClassTypeDescription;
+        const classFields: ClassFieldShape[] = classTd.attributes.map((attr, idx) => ({
+            localFieldId: idx,
+            type: this.convertTypeDescriptionToIR(attr.type),
+            name: attr.name
+        }));
+
+        const classMethods: ClassMethodShape[] = [];
+        let methodIdx = 0;
+        for (const method of classTd.methods) {
+            const primaryName = method.names[0] || `method_${methodIdx}`;
+            classMethods.push({
+                methodId: methodIdx,
+                name: primaryName,
+                funcName: `${className}::${primaryName}`
+            });
+            methodIdx++;
+        }
+
+        const classShapeId = `class_${className}`;
+        this.program.declareClass({
+            id: classShapeId,
+            uid: this.classShapeCounter++,
+            fields: classFields,
+            methods: classMethods,
+            implementedInterfaces: classTd.implementations.map(() => 'impl') // Placeholder
+        });
+
+        // Generate class-level methods
         for (const method of classType.methods) {
             if (method.method) {
                 this.generateMethod(className, method);
             }
         }
+
+        // Generate methods from implementation blocks
+        // Implementation methods are stored separately in classType.implementations
+        // and must be generated unless shadowed by an override in the class itself
+        this.generateImplMethods(className, classType);
     }
 
     /**
-     * Generate code for a class method using the substitution stack
+     * Generate methods from impl blocks attached to a class.
+     * Skips methods that are overridden by the class (isOverride: true).
      */
+    private generateImplMethods(
+        className: string,
+        classType: ast.ClassType
+    ): void {
+        if (!classType.implementations || classType.implementations.length === 0) return;
+
+        // Collect override method names from the class for shadowing check
+        const overrideNames = new Set<string>();
+        for (const classMethod of classType.methods) {
+            if (classMethod.isOverride && classMethod.method) {
+                for (const name of classMethod.method.names) {
+                    overrideNames.add(name);
+                }
+            }
+        }
+
+        for (const implDecl of classType.implementations) {
+            // Resolve the impl type reference to get the ImplementationType AST node
+            const implTypeRef = implDecl.type;
+            const refTarget = implTypeRef.field?.ref;
+
+            if (!refTarget || !ast.isTypeDeclaration(refTarget)) continue;
+            const implDef = refTarget.definition;
+            if (!ast.isImplementationType(implDef)) continue;
+
+            // Generate each method from the impl that isn't shadowed
+            for (const implMethod of implDef.methods) {
+                if (!implMethod.method) continue;
+
+                // Check if any name of this impl method is overridden
+                const isShadowed = implMethod.method.names.some(
+                    name => overrideNames.has(name)
+                );
+                if (isShadowed) continue;
+
+                this.generateMethod(className, implMethod);
+            }
+        }
+    }
+
     private generateMethod(
         className: string,
         classMethod: ast.ClassMethod
-    ) {
+    ): void {
         if (!classMethod.method) return;
-        
         const methodHeader = classMethod.method;
-        
-        // Use the callable registry to get the mangled method name
-        // For generic class instantiations, className is already mangled
+
+        // Skip generic methods — they are monomorphized and generated
+        // separately for each concrete instantiation at call sites
+        if (methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
+            return;
+        }
+
         const fullMethodName = this.callableRegistry.getMethodNameForClass(
             className,
             methodHeader
         );
-        
+
         console.log(`  Generating method: ${fullMethodName}`);
 
-        // If method has its own generic parameters, handle them here
-        // TODO: Add method-level generic instantiation support
+        // Build params: implicit 'this' + user params
+        const params: FunctionParam[] = [
+            { name: 'this', type: ptrType('class') }
+        ];
+        for (const param of methodHeader.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            params.push({ name: param.name, type: paramType });
+        }
 
-        // Create the LIR function with parameter types resolved
-        const args = this.convertMethodParameters(methodHeader);
-        const returnType = methodHeader.header.returnType
-            ? this.convertTypeWithSubstitution(methodHeader.header.returnType)
-            : undefined;
+        // Return types
+        const returnTypes: IRType[] = [];
+        if (methodHeader.header.returnType) {
+            returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+        }
 
-        const lirFunc = this.program.createFunction(fullMethodName, args, returnType);
+        const lirFunc = this.program.createFunction(
+            fullMethodName, params, returnTypes
+        );
+
+        // Save and set context
         const prevFunction = this.context.currentFunction;
-        this.context.currentFunction = lirFunc;
+        const prevVars = new Map(this.context.variables);
+        const prevTemp = this.context.tempCounter;
+        const prevLabel = this.context.labelCounter;
+        const prevScope = this.context.scopeDepth;
 
-        // Reset context for method
+        this.context.currentFunction = lirFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
 
-        // Map parameters to registers
-        for (const arg of methodHeader.header.args) {
-            this.context.variables.set(arg.name, arg.name);
+        // Map 'this' parameter
+        this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+
+        // Map user parameters
+        for (const param of methodHeader.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            this.context.variables.set(param.name, { register: param.name, type: paramType });
         }
 
-        // Generate method body (substitutions already on stack via getType())
+        // Generate body
         if (classMethod.body) {
-            this.generateMethodBody(classMethod.body);
+            this.visitBlockStatement(classMethod.body);
         } else if (classMethod.expr) {
             const result = this.visitExpression(classMethod.expr, undefined);
-            lirFunc.ret(result.register);
+            lirFunc.ret([result.register], [result.type]);
         }
 
+        // Ensure function ends with a return (implicit void return)
+        const lastInst = lirFunc.instructions[lirFunc.instructions.length - 1];
+        if (!lastInst || (lastInst.kind !== 'ret' && lastInst.kind !== 'exit')) {
+            lirFunc.ret();
+        }
+
+        console.log(serializeFunction(lirFunc));
+
+        // Restore context
         this.context.currentFunction = prevFunction;
+        this.context.variables = prevVars;
+        this.context.tempCounter = prevTemp;
+        this.context.labelCounter = prevLabel;
+        this.context.scopeDepth = prevScope;
     }
 
-    /**
-     * Convert method parameters using the substitution stack
-     */
-    private convertMethodParameters(
-        methodHeader: ast.MethodHeader
-    ): FunctionArg[] {
-        return methodHeader.header.args.map((param: ast.FunctionParameter) => ({
-            name: param.name,
-            type: param.type
-                ? this.convertTypeWithSubstitution(param.type)
-                : undefined
-        }));
-    }
+    // ============================================================================
+    // Function Generation
+    // ============================================================================
 
-    /**
-     * Convert an AST type to IR DataType, applying substitutions from the stack
-     * This is THE KEY METHOD that resolves T → u32 or T → SomeObject
-     */
-    private convertTypeWithSubstitution(
-        astType: ast.DataType
-    ): DataType | undefined {
-        // Get the fully resolved type (with all generics substituted and validated)
-        const resolvedType = this.getType(astType);
-        
-        // Now convert the CONCRETE type to IR DataType
-        return this.convertTypeDescriptionToIR(resolvedType);
-    }
-
-    /**
-     * Convert a Type-C TypeDescription to IR DataType
-     * This handles the concrete types after substitution
-     */
-    private convertTypeDescriptionToIR(type: TypeDescription): DataType | undefined {
-        switch (type.kind) {
-            case 'u8': return basicType('u8');
-            case 'u16': return basicType('u16');
-            case 'u32': return basicType('u32');
-            case 'u64': return basicType('u64');
-            case 'i8': return basicType('i8');
-            case 'i16': return basicType('i16');
-            case 'i32': return basicType('i32');
-            case 'i64': return basicType('i64');
-            case 'f32': return basicType('f32');
-            case 'f64': return basicType('f64');
-            case 'bool': return basicType('bool');
-            case 'string': return basicType('string');
-            case 'array': {
-                const elementType = this.convertTypeDescriptionToIR((type as any).elementType);
-                return elementType ? arrayType(elementType) : undefined;
+    private generateFunctions(node: ast.Module | ast.NamespaceDecl): void {
+        for (const n of node.definitions) {
+            if (ast.isFunctionDeclaration(n)) {
+                if (n.genericParameters && n.genericParameters.length > 0) {
+                    this.generateGenericFunctionInstantiations(n);
+                } else {
+                    this.visitFunctionDeclaration(n);
+                }
             }
-            case 'nullable': {
-                const baseType = this.convertTypeDescriptionToIR((type as any).baseType);
-                return baseType ? nullableType(baseType) : undefined;
-            }
-            case 'struct':
-            case 'class':
-                return basicType('struct'); // Or however you represent objects
-            default:
-                return undefined;
         }
     }
 
-    private getNodeIRType(node: AstNode) {
-        const nodetype = this.getType(node);
-        return this.convertTypeDescriptionToIR(nodetype)
-    }
+    private generateGenericFunctionInstantiations(funcDecl: ast.FunctionDeclaration): void {
+        const allInstantiations = this.monoMorph.getAllFunctionInstantiations();
+        const funcInstantiations = allInstantiations.filter(
+            inst => inst.declaration === funcDecl
+        );
 
-    /**
-     * Generate method body (substitutions already on stack via getType())
-     */
-    private generateMethodBody(
-        body: ast.BlockStatement
-    ): void {
-        this.enterScope();
-        for (const stmt of body.statements) {
-            this.visitStatement(stmt);
-        }
-        this.exitScope();
-    }
-
-    /**
-     * Check if a type is a value type (vs reference type)
-     */
-    private isValueType(type: TypeDescription): boolean {
-        const kind = type.kind;
-        return kind === 'u8' || kind === 'u16' || kind === 'u32' || kind === 'u64' ||
-               kind === 'i8' || kind === 'i16' || kind === 'i32' || kind === 'i64' ||
-               kind === 'f32' || kind === 'f64' || kind === 'bool';
-    }
-
-    /**
-     * Helper to create a class key similar to MonomorphizationRegistry
-     */
-    private makeClassKey(
-        classDecl: ast.TypeDeclaration,
-        substitutions: Map<string, TypeDescription>
-    ): string {
-        if (substitutions.size === 0) {
-            return classDecl.name;
-        }
-        
-        const typeArgStrings = classDecl.genericParameters
-            .map(param => {
-                const type = substitutions.get(param.name);
-                return type ? type.toString() : param.name;
+        for (const instantiation of funcInstantiations) {
+            const substitutions = new Map<string, TypeDescription>();
+            funcDecl.genericParameters.forEach((param: ast.GenericType, index: number) => {
+                if (index < instantiation.typeArgs.length) {
+                    substitutions.set(param.name, instantiation.typeArgs[index]);
+                }
             });
-            
-        return `${classDecl.name}<${typeArgStrings.join(',')}>`;
-    }
 
-    // ============================================================================
-    // Declarations
-    // ============================================================================
-
-    private generateFunctions(node: ast.Module | ast.NamespaceDecl) {
-        for( const n of node.definitions) {
-            if(ast.isFunctionDeclaration(n)) {
-                this.visitFunctionDeclaration(n)
+            this.pushSubstitutions(substitutions);
+            try {
+                const funcName = this.callableRegistry.getGenericFunctionName(
+                    funcDecl,
+                    instantiation.typeArgs
+                );
+                this.visitFunctionDeclarationWithName(funcDecl, funcName);
+            } finally {
+                this.popSubstitutions();
             }
         }
     }
 
     private visitFunctionDeclaration(node: ast.FunctionDeclaration): void {
-        // Use callable registry for function name mangling
-        // For generic functions, this should be called with specific type args
         const funcName = this.C(node);
-        const args = this.convertFunctionParameters(node.header.args);
-        const returnType = node.header.returnType
-            ? this.convertType(node.header.returnType)
-            : undefined;
+        this.visitFunctionDeclarationWithName(node, funcName);
+    }
 
-        // Create LIR function
-        const lirFunc = this.program.createFunction(funcName, args, returnType);
+    private visitFunctionDeclarationWithName(node: ast.FunctionDeclaration, funcName: string): void {
+        // Build params
+        const params: FunctionParam[] = node.header.args.map(param => ({
+            name: param.name,
+            type: param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType()
+        }));
+
+        // Return types
+        const returnTypes: IRType[] = [];
+        if (node.header.returnType) {
+            const retTd = this.getType(node.header.returnType);
+            if (isTupleType(retTd)) {
+                for (const elem of retTd.elementTypes) {
+                    returnTypes.push(this.convertTypeDescriptionToIR(elem));
+                }
+            } else {
+                returnTypes.push(this.convertTypeDescriptionToIR(retTd));
+            }
+        }
+
+        const isCoroutine = node.fnType === 'cfn';
+        const lirFunc = this.program.createFunction(
+            funcName, params, returnTypes,
+            { isCoroutine }
+        );
+
+        // Save and set context
         const prevFunction = this.context.currentFunction;
-        this.context.currentFunction = lirFunc;
+        const prevVars = new Map(this.context.variables);
+        const prevTemp = this.context.tempCounter;
+        const prevLabel = this.context.labelCounter;
+        const prevScope = this.context.scopeDepth;
 
-        // Reset context for function
+        this.context.currentFunction = lirFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
 
         // Map parameters to registers
-        for (const arg of node.header.args) {
-            this.context.variables.set(arg.name, arg.name);
+        for (const param of node.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            this.context.variables.set(param.name, { register: param.name, type: paramType });
         }
 
-        // Generate function body
+        // Generate body
         if (node.body) {
             this.visitBlockStatement(node.body);
         } else if (node.expr) {
-            // Expression-bodied function
             const result = this.visitExpression(node.expr, undefined);
-            lirFunc.ret(result.register);
+            lirFunc.ret([result.register], [result.type]);
         }
 
-        console.log(serializeFunction(this.context.currentFunction));
-        // Restore previous context
+        // Ensure function ends with a return (implicit void return)
+        const lastInst = lirFunc.instructions[lirFunc.instructions.length - 1];
+        if (!lastInst || (lastInst.kind !== 'ret' && lastInst.kind !== 'exit')) {
+            lirFunc.ret();
+        }
+
+        console.log(serializeFunction(lirFunc));
+
+        // Restore context
         this.context.currentFunction = prevFunction;
+        this.context.variables = prevVars;
+        this.context.tempCounter = prevTemp;
+        this.context.labelCounter = prevLabel;
+        this.context.scopeDepth = prevScope;
     }
+
     // ============================================================================
     // Statements
     // ============================================================================
@@ -673,9 +1105,9 @@ export class LIRGenerator {
         } else if (ast.isMatchStatement(node)) {
             this.visitMatchStatement(node);
         } else if (ast.isBreakStatement(node)) {
-            this.visitBreakStatement(node);
+            this.visitBreakStatement();
         } else if (ast.isContinueStatement(node)) {
-            this.visitContinueStatement(node);
+            this.visitContinueStatement();
         } else if (ast.isBlockStatement(node)) {
             this.visitBlockStatement(node);
         } else if (ast.isFunctionDeclarationStatement(node)) {
@@ -683,177 +1115,351 @@ export class LIRGenerator {
         }
     }
 
+    // ---- Variable Declaration ----
+
     private visitLocalVariableDeclaration(node: ast.VariableDeclarationStatement): void {
         for (const varDecl of node.declarations.variables) {
-            if (ast.isVariableDeclaration(varDecl) && varDecl.initializer) {
+            if (ast.isVariableDeclSingle(varDecl) && varDecl.initializer) {
                 const result = this.visitExpression(varDecl.initializer, undefined);
-                
-                // Get the fully resolved type (with all generics substituted automatically by getType)
-                const resolvedVarType = this.getType(varDecl);
-                
-                // Generate the appropriate IR instruction based on the CONCRETE type
-                const varReg = this.allocateVariable(varDecl.name);
-                
-                // Choose the right instruction based on the concrete type
-                if (this.isValueType(resolvedVarType)) {
-                    // For value types (u32, f64, etc.), use direct assignment
-                    this.context.currentFunction?.set(varReg, result.register);
-                } else {
-                    // For reference types (objects, arrays), might need ref counting or other logic
-                    this.context.currentFunction?.set(varReg, result.register);
-                    // Could add: this.context.currentFunction?.addRef(varReg);
-                }
+                const varType = this.getNodeIRType(varDecl);
+                const varReg = this.allocateVariable(varDecl.name, varType);
+                this.func().mov(varReg, result.register, varType);
+            } else if (ast.isVariableDeclTupleDestructuring(varDecl) && varDecl.initializer) {
+                this.visitTupleDestructuring(varDecl);
             }
-            // TODO: Handle destructuring patterns
         }
     }
+
+    /**
+     * Handle tuple destructuring: let (x, y) = someCall()
+     * Tuples in Type-C are only for function returns, so the initializer
+     * should be a function call that returns multiple values.
+     */
+    private visitTupleDestructuring(varDecl: ast.VariableDeclTupleDestructuring): void {
+        const f = this.func();
+        const elements = varDecl.elements;
+
+        // Get the type of the initializer — should be a TupleType
+        const initTd = this.getType(varDecl.initializer!);
+
+        // Determine element types from the tuple type
+        const elementTypes: IRType[] = [];
+        if (isTupleType(initTd)) {
+            for (const elemTd of initTd.elementTypes) {
+                elementTypes.push(this.convertTypeDescriptionToIR(elemTd));
+            }
+        } else {
+            // Not a tuple type — fall back to evaluating as single value
+            const result = this.visitExpression(varDecl.initializer!, undefined);
+            if (elements.length > 0 && elements[0].name) {
+                const varReg = this.allocateVariable(elements[0].name, result.type);
+                f.mov(varReg, result.register, result.type);
+            }
+            return;
+        }
+
+        // Generate the function call with multiple dest registers
+        const init = varDecl.initializer!;
+        if (ast.isFunctionCall(init)) {
+            // Direct call: generate with multiple dests
+            const dests: VReg[] = elements.map(() => this.tmp());
+            const retTypes = elementTypes;
+
+            // Evaluate arguments
+            const argRegs: VReg[] = [];
+            const argTypes: IRType[] = [];
+            if (init.args) {
+                for (const arg of init.args) {
+                    const argResult = this.visitExpression(arg, undefined);
+                    argRegs.push(argResult.register);
+                    argTypes.push(argResult.type);
+                }
+            }
+
+            // Determine call target
+            if (ast.isMemberAccess(init.expr)) {
+                const memberAccess = init.expr;
+                const obj = this.visitExpression(memberAccess.expr, undefined);
+                const memberRef = memberAccess.element?.ref;
+                const objTd = this.getType(memberAccess.expr);
+                const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+                if ((isClassType(resolvedObjTd) || isInterfaceType(resolvedObjTd)) && memberRef) {
+                    const methodName = this.getReferenceName(memberRef);
+                    const methodId = this.getMethodId(resolvedObjTd, methodName);
+                    f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+                } else {
+                    f.call(dests, 'unknown', argRegs, argTypes, retTypes);
+                }
+            } else if (ast.isQualifiedReference(init.expr)) {
+                const ref = init.expr.reference?.ref;
+                if (ref && ast.isFunctionDeclaration(ref)) {
+                    const funcName = this.C(ref);
+                    f.call(dests, funcName, argRegs, argTypes, retTypes);
+                } else {
+                    const varInfo = this.lookupVariable(this.getReferenceName(ref));
+                    if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                        f.callClosure(dests, varInfo.register, argRegs, argTypes, retTypes);
+                    } else {
+                        f.call(dests, 'unknown', argRegs, argTypes, retTypes);
+                    }
+                }
+            } else {
+                const funcExpr = this.visitExpression(init.expr, undefined);
+                if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
+                    f.callClosure(dests, funcExpr.register, argRegs, argTypes, retTypes);
+                } else {
+                    f.call(dests, funcExpr.register, argRegs, argTypes, retTypes);
+                }
+            }
+
+            // Map each dest register to the corresponding variable
+            for (let i = 0; i < elements.length && i < dests.length; i++) {
+                const elem = elements[i];
+                if (elem.name) {
+                    const varType = i < elementTypes.length ? elementTypes[i] : voidType();
+                    const varReg = this.allocateVariable(elem.name, varType);
+                    f.mov(varReg, dests[i], varType);
+                }
+            }
+        } else {
+            // Initializer is not a function call — evaluate and try to unpack
+            // (This shouldn't normally happen since tuples are only for returns)
+            const result = this.visitExpression(init, undefined);
+            if (elements.length > 0 && elements[0].name) {
+                const varType = elementTypes.length > 0 ? elementTypes[0] : result.type;
+                const varReg = this.allocateVariable(elements[0].name, varType);
+                f.mov(varReg, result.register, varType);
+            }
+        }
+    }
+
+    // ---- Return ----
 
     private visitReturnStatement(node: ast.ReturnStatement): void {
         if (node.expr) {
             const result = this.visitExpression(node.expr, undefined);
-            this.context.currentFunction?.ret(result.register);
+            // Check if returning a tuple expression
+            if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+                // Multi-value return handled in visitTupleExpression
+                // result is the first value; we need all values
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of node.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                this.func().ret(values, types);
+            } else {
+                this.func().ret([result.register], [result.type]);
+            }
         } else {
-            this.context.currentFunction?.ret();
+            this.func().ret();
         }
     }
 
-    private visitIfStatement(node: ast.IfStatement): void {
-        const func = this.context.currentFunction;
-        if (!func) return;
+    // ---- Control Flow Statements ----
 
+    private visitIfStatement(node: ast.IfStatement): void {
+        const f = this.func();
         const condition = this.visitExpression(node.condition, undefined);
         const thenLabel = this.generateLabel('then');
         const elseLabel = this.generateLabel('else');
         const endLabel = this.generateLabel('endif');
 
-        // Branch on condition
-        func.br(condition.register, thenLabel, elseLabel);
+        f.br(condition.register, thenLabel, elseLabel);
 
-        // Then branch
-        func.label(thenLabel);
+        f.label(thenLabel);
         this.visitBlockStatement(node.body);
-        func.jmp(endLabel);
+        f.jmp(endLabel);
 
-        // Else branch
-        func.label(elseLabel);
+        f.label(elseLabel);
         if (node.elseBody) {
             this.visitBlockStatement(node.elseBody);
         } else if (node.elseIf && node.elseIf.length > 0) {
-            // TODO: Handle else-if chain
             for (const elseIf of node.elseIf) {
                 this.visitIfStatement(elseIf);
             }
         }
-        func.jmp(endLabel);
+        f.jmp(endLabel);
 
-        // End label
-        func.label(endLabel);
+        f.label(endLabel);
     }
 
     private visitWhileStatement(node: ast.WhileStatement): void {
-        const func = this.context.currentFunction;
-        if (!func) return;
-
+        const f = this.func();
         const loopStart = this.generateLabel('while_start');
         const loopBody = this.generateLabel('while_body');
         const loopEnd = this.generateLabel('while_end');
 
         this.pushLoop(loopEnd, loopStart);
 
-        func.label(loopStart);
+        f.label(loopStart);
         const condition = this.visitExpression(node.condition, undefined);
-        func.br(condition.register, loopBody, loopEnd);
+        f.br(condition.register, loopBody, loopEnd);
 
-        func.label(loopBody);
+        f.label(loopBody);
         this.visitBlockStatement(node.body);
-        func.jmp(loopStart);
+        f.jmp(loopStart);
 
-        func.label(loopEnd);
+        f.label(loopEnd);
         this.popLoop();
     }
 
     private visitDoWhileStatement(node: ast.DoWhileStatement): void {
-        const func = this.context.currentFunction;
-        if (!func) return;
-
+        const f = this.func();
         const loopStart = this.generateLabel('do_start');
         const loopCheck = this.generateLabel('do_check');
         const loopEnd = this.generateLabel('do_end');
 
         this.pushLoop(loopEnd, loopCheck);
 
-        func.label(loopStart);
+        f.label(loopStart);
         this.visitBlockStatement(node.body);
 
-        func.label(loopCheck);
+        f.label(loopCheck);
         const condition = this.visitExpression(node.condition, undefined);
-        func.br(condition.register, loopStart, loopEnd);
+        f.br(condition.register, loopStart, loopEnd);
 
-        func.label(loopEnd);
+        f.label(loopEnd);
         this.popLoop();
     }
 
     private visitForStatement(node: ast.ForStatement): void {
-        const func = this.context.currentFunction;
-        if (!func) return;
-
+        const f = this.func();
         const loopStart = this.generateLabel('for_start');
         const loopBody = this.generateLabel('for_body');
         const loopUpdate = this.generateLabel('for_update');
         const loopEnd = this.generateLabel('for_end');
 
         this.pushLoop(loopEnd, loopUpdate);
+        this.enterScope();
 
-        // Initialization
         if (node.init) {
             this.visitStatement(node.init);
         }
 
-        // Condition check
-        func.label(loopStart);
+        f.label(loopStart);
         if (node.condition) {
             const condition = this.visitExpression(node.condition, undefined);
-            func.br(condition.register, loopBody, loopEnd);
+            f.br(condition.register, loopBody, loopEnd);
+        } else {
+            f.jmp(loopBody);
         }
 
-        // Loop body
-        func.label(loopBody);
+        f.label(loopBody);
         this.visitBlockStatement(node.body);
 
-        // Update
-        func.label(loopUpdate);
+        f.label(loopUpdate);
         if (node.update) {
             this.visitExpression(node.update, undefined);
         }
-        func.jmp(loopStart);
+        f.jmp(loopStart);
 
-        func.label(loopEnd);
+        f.label(loopEnd);
+        this.exitScope();
         this.popLoop();
     }
 
     private visitForeachStatement(node: ast.ForeachStatement): void {
-        // TODO: Implement foreach loop
-        // May need different handling for ForRangeIterator vs ForEachIterator
-        console.warn('Foreach statement not yet implemented');
+        const f = this.func();
+        this.enterScope();
+
+        if (ast.isForEachIterator(node)) {
+            // foreach (item in collection)
+            const collection = this.visitExpression(node.collection, undefined);
+            const lenReg = this.tmp();
+            f.arrayLength(lenReg, collection.register);
+
+            const idxReg = this.allocateVariable(`%foreach_idx`, scalarType('u64'));
+            f.constInt(idxReg, 0, 'u64');
+
+            const stepReg = this.tmp();
+            f.constInt(stepReg, 1, 'u64');
+
+            const loopStart = this.generateLabel('foreach_start');
+            const loopBody = this.generateLabel('foreach_body');
+            const loopEnd = this.generateLabel('foreach_end');
+
+            this.pushLoop(loopEnd, loopStart);
+
+            f.label(loopStart);
+            const cmpReg = this.tmp();
+            f.cmpLt(cmpReg, idxReg, lenReg, 'u64');
+            f.br(cmpReg, loopBody, loopEnd);
+
+            f.label(loopBody);
+
+            // Get element type from the collection's TypeDescription
+            const collTd = this.getType(node.collection);
+            let elemIRType: IRType = voidType();
+            if (isArrayType(collTd)) {
+                elemIRType = this.convertTypeDescriptionToIR(collTd.elementType);
+            }
+
+            // Bind loop variable
+            const varName = node.valueVar.name ?? '_';
+            const elemReg = this.allocateVariable(varName, elemIRType);
+            f.arrayGet(elemReg, collection.register, idxReg, elemIRType);
+
+            this.visitBlockStatement(node.body);
+
+            // Increment index
+            f.add(idxReg, idxReg, stepReg, 'u64');
+            f.jmp(loopStart);
+
+            f.label(loopEnd);
+            this.popLoop();
+        } else if (ast.isForRangeIterator(node)) {
+            // foreach (i in start..end)
+            const startResult = this.visitExpression(node.start, undefined);
+            const endResult = this.visitExpression(node.end, undefined);
+
+            const numType = this.extractNumericType(startResult.type);
+
+            const stepReg = this.tmp();
+            f.constInt(stepReg, 1, numType as IntType);
+
+            const varName = node.valueVar.name ?? '_';
+            const iterReg = this.allocateVariable(varName, startResult.type);
+            f.mov(iterReg, startResult.register, startResult.type);
+
+            const loopStart = this.generateLabel('forrange_start');
+            const loopBody = this.generateLabel('forrange_body');
+            const loopEnd = this.generateLabel('forrange_end');
+
+            this.pushLoop(loopEnd, loopStart);
+
+            f.label(loopStart);
+            const cmpReg = this.tmp();
+            f.cmpLt(cmpReg, iterReg, endResult.register, numType);
+            f.br(cmpReg, loopBody, loopEnd);
+
+            f.label(loopBody);
+            this.visitBlockStatement(node.body);
+
+            f.add(iterReg, iterReg, stepReg, numType);
+            f.jmp(loopStart);
+
+            f.label(loopEnd);
+            this.popLoop();
+        }
+
+        this.exitScope();
     }
 
-    private visitMatchStatement(node: ast.MatchStatement): void {
-        // TODO: Implement pattern matching
-        // Will need to generate comparison logic for each pattern
-        console.warn('Match statement not yet implemented');
-    }
-
-    private visitBreakStatement(node: ast.BreakStatement): void {
+    private visitBreakStatement(): void {
         const loop = this.currentLoop();
-        if (loop && this.context.currentFunction) {
-            this.context.currentFunction.jmp(loop.breakLabel);
+        if (loop) {
+            this.func().jmp(loop.breakLabel);
         }
     }
 
-    private visitContinueStatement(node: ast.ContinueStatement): void {
+    private visitContinueStatement(): void {
         const loop = this.currentLoop();
-        if (loop && this.context.currentFunction) {
-            this.context.currentFunction.jmp(loop.continueLabel);
+        if (loop) {
+            this.func().jmp(loop.continueLabel);
         }
     }
 
@@ -861,510 +1467,2306 @@ export class LIRGenerator {
     // Expressions
     // ============================================================================
 
-    private visitExpression(node: ast.Expression, varname?: string): ExpressionResult {
+    private visitExpression(node: ast.Expression, varname: string | undefined): ExpressionResult {
         // Literal expressions
         if (ast.isDecimalIntegerLiteral(node) ||
             ast.isHexadecimalIntegerLiteral(node) ||
             ast.isBinaryIntegerLiteral(node) ||
             ast.isOctalIntegerLiteral(node)) {
-            return this.visitIntegerLiteral(node, varname);
+            return this.visitIntegerLiteral(node);
         }
         if (ast.isFloatLiteral(node) || ast.isDoubleLiteral(node)) {
-            return this.visitFloatingPointLiteral(node, varname);
+            return this.visitFloatingPointLiteral(node);
         }
         if (ast.isTrueBooleanLiteral(node) || ast.isFalseBooleanLiteral(node)) {
-            return this.visitBooleanLiteral(node, varname);
+            return this.visitBooleanLiteral(node);
         }
         if (ast.isStringLiteralExpression(node)) {
-            return this.visitStringLiteral(node, varname);
+            return this.visitStringLiteral(node);
         }
         if (ast.isNullLiteralExpression(node)) {
-            return this.visitNullLiteral(node, varname);
+            return this.visitNullLiteral();
         }
 
         // Binary operations
         if (ast.isBinaryExpression(node)) {
-            return this.visitBinaryExpression(node, varname);
+            return this.visitBinaryExpression(node);
         }
 
         // Unary operations
         if (ast.isUnaryExpression(node)) {
-            return this.visitUnaryExpression(node, varname);
+            return this.visitUnaryExpression(node);
         }
 
         // Variable reference
         if (ast.isQualifiedReference(node)) {
-            return this.visitQualifiedReference(node, varname);
+            return this.visitQualifiedReference(node);
         }
 
         // Function call
         if (ast.isFunctionCall(node)) {
-            return this.visitFunctionCall(node, varname);
+            return this.visitFunctionCall(node);
         }
 
         // Member access
         if (ast.isMemberAccess(node)) {
-            return this.visitMemberAccess(node, varname);
+            return this.visitMemberAccess(node);
         }
 
-        // Array/Index access
+        // Index access
         if (ast.isIndexAccess(node)) {
-            return this.visitIndexAccess(node, varname);
+            return this.visitIndexAccess(node);
         }
 
         // Array construction
         if (ast.isArrayConstructionExpression(node)) {
-            return this.visitArrayConstruction(node, varname);
+            return this.visitArrayConstruction(node);
         }
 
         // Struct construction
         if (ast.isNamedStructConstructionExpression(node) ||
             ast.isAnonymousStructConstructionExpression(node)) {
-            return this.visitStructConstruction(node, varname);
+            return this.visitStructConstruction(node);
         }
 
         // Control flow expressions
         if (ast.isConditionalExpression(node)) {
-            return this.visitConditionalExpression(node, varname);
+            return this.visitConditionalExpression(node);
         }
 
         if (ast.isMatchExpression(node)) {
-            return this.visitMatchExpression(node, varname);
+            return this.visitMatchExpression(node);
         }
 
         if (ast.isLetInExpression(node)) {
-            return this.visitLetInExpression(node, varname);
+            return this.visitLetInExpression(node);
         }
 
         // Special expressions
         if (ast.isThisExpression(node)) {
-            return this.visitThisExpression(node, varname);
+            return this.visitThisExpression();
         }
 
         if (ast.isNewExpression(node)) {
-            return this.visitNewExpression(node, varname);
+            return this.visitNewExpression(node);
         }
 
         if (ast.isLambdaExpression(node)) {
-            return this.visitLambdaExpression(node, varname);
+            return this.visitLambdaExpression(node);
         }
 
         if (ast.isDoExpression(node)) {
-            return this.visitDoExpression(node, varname);
+            return this.visitDoExpression(node);
         }
 
         if (ast.isThrowExpression(node)) {
-            return this.visitThrowExpression(node, varname);
+            return this.visitThrowExpression(node);
         }
 
         if (ast.isYieldExpression(node)) {
-            return this.visitYieldExpression(node, varname);
+            return this.visitYieldExpression(node);
         }
 
         if (ast.isCoroutineExpression(node)) {
-            return this.visitCoroutineExpression(node, varname);
+            return this.visitCoroutineExpression(node);
         }
 
         if (ast.isTupleExpression(node)) {
-            return this.visitTupleExpression(node, varname);
+            return this.visitTupleExpression(node);
         }
 
         // Type operations
         if (ast.isInstanceCheckExpression(node)) {
-            return this.visitInstanceCheckExpression(node, varname);
+            return this.visitInstanceCheckExpression(node);
         }
 
         if (ast.isTypeCastExpression(node)) {
-            return this.visitTypeCastExpression(node, varname);
+            return this.visitTypeCastExpression(node);
         }
 
-        // Default: return a placeholder
+        // Postfix operations
+        if (ast.isPostfixOp(node)) {
+            return this.visitPostfixOp(node);
+        }
+
+        // Denull expression
+        if (ast.isDenullExpression(node)) {
+            return this.visitDenullExpression(node);
+        }
+
+        // Index set: arr[i] = value (as expression)
+        if (ast.isIndexSet(node)) {
+            return this.visitIndexSet(node);
+        }
+
+        // Reverse index access: arr[-i]
+        if (ast.isReverseIndexAccess(node)) {
+            return this.visitReverseIndexAccess(node);
+        }
+
+        // Reverse index set: arr[-i] = value
+        if (ast.isReverseIndexSet(node)) {
+            return this.visitReverseIndexSet(node);
+        }
+
+        // Object update: obj.{ field: newValue }
+        if (ast.isObjectUpdate(node)) {
+            return this.visitObjectUpdate(node);
+        }
+
+        // Wildcard expression: _
+        if (ast.isWildcardExpression(node)) {
+            return this.visitWildcardExpression();
+        }
+
+        // Unreachable expression
+        if (ast.isUnreachableExpression(node)) {
+            return this.visitUnreachableExpression();
+        }
+
+        // Mutate expression: mutate expr
+        if (ast.isMutateExpression(node)) {
+            return this.visitMutateExpression(node);
+        }
+
+        // Binary string literal: b"..."
+        if (ast.isBinaryStringLiteralExpression(node)) {
+            return this.visitBinaryStringLiteral(node);
+        }
+
+        // Default: return undef
         const temp = this.tmp();
-        this.context.currentFunction?.undef(temp);
-        return { register: temp };
+        const nodeType = this.getNodeIRType(node);
+        this.func().undef(temp, nodeType);
+        return { register: temp, type: nodeType };
     }
 
-    private visitIntegerLiteral(node: ast.IntegerLiteral, varname?: string): ExpressionResult {
+    // ============================================================================
+    // Literals
+    // ============================================================================
+
+    private visitIntegerLiteral(node: ast.IntegerLiteral): ExpressionResult {
         const temp = this.tmp();
         const value = this.parseIntegerLiteral(node.value);
-        const type = this.convertTypeDescriptionToIR(this.getType(node));
-        this.context.currentFunction?.const(temp, intLiteral(value), type);
-        return { register: temp, type: type };
+        const irType = this.getNodeIRType(node);
+        const intType = this.extractNumericType(irType) as IntType;
+        this.func().constInt(temp, value, intType);
+        return { register: temp, type: irType };
     }
 
-    private visitFloatingPointLiteral(node: ast.FloatingPointLiteral, varname?: string): ExpressionResult {
+    private visitFloatingPointLiteral(node: ast.FloatingPointLiteral): ExpressionResult {
         const temp = this.tmp();
         const value = parseFloat(node.value);
-        const type = ast.isFloatLiteral(node) ? basicType('f32') : basicType('f64');
-        this.context.currentFunction?.const(temp, floatLiteral(value), type);
-        return { register: temp, type };
+        const irType = this.getNodeIRType(node);
+        const floatType = (irType.tag === 'scalar' && irType.scalar === 'f64') ? 'f64' : 'f32';
+        this.func().constFloat(temp, value, floatType as FloatType);
+        return { register: temp, type: irType };
     }
 
-    private visitBooleanLiteral(node: ast.BooleanLiteral, varname?: string): ExpressionResult {
+    private visitBooleanLiteral(node: ast.BooleanLiteral): ExpressionResult {
         const temp = this.tmp();
         const value = ast.isTrueBooleanLiteral(node);
-        this.context.currentFunction?.const(temp, boolLiteral(value), basicType('bool'));
-        return { register: temp, type: basicType('bool') };
+        this.func().constBool(temp, value);
+        return { register: temp, type: scalarType('bool') };
     }
 
-    private visitStringLiteral(node: ast.StringLiteralExpression, varname?: string): ExpressionResult {
+    private visitStringLiteral(node: ast.StringLiteralExpression): ExpressionResult {
         const temp = this.tmp();
-        const value = node.value; // Remove quotes
-        this.context.currentFunction?.const(temp, stringLiteral(value), basicType('string'));
-        return { register: temp, type: basicType('string') };
+        this.func().strConst(temp, node.value);
+        this.program.addStringConstant(node.value);
+        return { register: temp, type: ptrType('string') };
     }
 
-    private visitNullLiteral(node: ast.NullLiteralExpression, varname?: string): ExpressionResult {
+    private visitNullLiteral(): ExpressionResult {
         const temp = this.tmp();
-        this.context.currentFunction?.const(temp, intLiteral(0)); // Represent null as 0
-        return { register: temp };
+        this.func().constNull(temp);
+        return { register: temp, type: ptrType('struct') };
     }
 
-    private visitBinaryExpression(node: ast.BinaryExpression, varname?: string): ExpressionResult {
+    // ============================================================================
+    // Binary & Unary Expressions
+    // ============================================================================
+
+    private visitBinaryExpression(node: ast.BinaryExpression): ExpressionResult {
+        const op = node.op;
+
+        // Assignment operators
+        if (op === '=' || op === '+=' || op === '-=' || op === '*=' || op === '/=' ||
+            op === '%=' || op === '<<=' || op === '>>=' || op === '&=' || op === '|=' || op === '^=') {
+            return this.visitAssignmentExpression(node);
+        }
+
+        // Null coalescing
+        if (op === '??') {
+            return this.visitNullCoalescing(node);
+        }
+
+        // Logical short-circuit
+        if (op === '&&') {
+            return this.visitLogicalAnd(node);
+        }
+        if (op === '||') {
+            return this.visitLogicalOr(node);
+        }
+
+        // Standard binary: evaluate both sides
         const left = this.visitExpression(node.left, undefined);
         const right = this.visitExpression(node.right, undefined);
-        const temp = this.tmp();
-        const op = this.convertBinaryOp(node.op);
 
-        this.context.currentFunction?.binaryOp(temp, op, left.register, right.register);
-        return { register: temp };
-    }
-
-    private visitUnaryExpression(node: ast.UnaryExpression, varname?: string): ExpressionResult {
-        const operand = this.visitExpression(node.expr, undefined);
-        const temp = this.tmp();
-        const op = this.convertUnaryOp(node.op);
-
-        this.context.currentFunction?.unaryOp(temp, op, operand.register);
-        return { register: temp };
-    }
-
-    private visitQualifiedReference(node: ast.QualifiedReference, varname?: string): ExpressionResult {
-        // Look up variable in context
-        const ref = node.reference?.ref;
-        this.assert(ref !== undefined, "Invalid refrence");
-
-        // Check if straight symbol: arg, vardecl
-        if(ast.isFunctionParameter(ref) || ast.isVariableDeclSingle(ref)) {
-            const varName = this.getReferenceName(ref);
-            let register: string = ""
-            // We need to check if the variable is global
-            if(ast.isVariableDeclSingle(ref) && ast.isModule(ref.$container?.$container?.$container) || ast.isNamespaceDecl(ref.$container?.$container?.$container)) {
-                register = this.tmp();
-                const type = this.getNodeIRType(ref);
-                this.context.currentFunction?.globalLoad(register, this.G(ref), type);
-            }
-            else {
-                // No load instruction needed, variables/arguments live in regsiters.
-                register = this.context.variables.get(varName) ?? varName;
-            }
-            return { register };
+        // Check for operator overload on the left operand
+        const leftTd = this.getType(node.left);
+        const rightTd = this.getType(node.right);
+        const overload = this.resolveOperatorMethod(leftTd, op, [rightTd]);
+        if (overload) {
+            return this.emitOperatorCall(
+                left, overload.methodId, overload.returnType,
+                [right.register], [right.type]
+            );
         }
-    
-        throw "Not implement for "+ref?.$type;
+
+        const temp = this.tmp();
+
+        // Arithmetic (primitive fallback)
+        if (op === '+') {
+            if (this.isStringIRType(left.type)) {
+                this.func().strConcat(temp, left.register, right.register, right.type);
+                return { register: temp, type: ptrType('string') };
+            }
+            const numType = this.extractNumericType(left.type);
+            this.func().add(temp, left.register, right.register, numType);
+            return { register: temp, type: left.type };
+        }
+        if (op === '-') {
+            const numType = this.extractNumericType(left.type);
+            this.func().sub(temp, left.register, right.register, numType);
+            return { register: temp, type: left.type };
+        }
+        if (op === '*') {
+            const numType = this.extractNumericType(left.type);
+            this.func().mul(temp, left.register, right.register, numType);
+            return { register: temp, type: left.type };
+        }
+        if (op === '/') {
+            const numType = this.extractNumericType(left.type);
+            this.func().div(temp, left.register, right.register, numType);
+            return { register: temp, type: left.type };
+        }
+        if (op === '%') {
+            const numType = this.extractNumericType(left.type);
+            this.func().mod(temp, left.register, right.register, numType);
+            return { register: temp, type: left.type };
+        }
+
+        // Bitwise
+        if (op === '<<') {
+            this.func().shl(temp, left.register, right.register);
+            return { register: temp, type: left.type };
+        }
+        if (op === '>>') {
+            const signed = isSignedInt(left.type);
+            this.func().shr(temp, left.register, right.register, signed);
+            return { register: temp, type: left.type };
+        }
+        if (op === '&') {
+            this.func().band(temp, left.register, right.register);
+            return { register: temp, type: left.type };
+        }
+        if (op === '|') {
+            this.func().bor(temp, left.register, right.register);
+            return { register: temp, type: left.type };
+        }
+        if (op === '^') {
+            this.func().bxor(temp, left.register, right.register);
+            return { register: temp, type: left.type };
+        }
+
+        // Comparison
+        const boolType = scalarType('bool');
+        if (op === '<') {
+            const cmpType = this.extractNumericType(left.type);
+            this.func().cmpLt(temp, left.register, right.register, cmpType);
+            return { register: temp, type: boolType };
+        }
+        if (op === '>') {
+            const cmpType = this.extractNumericType(left.type);
+            this.func().cmpGt(temp, left.register, right.register, cmpType);
+            return { register: temp, type: boolType };
+        }
+        if (op === '<=') {
+            const cmpType = this.extractNumericType(left.type);
+            this.func().cmpLe(temp, left.register, right.register, cmpType);
+            return { register: temp, type: boolType };
+        }
+        if (op === '>=') {
+            const cmpType = this.extractNumericType(left.type);
+            this.func().cmpGe(temp, left.register, right.register, cmpType);
+            return { register: temp, type: boolType };
+        }
+        if (op === '==') {
+            if (this.isStringIRType(left.type)) {
+                this.func().cmpEqStr(temp, left.register, right.register);
+            } else {
+                const cmpType = this.extractCmpType(left.type);
+                this.func().cmpEq(temp, left.register, right.register, cmpType);
+            }
+            return { register: temp, type: boolType };
+        }
+        if (op === '!=') {
+            if (this.isStringIRType(left.type)) {
+                this.func().cmpNeStr(temp, left.register, right.register);
+            } else {
+                const cmpType = this.extractCmpType(left.type);
+                this.func().cmpNe(temp, left.register, right.register, cmpType);
+            }
+            return { register: temp, type: boolType };
+        }
+
+        // Fallback
+        this.func().undef(temp, left.type);
+        return { register: temp, type: left.type };
     }
 
-    private visitFunctionCall(node: ast.FunctionCall, varname?: string): ExpressionResult {
-        const func = this.context.currentFunction;
-        if (!func) return { register: 'undefined' };
+    private visitLogicalAnd(node: ast.BinaryExpression): ExpressionResult {
+        const f = this.func();
+        const left = this.visitExpression(node.left, undefined);
+        const temp = this.tmp();
+        const rhsLabel = this.generateLabel('and_rhs');
+        const endLabel = this.generateLabel('and_end');
 
-        // Evaluate function expression
-        const funcExpr = this.visitExpression(node.expr, undefined);
+        // Short circuit: if left is false, result is false
+        f.br(left.register, rhsLabel, endLabel);
+
+        f.label(rhsLabel);
+        const right = this.visitExpression(node.right, undefined);
+        f.and(temp, left.register, right.register);
+        f.jmp(endLabel);
+
+        f.label(endLabel);
+        // In the false case, temp = left.register (false), in the true case, temp = and result
+        // For simplicity, use and instruction which handles this
+        return { register: temp, type: scalarType('bool') };
+    }
+
+    private visitLogicalOr(node: ast.BinaryExpression): ExpressionResult {
+        const f = this.func();
+        const left = this.visitExpression(node.left, undefined);
+        const temp = this.tmp();
+        const rhsLabel = this.generateLabel('or_rhs');
+        const endLabel = this.generateLabel('or_end');
+
+        // Short circuit: if left is true, result is true
+        f.br(left.register, endLabel, rhsLabel);
+
+        f.label(rhsLabel);
+        const right = this.visitExpression(node.right, undefined);
+        f.or(temp, left.register, right.register);
+        f.jmp(endLabel);
+
+        f.label(endLabel);
+        return { register: temp, type: scalarType('bool') };
+    }
+
+    private visitNullCoalescing(node: ast.BinaryExpression): ExpressionResult {
+        const f = this.func();
+        const left = this.visitExpression(node.left, undefined);
+        const temp = this.tmp();
+        const nullCheckReg = this.tmp();
+        const rhsLabel = this.generateLabel('coalesce_rhs');
+        const endLabel = this.generateLabel('coalesce_end');
+
+        f.isNull(nullCheckReg, left.register);
+        f.br(nullCheckReg, rhsLabel, endLabel);
+
+        // Left is null, use right
+        f.label(rhsLabel);
+        const right = this.visitExpression(node.right, undefined);
+        f.mov(temp, right.register, right.type);
+        f.jmp(endLabel);
+
+        // Left is not null, use left
+        f.label(endLabel);
+        // We need phi here ideally, but for now use mov before branch
+        // Rewrite: emit mov before branches
+        return { register: temp, type: left.type };
+    }
+
+    // ---- Assignment Expression ----
+
+    private visitAssignmentExpression(node: ast.BinaryExpression): ExpressionResult {
+        const op = node.op;
+        const lhs = node.left;
+        const f = this.func();
+
+        if (op === '=') {
+            // Simple assignment
+            const rhs = this.visitExpression(node.right, undefined);
+            this.storeBack(lhs, rhs);
+            return rhs;
+        }
+
+        // Compound assignment: load LHS, compute, store back
+        const lhsResult = this.visitExpression(lhs, undefined);
+        const rhsResult = this.visitExpression(node.right, undefined);
+
+        const baseOp = op.slice(0, -1); // Remove '='
+
+        // Check for operator overload on the base operator
+        const lhsTd = this.getType(lhs);
+        const rhsTd = this.getType(node.right);
+        const overload = this.resolveOperatorMethod(lhsTd, baseOp, [rhsTd]);
+        if (overload) {
+            const result = this.emitOperatorCall(
+                lhsResult, overload.methodId, overload.returnType,
+                [rhsResult.register], [rhsResult.type]
+            );
+            this.storeBack(lhs, result);
+            return result;
+        }
+
+        const temp = this.tmp();
+        const numType = this.extractNumericType(lhsResult.type);
+
+        switch (baseOp) {
+            case '+':
+                if (this.isStringIRType(lhsResult.type)) {
+                    f.strConcat(temp, lhsResult.register, rhsResult.register, rhsResult.type);
+                } else {
+                    f.add(temp, lhsResult.register, rhsResult.register, numType);
+                }
+                break;
+            case '-': f.sub(temp, lhsResult.register, rhsResult.register, numType); break;
+            case '*': f.mul(temp, lhsResult.register, rhsResult.register, numType); break;
+            case '/': f.div(temp, lhsResult.register, rhsResult.register, numType); break;
+            case '%': f.mod(temp, lhsResult.register, rhsResult.register, numType); break;
+            case '<<': f.shl(temp, lhsResult.register, rhsResult.register); break;
+            case '>>': f.shr(temp, lhsResult.register, rhsResult.register, isSignedInt(lhsResult.type)); break;
+            case '&': f.band(temp, lhsResult.register, rhsResult.register); break;
+            case '|': f.bor(temp, lhsResult.register, rhsResult.register); break;
+            case '^': f.bxor(temp, lhsResult.register, rhsResult.register); break;
+            default:
+                f.undef(temp, lhsResult.type);
+        }
+
+        const result: ExpressionResult = { register: temp, type: lhsResult.type };
+        this.storeBack(lhs, result);
+        return result;
+    }
+
+    /**
+     * Store a value back to an LHS expression target
+     */
+    private storeBack(lhs: ast.Expression, value: ExpressionResult): void {
+        const f = this.func();
+
+        if (ast.isQualifiedReference(lhs)) {
+            const ref = lhs.reference?.ref;
+            if (ref && ast.isVariableDeclSingle(ref)) {
+                if (this.isGlobalVar(ref)) {
+                    f.globalStore(this.G(ref), value.register, value.type);
+                } else {
+                    const varInfo = this.lookupVariable(this.getReferenceName(ref));
+                    if (varInfo) {
+                        f.mov(varInfo.register, value.register, value.type);
+                    }
+                }
+            } else if (ref && (ast.isFunctionParameter(ref) || ast.isDestructuringElement(ref) || ast.isIteratorVar(ref) || ast.isVariablePattern(ref))) {
+                const varInfo = this.lookupVariable(this.getReferenceName(ref));
+                if (varInfo) {
+                    f.mov(varInfo.register, value.register, value.type);
+                }
+            } else if (ref && ast.isClassAttributeDecl(ref)) {
+                // Implicit `this.field = value` for bare class field assignment
+                const thisVar = this.lookupVariable('this');
+                if (thisVar) {
+                    const classType = ref.$container; // ClassType AST node
+                    const classTd = this.getType(classType as AstNode);
+                    const resolvedClassTd = isReferenceType(classTd) ? this.typeUtils.resolveIfReference(classTd) : classTd;
+                    const fieldIndex = this.getClassFieldIndex(resolvedClassTd, ref.name);
+                    f.classSet(thisVar.register, fieldIndex, value.register, value.type);
+                }
+            }
+        } else if (ast.isMemberAccess(lhs)) {
+            const obj = this.visitExpression(lhs.expr, undefined);
+            const memberRef = lhs.element?.ref;
+            if (memberRef) {
+                // Determine if struct or class
+                const objTd = this.getType(lhs.expr);
+                const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+                if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
+                    const fieldIndex = this.getStructFieldIndex(resolvedObjTd, this.getReferenceName(memberRef));
+                    f.structSet(obj.register, fieldIndex, value.register, value.type);
+                } else if (isClassType(resolvedObjTd)) {
+                    const fieldIndex = this.getClassFieldIndex(resolvedObjTd, this.getReferenceName(memberRef));
+                    f.classSet(obj.register, fieldIndex, value.register, value.type);
+                }
+            }
+        } else if (ast.isIndexAccess(lhs)) {
+            const array = this.visitExpression(lhs.expr, undefined);
+            if (lhs.indexes && lhs.indexes.length > 0) {
+                const indexResults = lhs.indexes.map(idx => this.visitExpression(idx, undefined));
+                const indexTds = lhs.indexes.map(idx => this.getType(idx));
+                const valueTd = this.getType(lhs); // This would be element type, but for []=, args = [...indexes, value]
+
+                // Check for []= operator overload
+                const objTd = this.getType(lhs.expr);
+                const allArgTds = [...indexTds, valueTd]; // Approximate: pass index types + value type
+                const overload = this.resolveOperatorMethod(objTd, '[]=', allArgTds);
+                if (overload) {
+                    const allArgRegs = [...indexResults.map(r => r.register), value.register];
+                    const allArgIRTypes = [...indexResults.map(r => r.type), value.type];
+                    this.emitOperatorCall(
+                        { register: array.register, type: array.type },
+                        overload.methodId, overload.returnType,
+                        allArgRegs, allArgIRTypes
+                    );
+                } else {
+                    // Primitive array set
+                    f.arraySet(array.register, indexResults[0].register, value.register, value.type);
+                }
+            }
+        }
+    }
+
+    // ---- Unary Expression ----
+
+    private visitUnaryExpression(node: ast.UnaryExpression): ExpressionResult {
+        const operand = this.visitExpression(node.expr, undefined);
+
+        // Check for operator overload on the operand
+        const operandTd = this.getType(node.expr);
+        const overload = this.resolveOperatorMethod(operandTd, node.op, []);
+        if (overload) {
+            return this.emitOperatorCall(
+                operand, overload.methodId, overload.returnType,
+                [], []
+            );
+        }
+
+        const temp = this.tmp();
+        const f = this.func();
+
+        switch (node.op) {
+            case '-': {
+                const numType = this.extractNumericType(operand.type);
+                f.neg(temp, operand.register, numType);
+                return { register: temp, type: operand.type };
+            }
+            case '!': {
+                f.not(temp, operand.register);
+                return { register: temp, type: scalarType('bool') };
+            }
+            case '~': {
+                f.bnot(temp, operand.register);
+                return { register: temp, type: operand.type };
+            }
+            case '+': {
+                // Identity
+                f.mov(temp, operand.register, operand.type);
+                return { register: temp, type: operand.type };
+            }
+            case '++': {
+                // Prefix increment
+                const numType = this.extractNumericType(operand.type);
+                const oneReg = this.tmp();
+                f.constInt(oneReg, 1, numType as IntType);
+                f.add(temp, operand.register, oneReg, numType);
+                this.storeBack(node.expr, { register: temp, type: operand.type });
+                return { register: temp, type: operand.type };
+            }
+            case '--': {
+                // Prefix decrement
+                const numType = this.extractNumericType(operand.type);
+                const oneReg = this.tmp();
+                f.constInt(oneReg, 1, numType as IntType);
+                f.sub(temp, operand.register, oneReg, numType);
+                this.storeBack(node.expr, { register: temp, type: operand.type });
+                return { register: temp, type: operand.type };
+            }
+            default: {
+                f.undef(temp, operand.type);
+                return { register: temp, type: operand.type };
+            }
+        }
+    }
+
+    // ---- Postfix Op ----
+
+    private visitPostfixOp(node: ast.PostfixOp): ExpressionResult {
+        const operand = this.visitExpression(node.expr, undefined);
+
+        // Check for operator overload (++ or --)
+        const operandTd = this.getType(node.expr);
+        const overload = this.resolveOperatorMethod(operandTd, node.op, []);
+        if (overload) {
+            // For postfix, save original value before calling overload
+            const temp = this.tmp();
+            this.func().mov(temp, operand.register, operand.type);
+            const newResult = this.emitOperatorCall(
+                operand, overload.methodId, overload.returnType,
+                [], []
+            );
+            this.storeBack(node.expr, newResult);
+            return { register: temp, type: operand.type };
+        }
+
+        const temp = this.tmp(); // Save original value
+        const newVal = this.tmp();
+        const f = this.func();
+
+        f.mov(temp, operand.register, operand.type);
+
+        const numType = this.extractNumericType(operand.type);
+        const oneReg = this.tmp();
+        f.constInt(oneReg, 1, numType as IntType);
+
+        if (node.op === '++') {
+            f.add(newVal, operand.register, oneReg, numType);
+        } else {
+            f.sub(newVal, operand.register, oneReg, numType);
+        }
+
+        this.storeBack(node.expr, { register: newVal, type: operand.type });
+
+        // Return original value (postfix)
+        return { register: temp, type: operand.type };
+    }
+
+    // ============================================================================
+    // References & Calls
+    // ============================================================================
+
+    private visitQualifiedReference(node: ast.QualifiedReference): ExpressionResult {
+        const ref = node.reference?.ref;
+        this.assert(ref !== undefined, "Invalid reference");
+
+        // Function parameter or local variable
+        if (ast.isFunctionParameter(ref) || ast.isVariableDeclSingle(ref)) {
+            const varName = this.getReferenceName(ref);
+
+            if (ast.isVariableDeclSingle(ref) && this.isGlobalVar(ref)) {
+                const temp = this.tmp();
+                const type = this.getNodeIRType(ref);
+                this.func().globalLoad(temp, this.G(ref), type);
+                return { register: temp, type };
+            }
+
+            const varInfo = this.lookupVariable(varName);
+            if (varInfo) {
+                return { register: varInfo.register, type: varInfo.type };
+            }
+            // Parameter not in variables map - use name directly
+            const type = this.getNodeIRType(ref);
+            return { register: varName, type };
+        }
+
+        // Destructuring element (from tuple/array/struct unpacking)
+        // Iterator variable (from foreach loops)
+        // Variable pattern (from match patterns)
+        if (ast.isDestructuringElement(ref) || ast.isIteratorVar(ref) || ast.isVariablePattern(ref)) {
+            const varName = ref.name ?? '_';
+            const varInfo = this.lookupVariable(varName);
+            if (varInfo) {
+                return { register: varInfo.register, type: varInfo.type };
+            }
+            // Fallback: infer type from node
+            const type = this.getNodeIRType(ref);
+            return { register: varName, type };
+        }
+
+        // Function reference (as value → closure_alloc)
+        if (ast.isFunctionDeclaration(ref)) {
+            const temp = this.tmp();
+            const funcName = this.C(ref);
+            this.func().closureAlloc(temp, funcName);
+            return { register: temp, type: ptrType('closure') };
+        }
+
+        // Enum case
+        if (ast.isEnumCase(ref)) {
+            const temp = this.tmp();
+            const enumDecl = ref.$container;
+            const enumTd = this.getType(enumDecl as AstNode);
+            const irType = this.convertTypeDescriptionToIR(enumTd);
+            const intType = (irType.tag === 'scalar' ? irType.scalar : 'u32') as IntType;
+            // Get enum case value
+            const value = ref.init !== undefined ? this.parseIntegerLiteral(ref.init.value) : BigInt(this.getEnumCaseIndex(ref));
+            this.func().constInt(temp, value, intType);
+            return { register: temp, type: irType };
+        }
+
+        // Variant constructor reference (used in function call dispatch)
+        if (ast.isVariantConstructor(ref)) {
+            // This will be handled in visitFunctionCall when called
+            // Return a placeholder - variant constructors are not first-class values
+            const temp = this.tmp();
+            this.func().undef(temp, ptrType('struct'));
+            return { register: temp, type: ptrType('struct') };
+        }
+
+        // FFI extern declaration — emit ffi_register in current function
+        if (ast.isExternFFIDecl(ref)) {
+            const libname = ref.dynlib;
+            // Ensure library is registered in ffiRegistery
+            if (!this.ffiRegistery.has(libname)) {
+                this.ffiRegistery.register(libname);
+            }
+            const id = this.ffiRegistery.get(libname);
+            const handleReg = `%ffi_${id}`;
+            // Emit ffi_register in current function (idempotent at runtime)
+            this.func().ffiRegister(handleReg, libname);
+            return { register: handleReg, type: ptrType('ffi_handle') };
+        }
+
+        // Class field access (implicit `this`) — e.g. `data` inside a method means `this.data`
+        if (ast.isClassAttributeDecl(ref)) {
+            const thisVar = this.lookupVariable('this');
+            this.assert(thisVar !== undefined, "ClassAttributeDecl reference outside of method context");
+            const classType = ref.$container; // ClassType AST node
+            const classTd = this.getType(classType as AstNode);
+            const resolvedClassTd = isReferenceType(classTd) ? this.typeUtils.resolveIfReference(classTd) : classTd;
+            const fieldIndex = this.getClassFieldIndex(resolvedClassTd, ref.name);
+            const resultType = this.getNodeIRType(node);
+            const temp = this.tmp();
+            this.func().classGet(temp, thisVar!.register, fieldIndex, resultType);
+            return { register: temp, type: resultType };
+        }
+
+        // TypeDeclaration used as a namespace prefix (e.g., EnumType.Case, Type.staticMethod)
+        // The actual member access is handled by visitMemberAccess or visitFunctionCall
+        if (ast.isTypeDeclaration(ref)) {
+            const temp = this.tmp();
+            const type = this.getNodeIRType(node);
+            this.func().undef(temp, type);
+            return { register: temp, type };
+        }
+
+        // NamespaceDecl used as a prefix (e.g., namespace.function)
+        if (ast.isNamespaceDecl(ref)) {
+            const temp = this.tmp();
+            this.func().undef(temp, voidType());
+            return { register: temp, type: voidType() };
+        }
+
+        throw new Error("Not implemented for " + ref?.$type);
+    }
+
+    private getEnumCaseIndex(enumCase: ast.EnumCase): number {
+        const enumDecl = enumCase.$container;
+        if (ast.isEnumType(enumDecl)) {
+            return enumDecl.cases.indexOf(enumCase);
+        }
+        return 0;
+    }
+
+    // ---- Function Call ----
+
+    private visitFunctionCall(node: ast.FunctionCall): ExpressionResult {
+        const f = this.func();
+
+        // Check if this is a variant constructor call
+        if (ast.isQualifiedReference(node.expr)) {
+            const ref = node.expr.reference?.ref;
+            if (ref && ast.isVariantConstructor(ref)) {
+                return this.visitVariantConstruction(node, ref);
+            }
+        }
 
         // Evaluate arguments
-        const argRegs: string[] = [];
+        const argRegs: VReg[] = [];
+        const argTypes: IRType[] = [];
         if (node.args) {
             for (const arg of node.args) {
                 const argResult = this.visitExpression(arg, undefined);
                 argRegs.push(argResult.register);
+                argTypes.push(argResult.type);
             }
         }
 
-        // Generate call
-        const temp = this.tmp();
-        func.call(funcExpr.register, argRegs, temp);
-        return { register: temp };
+        // Determine call type based on expression
+        if (ast.isMemberAccess(node.expr)) {
+            return this.visitMethodCall(node, argRegs, argTypes);
+        }
+
+        if (ast.isQualifiedReference(node.expr)) {
+            const ref = node.expr.reference?.ref;
+
+            if (ref && ast.isFunctionDeclaration(ref)) {
+                // Direct function call
+                const funcName = this.C(ref);
+                const retTd = this.getType(node);
+                const retType = this.convertTypeDescriptionToIR(retTd);
+                const retTypes = retType.tag === 'void' ? [] : [retType];
+                const dests = retType.tag === 'void' ? [] : [this.tmp()];
+
+                f.call(dests, funcName, argRegs, argTypes, retTypes);
+
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
+
+            // Variable holding a closure
+            const varInfo = this.lookupVariable(this.getReferenceName(ref));
+            if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                const retTd = this.getType(node);
+                const retType = this.convertTypeDescriptionToIR(retTd);
+                const retTypes = retType.tag === 'void' ? [] : [retType];
+                const dests = retType.tag === 'void' ? [] : [this.tmp()];
+
+                f.callClosure(dests, varInfo.register, argRegs, argTypes, retTypes);
+
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
+        }
+
+        // Check for () operator overload (callable objects)
+        {
+            const exprTd = this.getType(node.expr);
+            const argTds = node.args ? node.args.map(a => this.getType(a)) : [];
+            const overload = this.resolveOperatorMethod(exprTd, '()', argTds);
+            if (overload) {
+                const objResult = this.visitExpression(node.expr, undefined);
+                return this.emitOperatorCall(
+                    objResult, overload.methodId, overload.returnType,
+                    argRegs, argTypes
+                );
+            }
+        }
+
+        // Generic fallback: evaluate expression and call
+        const funcExpr = this.visitExpression(node.expr, undefined);
+        const retTd = this.getType(node);
+        const retType = this.convertTypeDescriptionToIR(retTd);
+        const retTypes = retType.tag === 'void' ? [] : [retType];
+        const dests = retType.tag === 'void' ? [] : [this.tmp()];
+
+        if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
+            f.callClosure(dests, funcExpr.register, argRegs, argTypes, retTypes);
+        } else {
+            // Fallback to direct call with register name
+            f.call(dests, funcExpr.register, argRegs, argTypes, retTypes);
+        }
+
+        if (dests.length > 0) {
+            return { register: dests[0], type: retTypes[0] };
+        }
+        return { register: this.tmp(), type: voidType() };
     }
 
-    private visitMemberAccess(node: ast.MemberAccess, varname?: string): ExpressionResult {
-        // TODO: Generate struct_get, class_get, or array access
+    private visitMethodCall(
+        node: ast.FunctionCall,
+        argRegs: VReg[],
+        argTypes: IRType[]
+    ): ExpressionResult {
+        const f = this.func();
+        const memberAccess = node.expr as ast.MemberAccess;
+        const obj = this.visitExpression(memberAccess.expr, undefined);
+        const memberRef = memberAccess.element?.ref;
+
+        const retTd = this.getType(node);
+        const retType = this.convertTypeDescriptionToIR(retTd);
+        const retTypes = retType.tag === 'void' ? [] : [retType];
+        const dests = retType.tag === 'void' ? [] : [this.tmp()];
+
+        // Check if FFI call
+        const objTd = this.getType(memberAccess.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+        // Builtin prototype method calls (array.resize, string.cat, coro.reset, etc.)
+        if (memberRef && ast.isBuiltinSymbolFn(memberRef)) {
+            const methodName = this.getReferenceName(memberRef);
+            return this.visitBuiltinMethodCall(
+                resolvedObjTd, methodName, obj, argRegs, argTypes, dests, retTypes
+            );
+        }
+
+        if (isFFIType(resolvedObjTd)) {
+            // FFI method call — resolve method index from extern block order
+            const ffiTd = resolvedObjTd as FFITypeDescription;
+            const ffiMethodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
+            const methodId = ffiTd.methods.findIndex(m => m.names.includes(ffiMethodName));
+            f.callFFI(dests, obj.register, methodId >= 0 ? methodId : 0, argRegs, argTypes, retTypes);
+        } else if (isClassType(resolvedObjTd) || isInterfaceType(resolvedObjTd)) {
+            // Method call on class/interface
+            if (memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                // For now, use method ID 0 - TODO: proper method ID resolution
+                const methodId = this.getMethodId(resolvedObjTd, methodName);
+                f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+            } else {
+                f.callMethod(dests, obj.register, 0, argRegs, argTypes, retTypes);
+            }
+        } else {
+            // Fallback: treat as direct call with mangled name
+            const methodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
+            f.call(dests, methodName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+        }
+
+        if (dests.length > 0) {
+            return { register: dests[0], type: retTypes[0] };
+        }
+        return { register: this.tmp(), type: voidType() };
+    }
+
+    // ---- Builtin Prototype Method Call ----
+
+    private visitBuiltinMethodCall(
+        objTd: TypeDescription,
+        methodName: string,
+        obj: ExpressionResult,
+        argRegs: VReg[],
+        argTypes: IRType[],
+        dests: VReg[],
+        retTypes: IRType[]
+    ): ExpressionResult {
+        const f = this.func();
+
+        // --- Array builtins ---
+        if (isArrayType(objTd)) {
+            if (methodName === 'resize') {
+                f.arrayExtend(obj.register, argRegs[0]);
+                return { register: this.tmp(), type: voidType() };
+            }
+            if (methodName === 'slice') {
+                const dest = dests.length > 0 ? dests[0] : this.tmp();
+                f.arraySlice(dest, obj.register, argRegs[0], argRegs[1]);
+                return { register: dest, type: ptrType('array') };
+            }
+        }
+
+        // --- String builtins ---
+        if (isStringType(objTd) || isStringLiteralType(objTd)) {
+            if (methodName === 'cat') {
+                const dest = dests.length > 0 ? dests[0] : this.tmp();
+                f.strConcat(dest, obj.register, argRegs[0], argTypes[0]);
+                return { register: dest, type: ptrType('string') };
+            }
+        }
+
+        // --- Coroutine builtins ---
+        if (isCoroutineType(objTd)) {
+            if (methodName === 'reset') {
+                f.coroReset(obj.register);
+                return { register: this.tmp(), type: voidType() };
+            }
+            if (methodName === 'finish') {
+                f.coroFinish(obj.register);
+                return { register: this.tmp(), type: voidType() };
+            }
+        }
+
+        // Fallback: emit as a builtin call (for builtins without dedicated IR, future FFI)
+        f.call(dests, `builtin_${methodName}`, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+        if (dests.length > 0) {
+            return { register: dests[0], type: retTypes[0] };
+        }
+        return { register: this.tmp(), type: voidType() };
+    }
+
+    // ============================================================================
+    // Member & Index Access
+    // ============================================================================
+
+    private visitMemberAccess(node: ast.MemberAccess): ExpressionResult {
+        const memberRef = node.element?.ref;
+        const temp = this.tmp();
+
+        if (!memberRef) {
+            this.func().undef(temp, voidType());
+            return { register: temp, type: voidType() };
+        }
+
+        // Enum case access (e.g., FileOpenMode.Read) — no need to evaluate the type as a value
+        if (ast.isEnumCase(memberRef)) {
+            const enumDecl = memberRef.$container;
+            const enumTd = this.getType(enumDecl as AstNode);
+            const irType = this.convertTypeDescriptionToIR(enumTd);
+            const intType = (irType.tag === 'scalar' ? irType.scalar : 'u32') as IntType;
+            const value = memberRef.init !== undefined ? this.parseIntegerLiteral(memberRef.init.value) : BigInt(this.getEnumCaseIndex(memberRef));
+            this.func().constInt(temp, value, intType);
+            return { register: temp, type: irType };
+        }
+
         const obj = this.visitExpression(node.expr, undefined);
-        const ref = node.element?.ref;
-        const memberName = this.getReferenceName(ref) ?? 'unknown';
-        const temp = this.tmp();
-        
-        // Placeholder: assume struct access
-        this.context.currentFunction?.structGet(temp, obj.register, memberName);
-        return { register: temp };
+        const memberName = this.getReferenceName(memberRef);
+        const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const resultType = this.getNodeIRType(node);
+
+        // Array .length
+        if (isArrayType(resolvedObjTd) && memberName === 'length') {
+            this.func().arrayLength(temp, obj.register);
+            return { register: temp, type: scalarType('u64') };
+        }
+
+        // Coroutine .state
+        if (isCoroutineType(resolvedObjTd) && memberName === 'state') {
+            this.func().coroState(temp, obj.register);
+            return { register: temp, type: scalarType('u8') };
+        }
+
+        // Coroutine .alive (state != Completed, where Completed = 3)
+        if (isCoroutineType(resolvedObjTd) && memberName === 'alive') {
+            const stateReg = this.tmp();
+            this.func().coroState(stateReg, obj.register);
+            const completedReg = this.tmp();
+            this.func().constInt(completedReg, 3n, 'u8');
+            this.func().cmpNe(temp, stateReg, completedReg, 'u8');
+            return { register: temp, type: scalarType('bool') };
+        }
+
+        // Struct field access
+        if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
+            const fieldIndex = this.getStructFieldIndex(resolvedObjTd, memberName);
+            this.func().structGet(temp, obj.register, fieldIndex, resultType);
+            return { register: temp, type: resultType };
+        }
+
+        // Class field access
+        if (isClassType(resolvedObjTd)) {
+            const fieldIndex = this.getClassFieldIndex(resolvedObjTd, memberName);
+            this.func().classGet(temp, obj.register, fieldIndex, resultType);
+            return { register: temp, type: resultType };
+        }
+
+        // Fallback
+        this.func().undef(temp, resultType);
+        return { register: temp, type: resultType };
     }
 
-    private visitIndexAccess(node: ast.IndexAccess, varname?: string): ExpressionResult {
-        const array = this.visitExpression(node.expr, undefined);
-        const temp = this.tmp();
-        
+    private visitIndexAccess(node: ast.IndexAccess): ExpressionResult {
+        const obj = this.visitExpression(node.expr, undefined);
+
+        // Check for [] operator overload
+        const objTd = this.getType(node.expr);
         if (node.indexes && node.indexes.length > 0) {
-            const index = this.visitExpression(node.indexes[0], undefined);
-            this.context.currentFunction?.arrayGet(temp, array.register, index.register);
+            const indexResults = node.indexes.map(idx => this.visitExpression(idx, undefined));
+            const indexTds = node.indexes.map(idx => this.getType(idx));
+            const overload = this.resolveOperatorMethod(objTd, '[]', indexTds);
+            if (overload) {
+                return this.emitOperatorCall(
+                    obj, overload.methodId, overload.returnType,
+                    indexResults.map(r => r.register),
+                    indexResults.map(r => r.type)
+                );
+            }
+
+            // Primitive array access
+            const index = indexResults[0];
+            const elemType = this.getNodeIRType(node);
+            const temp = this.tmp();
+            this.func().arrayGet(temp, obj.register, index.register, elemType);
+            return { register: temp, type: elemType };
         }
-        
-        return { register: temp };
-    }
 
-    private visitArrayConstruction(node: ast.ArrayConstructionExpression, varname?: string): ExpressionResult {
-        // TODO: Implement array construction
-        // Need to allocate array and set elements
         const temp = this.tmp();
-        return { register: temp };
+        const resultType = this.getNodeIRType(node);
+        this.func().undef(temp, resultType);
+        return { register: temp, type: resultType };
     }
 
-    private visitStructConstruction(node: ast.Expression, varname?: string): ExpressionResult {
-        // TODO: Implement struct construction
+    // ============================================================================
+    // Construction: Struct, Array, Variant, New
+    // ============================================================================
+
+    private visitStructConstruction(node: ast.Expression): ExpressionResult {
+        const f = this.func();
         const temp = this.tmp();
-        return { register: temp };
+        const resultType = ptrType('struct') as IRType;
+
+        if (ast.isNamedStructConstructionExpression(node)) {
+            // Named struct: { fieldName: value, ... }
+            const structTd = this.getType(node);
+            const shapeId = this.getOrDeclareStructShape(structTd);
+            f.structAlloc(temp, shapeId);
+
+            const structFields = isStructType(structTd) ? (structTd as StructTypeDescription).fields : [];
+            let targetFieldPos = 0; // tracks which target field we're writing to
+            for (let i = 0; i < node.fields.length; i++) {
+                const field = node.fields[i];
+                if (ast.isStructFieldKeyValuePair(field)) {
+                    const nameId = this.getOrCreateFieldNameId(field.name);
+                    const fieldValue = this.visitExpression(field.expr, undefined);
+                    f.structSet(temp, nameId, fieldValue.register, fieldValue.type);
+                    targetFieldPos++;
+                } else if (ast.isStructSpreadExpression(field)) {
+                    // Spread: copy all fields from the source struct
+                    const srcResult = this.visitExpression(field.expression, undefined);
+                    const srcTd = this.getType(field.expression);
+                    const resolvedSrc = isReferenceType(srcTd) ? this.typeUtils.resolveIfReference(srcTd) : srcTd;
+                    if (isStructType(resolvedSrc)) {
+                        const srcFields = (resolvedSrc as StructTypeDescription).fields;
+                        for (let si = 0; si < srcFields.length; si++) {
+                            const srcFieldType = this.convertTypeDescriptionToIR(srcFields[si].type);
+                            const srcNameId = this.getOrCreateFieldNameId(srcFields[si].name);
+                            const tgtNameId = targetFieldPos < structFields.length
+                                ? this.getOrCreateFieldNameId(structFields[targetFieldPos].name)
+                                : srcNameId;
+                            const srcFieldReg = this.tmp();
+                            f.structGet(srcFieldReg, srcResult.register, srcNameId, srcFieldType);
+                            f.structSet(temp, tgtNameId, srcFieldReg, srcFieldType);
+                            targetFieldPos++;
+                        }
+                    }
+                }
+            }
+
+            return { register: temp, type: resultType };
+        }
+
+        if (ast.isAnonymousStructConstructionExpression(node)) {
+            // Anonymous struct: { value1, value2, ... }
+            const structTd = this.getType(node);
+            const shapeId = this.getOrDeclareStructShape(structTd);
+            f.structAlloc(temp, shapeId);
+
+            const anonStructFields = isStructType(structTd) ? (structTd as StructTypeDescription).fields : [];
+            for (let i = 0; i < node.expressions.length; i++) {
+                const fieldValue = this.visitExpression(node.expressions[i], undefined);
+                const nameId = i < anonStructFields.length
+                    ? this.getOrCreateFieldNameId(anonStructFields[i].name)
+                    : i;
+                f.structSet(temp, nameId, fieldValue.register, fieldValue.type);
+            }
+
+            return { register: temp, type: resultType };
+        }
+
+        f.undef(temp, resultType);
+        return { register: temp, type: resultType };
     }
 
-    private visitConditionalExpression(node: ast.ConditionalExpression, varname?: string): ExpressionResult {
-        // TODO: Implement if expression (different from if statement)
+    private visitArrayConstruction(node: ast.ArrayConstructionExpression): ExpressionResult {
+        const f = this.func();
         const temp = this.tmp();
-        return { register: temp };
+
+        // Get element type from the array's type
+        const arrayTd = this.getType(node);
+        let elemType: IRType = voidType();
+        if (isArrayType(arrayTd)) {
+            elemType = this.convertTypeDescriptionToIR((arrayTd as ArrayTypeDescription).elementType);
+        }
+
+        // Allocate array
+        const values = node.values ?? [];
+        const sizeReg = this.tmp();
+        f.constInt(sizeReg, values.length, 'u64');
+        f.arrayAlloc(temp, elemType, sizeReg);
+
+        // Set elements
+        for (let i = 0; i < values.length; i++) {
+            const elem = values[i];
+            if (ast.isArraySpreadExpression(elem)) {
+                // Spread: extend array with source elements
+                const srcArray = this.visitExpression(elem.expr, undefined);
+                const srcLen = this.tmp();
+                f.arrayLength(srcLen, srcArray.register);
+                f.arrayExtend(temp, srcLen);
+
+                // Copy elements from source array
+                // Generate a loop: for j = 0; j < srcLen; j++ { arr[destIdx++] = src[j] }
+                const loopStart = this.generateLabel('spread_loop');
+                const loopEnd = this.generateLabel('spread_end');
+                const jReg = this.tmp();
+                const destIdxReg = this.tmp();
+                const cmpReg = this.tmp();
+
+                f.constInt(jReg, 0, 'u64');
+                f.constInt(destIdxReg, i, 'u64'); // Start dest index at current position
+
+                f.label(loopStart);
+                f.cmpLt(cmpReg, jReg, srcLen, 'u64');
+                const loopBody = this.generateLabel('spread_body');
+                f.br(cmpReg, loopBody, loopEnd);
+
+                f.label(loopBody);
+                const srcElem = this.tmp();
+                f.arrayGet(srcElem, srcArray.register, jReg, elemType);
+                f.arraySet(temp, destIdxReg, srcElem, elemType);
+
+                const oneReg = this.tmp();
+                f.constInt(oneReg, 1, 'u64');
+                f.add(jReg, jReg, oneReg, 'u64');
+                f.add(destIdxReg, destIdxReg, oneReg, 'u64');
+                f.jmp(loopStart);
+
+                f.label(loopEnd);
+            } else if (ast.isExpressionElement(elem)) {
+                const elemResult = this.visitExpression(elem.expr, undefined);
+                const idxReg = this.tmp();
+                f.constInt(idxReg, i, 'u64');
+                f.arraySet(temp, idxReg, elemResult.register, elemType);
+            }
+        }
+
+        return { register: temp, type: ptrType('array') };
     }
 
-    private visitMatchExpression(node: ast.MatchExpression, varname?: string): ExpressionResult {
-        // TODO: Implement match expression
+    /**
+     * Variant construction: VariantName.Constructor(args...)
+     * Layout: field #0 = u8 tag, field #1..N = constructor args
+     */
+    private visitVariantConstruction(
+        node: ast.FunctionCall,
+        constructorRef: ast.VariantConstructor
+    ): ExpressionResult {
+        const f = this.func();
         const temp = this.tmp();
-        return { register: temp };
+
+        // Get variant type info
+        const variantTd = this.getType(node);
+        const shapeId = this.getOrDeclareStructShape(variantTd);
+        f.structAlloc(temp, shapeId);
+
+        // Set tag (field #0)
+        const tagReg = this.tmp();
+        const tagValue = this.getVariantConstructorTag(constructorRef);
+        f.constInt(tagReg, tagValue, 'u8');
+        f.structSet(temp, 0, tagReg, scalarType('u8'));
+
+        // Set constructor arguments (fields #1..N)
+        if (node.args) {
+            for (let i = 0; i < node.args.length; i++) {
+                const argResult = this.visitExpression(node.args[i], undefined);
+                f.structSet(temp, i + 1, argResult.register, argResult.type);
+            }
+        }
+
+        return { register: temp, type: ptrType('struct') };
     }
 
-    private visitLetInExpression(node: ast.LetInExpression, varname?: string): ExpressionResult {
-        // TODO: Implement let-in expression
+    private visitNewExpression(node: ast.NewExpression): ExpressionResult {
+        const f = this.func();
         const temp = this.tmp();
-        return { register: temp };
+
+        const classTd = this.getType(node);
+        const classKey = this.getClassShapeKey(classTd);
+        f.classAlloc(temp, classKey);
+
+        // Call init method if there are arguments
+        if (node.args && node.args.length > 0) {
+            const argRegs: VReg[] = [];
+            const argTypes: IRType[] = [];
+            for (const arg of node.args) {
+                const argResult = this.visitExpression(arg, undefined);
+                argRegs.push(argResult.register);
+                argTypes.push(argResult.type);
+            }
+
+            // Call the init method (constructor)
+            // Convention: init method ID is 0
+            f.callMethod([], temp, 0, argRegs, argTypes, []);
+        }
+
+        return { register: temp, type: ptrType('class') };
     }
 
-    private visitThisExpression(node: ast.ThisExpression, varname?: string): ExpressionResult {
-        // Return 'this' register
-        return { register: 'this' };
+    // ============================================================================
+    // Lambda / Closure
+    // ============================================================================
+
+    private visitLambdaExpression(node: ast.LambdaExpression): ExpressionResult {
+        const f = this.func();
+
+        // 1. Analyze upvalues
+        const upvalues = this.collectUpvalues(node);
+
+        // 2. Generate backing function
+        const closureName = `$lambda_${this.closureCounter++}`;
+
+        // Build params: env params first, then user params
+        const params: FunctionParam[] = [];
+
+        // Env params (captured upvalues)
+        for (const uv of upvalues) {
+            params.push({ name: uv.name, type: uv.type });
+        }
+
+        // User params
+        for (const param of node.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            params.push({ name: param.name, type: paramType });
+        }
+
+        // Return type
+        const returnTypes: IRType[] = [];
+        if (node.header.returnType) {
+            returnTypes.push(this.convertTypeWithSubstitution(node.header.returnType));
+        }
+
+        const closureFunc = this.program.createFunction(
+            closureName, params, returnTypes,
+            { isClosure: true }
+        );
+
+        // Save context
+        const prevFunction = this.context.currentFunction;
+        const prevVars = new Map(this.context.variables);
+        const prevTemp = this.context.tempCounter;
+        const prevLabel = this.context.labelCounter;
+        const prevScope = this.context.scopeDepth;
+
+        this.context.currentFunction = closureFunc;
+        this.context.variables.clear();
+        this.context.tempCounter = 0;
+        this.context.labelCounter = 0;
+        this.context.scopeDepth = 0;
+
+        // Map env params to variables
+        for (const uv of upvalues) {
+            this.context.variables.set(uv.name, { register: uv.name, type: uv.type });
+        }
+
+        // Map user params to variables
+        for (const param of node.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            this.context.variables.set(param.name, { register: param.name, type: paramType });
+        }
+
+        // Generate body
+        if (node.body) {
+            if (ast.isBlockStatement(node.body)) {
+                this.visitBlockStatement(node.body);
+            } else {
+                // Expression body
+                const result = this.visitExpression(node.body as ast.Expression, undefined);
+                closureFunc.closureRet([result.register], [result.type]);
+            }
+        } else if (node.expr) {
+            const result = this.visitExpression(node.expr, undefined);
+            closureFunc.closureRet([result.register], [result.type]);
+        }
+
+        // Ensure closure ends with a return (implicit void return)
+        const lastClosureInst = closureFunc.instructions[closureFunc.instructions.length - 1];
+        if (!lastClosureInst || (lastClosureInst.kind !== 'closure_ret' && lastClosureInst.kind !== 'ret' && lastClosureInst.kind !== 'exit')) {
+            closureFunc.closureRet();
+        }
+
+        // Restore context
+        this.context.currentFunction = prevFunction;
+        this.context.variables = prevVars;
+        this.context.tempCounter = prevTemp;
+        this.context.labelCounter = prevLabel;
+        this.context.scopeDepth = prevScope;
+
+        // 3. Generate closure_alloc + push_env in enclosing function
+        const closureReg = this.tmp();
+        f.closureAlloc(closureReg, closureName);
+
+        for (const uv of upvalues) {
+            f.closurePushEnv(closureReg, uv.register, uv.type);
+        }
+
+        return { register: closureReg, type: ptrType('closure') };
     }
 
-    private visitNewExpression(node: ast.NewExpression, varname?: string): ExpressionResult {
-        // TODO: Generate class_alloc or struct_alloc
-        const temp = this.tmp();
-        return { register: temp };
+    /**
+     * Collect upvalues for a lambda by walking its body and finding references
+     * to variables from enclosing scopes.
+     */
+    private collectUpvalues(node: ast.LambdaExpression): CapturedUpvalue[] {
+        const upvalues: CapturedUpvalue[] = [];
+        const seen = new Set<string>();
+
+        // Get the set of parameter names (these are not upvalues)
+        const paramNames = new Set(node.header.args.map(p => p.name));
+
+        // Walk all QualifiedReference nodes in the lambda body
+        const body = node.body ?? node.expr;
+        if (!body) return upvalues;
+
+        const refs = AstUtils.streamAllContents(body as AstNode)
+            .filter(ast.isQualifiedReference)
+            .toArray();
+
+        for (const ref of refs) {
+            const target = ref.reference?.ref;
+            if (!target) continue;
+
+            if (ast.isFunctionParameter(target) || ast.isVariableDeclSingle(target)) {
+                const name = this.getReferenceName(target);
+
+                // Skip if it's a lambda parameter
+                if (paramNames.has(name)) continue;
+
+                // Skip if already captured
+                if (seen.has(name)) continue;
+
+                // Check if it exists in the current (enclosing) scope
+                const varInfo = this.lookupVariable(name);
+                if (varInfo) {
+                    seen.add(name);
+                    upvalues.push({
+                        name,
+                        register: varInfo.register,
+                        type: varInfo.type
+                    });
+                }
+            }
+        }
+
+        // Also capture 'this' if used
+        if (!seen.has('this')) {
+            const thisRefs = AstUtils.streamAllContents(body as AstNode)
+                .filter(ast.isThisExpression)
+                .toArray();
+            if (thisRefs.length > 0) {
+                const thisInfo = this.lookupVariable('this');
+                if (thisInfo) {
+                    upvalues.push({
+                        name: 'this',
+                        register: thisInfo.register,
+                        type: thisInfo.type
+                    });
+                }
+            }
+        }
+
+        return upvalues;
     }
 
-    private visitLambdaExpression(node: ast.LambdaExpression, varname?: string): ExpressionResult {
-        // TODO: Generate closure_alloc
-        const temp = this.tmp();
-        return { register: temp };
+    // ============================================================================
+    // Pattern Matching
+    // ============================================================================
+
+    private visitMatchStatement(node: ast.MatchStatement): void {
+        const f = this.func();
+        const subject = this.visitExpression(node.target, undefined);
+        const endLabel = this.generateLabel('match_end');
+
+        for (let i = 0; i < node.cases.length; i++) {
+            const matchCase = node.cases[i];
+            const nextCaseLabel = (i < node.cases.length - 1)
+                ? this.generateLabel('match_next')
+                : endLabel;
+            const bodyLabel = this.generateLabel('match_body');
+
+            // Check pattern
+            if (matchCase.pattern) {
+                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel);
+            } else {
+                // Default case: always matches
+                f.jmp(bodyLabel);
+            }
+
+            f.label(bodyLabel);
+
+            // Bind pattern variables (pass nextCaseLabel for nested pattern fail)
+            if (matchCase.pattern) {
+                this.emitPatternBindings(subject, matchCase.pattern, nextCaseLabel);
+            }
+
+            // Execute body
+            if (matchCase.body) {
+                this.visitBlockStatement(matchCase.body);
+            }
+
+            f.jmp(endLabel);
+
+            if (nextCaseLabel !== endLabel) {
+                f.label(nextCaseLabel);
+            }
+        }
+
+        f.label(endLabel);
     }
 
-    private visitDoExpression(node: ast.DoExpression, varname?: string): ExpressionResult {
-        this.visitBlockStatement(node.body);
-        // TODO: Capture block result
-        const temp = this.tmp();
-        return { register: temp };
+    private visitMatchExpression(node: ast.MatchExpression): ExpressionResult {
+        const f = this.func();
+        const subject = this.visitExpression(node.target, undefined);
+        const resultReg = this.tmp();
+        const resultType = this.getNodeIRType(node);
+        const endLabel = this.generateLabel('matchexpr_end');
+
+        f.undef(resultReg, resultType); // Initialize result
+
+        for (let i = 0; i < node.cases.length; i++) {
+            const matchCase = node.cases[i];
+            const nextCaseLabel = (i < node.cases.length - 1)
+                ? this.generateLabel('matchexpr_next')
+                : endLabel;
+            const bodyLabel = this.generateLabel('matchexpr_body');
+
+            if (matchCase.pattern) {
+                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel);
+            } else {
+                f.jmp(bodyLabel);
+            }
+
+            f.label(bodyLabel);
+
+            if (matchCase.pattern) {
+                this.emitPatternBindings(subject, matchCase.pattern, nextCaseLabel);
+            }
+
+            // Evaluate expression body
+            if (matchCase.body) {
+                const caseResult = this.visitExpression(matchCase.body, undefined);
+                f.mov(resultReg, caseResult.register, resultType);
+            }
+
+            f.jmp(endLabel);
+
+            if (nextCaseLabel !== endLabel) {
+                f.label(nextCaseLabel);
+            }
+        }
+
+        f.label(endLabel);
+        return { register: resultReg, type: resultType };
     }
 
-    private visitThrowExpression(node: ast.ThrowExpression, varname?: string): ExpressionResult {
+    /**
+     * Emit pattern check: jumps to matchLabel if pattern matches, failLabel if not
+     */
+    private emitPatternCheck(
+        subject: ExpressionResult,
+        pattern: ast.MatchCasePattern,
+        matchLabel: string,
+        failLabel: string
+    ): void {
+        const f = this.func();
+
+        if (ast.isLiteralPattern(pattern)) {
+            // Compare subject with literal (LiteralPattern IS the literal expression)
+            const litResult = this.visitExpression(pattern as unknown as ast.Expression, undefined);
+            const cmpReg = this.tmp();
+            if (this.isStringIRType(subject.type)) {
+                f.cmpEqStr(cmpReg, subject.register, litResult.register);
+            } else {
+                const cmpType = this.extractCmpType(subject.type);
+                f.cmpEq(cmpReg, subject.register, litResult.register, cmpType);
+            }
+            f.br(cmpReg, matchLabel, failLabel);
+        } else if (ast.isVariablePattern(pattern)) {
+            // Variable pattern: always matches, binds in emitPatternBindings
+            f.jmp(matchLabel);
+        } else if (ast.isWildcardPattern(pattern)) {
+            // Wildcard: always matches
+            f.jmp(matchLabel);
+        } else if (ast.isTypeInstancePattern(pattern)) {
+            // Type instance pattern: check variant tag
+            const patternTd = this.getType(pattern.type);
+            if (isVariantConstructorType(patternTd)) {
+                // Read tag from subject
+                const tagReg = this.tmp();
+                f.structGet(tagReg, subject.register, 0, scalarType('u8'));
+
+                // Compare with expected tag
+                const expectedTag = this.getVariantConstructorTagFromType(patternTd);
+                const expectedTagReg = this.tmp();
+                f.constInt(expectedTagReg, expectedTag, 'u8');
+
+                const cmpReg = this.tmp();
+                f.cmpEq(cmpReg, tagReg, expectedTagReg, 'u8');
+                f.br(cmpReg, matchLabel, failLabel);
+            } else if (isClassType(patternTd)) {
+                // Class type pattern: check if subject is an instance of this class
+                const classTdDesc = patternTd as ClassTypeDescription;
+                const classNode = classTdDesc.node;
+                const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
+                    ? (classNode.$container as ast.TypeDeclaration).name : 'unknown';
+                const classId = this.hashClassName(className);
+                const checkReg = this.tmp();
+                f.interfaceIsClass(checkReg, subject.register, classId);
+                f.br(checkReg, matchLabel, failLabel);
+            } else {
+                // Other non-variant type patterns: assume match for now
+                f.jmp(matchLabel);
+            }
+        } else if (ast.isTypePattern(pattern)) {
+            // Generic type pattern without type reference
+            f.jmp(matchLabel);
+        } else {
+            // Unknown pattern type: match
+            f.jmp(matchLabel);
+        }
+    }
+
+    /**
+     * Emit pattern variable bindings (after pattern check succeeded).
+     * For nested patterns, also emits additional checks and branches to failLabel.
+     */
+    private emitPatternBindings(
+        subject: ExpressionResult,
+        pattern: ast.MatchCasePattern,
+        failLabel?: string
+    ): void {
+        const f = this.func();
+
+        if (ast.isVariablePattern(pattern)) {
+            // Bind subject value to pattern variable
+            const varType = subject.type;
+            const varReg = this.allocateVariable(pattern.name, varType);
+            f.mov(varReg, subject.register, varType);
+        } else if (ast.isTypeInstancePattern(pattern)) {
+            // If pattern has nested bindings (e.g., Ok(value), Ok(Ok(inner))),
+            // bind constructor fields to pattern variables recursively
+            const patternTd = this.getType(pattern.type);
+            if (isVariantConstructorType(patternTd) && pattern.params) {
+                for (let i = 0; i < pattern.params.length; i++) {
+                    const nestedPattern = pattern.params[i];
+                    const fieldType = this.getVariantFieldType(patternTd, i);
+                    const fieldReg = this.tmp();
+                    f.structGet(fieldReg, subject.register, i + 1, fieldType);
+
+                    const fieldSubject: ExpressionResult = { register: fieldReg, type: fieldType };
+
+                    if (ast.isVariablePattern(nestedPattern)) {
+                        // Direct binding: allocate variable and move field value
+                        const varReg = this.allocateVariable(nestedPattern.name, fieldType);
+                        f.mov(varReg, fieldReg, fieldType);
+                    } else if (ast.isWildcardPattern(nestedPattern)) {
+                        // Wildcard: skip, no binding needed
+                    } else if (ast.isLiteralPattern(nestedPattern)) {
+                        // Literal: compare field value with literal and branch to fail
+                        if (failLabel) {
+                            const litResult = this.visitExpression(nestedPattern as unknown as ast.Expression, undefined);
+                            const cmpReg = this.tmp();
+                            if (this.isStringIRType(fieldType)) {
+                                f.cmpEqStr(cmpReg, fieldReg, litResult.register);
+                            } else {
+                                const cmpType = this.extractCmpType(fieldType);
+                                f.cmpEq(cmpReg, fieldReg, litResult.register, cmpType);
+                            }
+                            const continueLabel = this.generateLabel('nested_ok');
+                            f.br(cmpReg, continueLabel, failLabel);
+                            f.label(continueLabel);
+                        }
+                    } else if (ast.isTypeInstancePattern(nestedPattern)) {
+                        // Nested variant pattern: check tag, then recursively bind
+                        if (failLabel) {
+                            const nestedTd = this.getType(nestedPattern.type);
+                            if (isVariantConstructorType(nestedTd)) {
+                                const tagReg = this.tmp();
+                                f.structGet(tagReg, fieldReg, 0, scalarType('u8'));
+                                const expectedTag = this.getVariantConstructorTagFromType(nestedTd);
+                                const expectedTagReg = this.tmp();
+                                f.constInt(expectedTagReg, expectedTag, 'u8');
+                                const cmpReg = this.tmp();
+                                f.cmpEq(cmpReg, tagReg, expectedTagReg, 'u8');
+                                const nestedOkLabel = this.generateLabel('nested_variant_ok');
+                                f.br(cmpReg, nestedOkLabel, failLabel);
+                                f.label(nestedOkLabel);
+                            }
+                        }
+                        // Recursively bind nested fields
+                        this.emitPatternBindings(fieldSubject, nestedPattern, failLabel);
+                    } else if (ast.isTypePattern(nestedPattern)) {
+                        // Type pattern (without instance check) — recursively bind
+                        this.emitPatternBindings(fieldSubject, nestedPattern, failLabel);
+                    }
+                }
+            }
+        } else if (ast.isTypePattern(pattern) && pattern.params) {
+            // TypePattern without specific type instance — bind params
+            for (let i = 0; i < pattern.params.length; i++) {
+                const nestedPattern = pattern.params[i];
+                // Extract field from subject struct (offset +1 for variant tag)
+                const fieldType = this.getNodeIRType(nestedPattern as unknown as AstNode);
+                const fieldReg = this.tmp();
+                f.structGet(fieldReg, subject.register, i + 1, fieldType);
+                const fieldSubject: ExpressionResult = { register: fieldReg, type: fieldType };
+                this.emitPatternBindings(fieldSubject, nestedPattern, failLabel);
+            }
+        }
+    }
+
+    // ============================================================================
+    // Control Flow Expressions
+    // ============================================================================
+
+    private visitConditionalExpression(node: ast.ConditionalExpression): ExpressionResult {
+        const f = this.func();
+        const resultType = this.getNodeIRType(node);
+        const resultReg = this.tmp();
+        const endLabel = this.generateLabel('cond_end');
+
+        // Type-C conditional: if cond1 => then1, cond2 => then2, else elseExpr
+        // node.value is the subject, conditions[] are conditions, thens[] are results
+        // If there's a value, it's `match value { cond1 => then1, ... }`
+        // If no conditions but there are thens, it's simple if-then-else
+
+        for (let i = 0; i < node.conditions.length; i++) {
+            const condLabel = this.generateLabel('cond_check');
+            const thenLabel = this.generateLabel('cond_then');
+            const nextLabel = (i < node.conditions.length - 1)
+                ? this.generateLabel('cond_next')
+                : this.generateLabel('cond_else');
+
+            f.label(condLabel);
+            const condResult = this.visitExpression(node.conditions[i], undefined);
+            f.br(condResult.register, thenLabel, nextLabel);
+
+            f.label(thenLabel);
+            const thenResult = this.visitExpression(node.thens[i], undefined);
+            f.mov(resultReg, thenResult.register, resultType);
+            f.jmp(endLabel);
+
+            if (i < node.conditions.length - 1) {
+                f.label(nextLabel);
+            } else {
+                // Last condition's else label
+                f.label(nextLabel);
+                if (node.elseExpr) {
+                    const elseResult = this.visitExpression(node.elseExpr, undefined);
+                    f.mov(resultReg, elseResult.register, resultType);
+                }
+                f.jmp(endLabel);
+            }
+        }
+
+        f.label(endLabel);
+        return { register: resultReg, type: resultType };
+    }
+
+    private visitLetInExpression(node: ast.LetInExpression): ExpressionResult {
+        this.enterScope();
+
+        // Declare let variables
+        for (const varDecl of node.vars) {
+            if (ast.isVariableDeclSingle(varDecl) && varDecl.initializer) {
+                const result = this.visitExpression(varDecl.initializer, undefined);
+                const varType = this.getNodeIRType(varDecl);
+                const varReg = this.allocateVariable(varDecl.name, varType);
+                this.func().mov(varReg, result.register, varType);
+            }
+        }
+
+        // Evaluate body expression
+        const bodyResult = this.visitExpression(node.expr, undefined);
+
+        this.exitScope();
+        return bodyResult;
+    }
+
+    private visitDoExpression(node: ast.DoExpression): ExpressionResult {
+        // Execute block, last expression statement's value is the result
+        const resultType = this.getNodeIRType(node);
+        const resultReg = this.tmp();
+        this.func().undef(resultReg, resultType);
+
+        this.enterScope();
+        const stmts = node.body.statements;
+        for (let i = 0; i < stmts.length; i++) {
+            const stmt = stmts[i];
+            if (i === stmts.length - 1 && ast.isExpressionStatement(stmt)) {
+                // Last statement - capture as result
+                const result = this.visitExpression(stmt.expr, undefined);
+                this.func().mov(resultReg, result.register, resultType);
+            } else {
+                this.visitStatement(stmt);
+            }
+        }
+        this.exitScope();
+
+        return { register: resultReg, type: resultType };
+    }
+
+    // ============================================================================
+    // Special Expressions
+    // ============================================================================
+
+    private visitThisExpression(): ExpressionResult {
+        const thisInfo = this.lookupVariable('this');
+        if (thisInfo) {
+            return { register: thisInfo.register, type: thisInfo.type };
+        }
+        return { register: 'this', type: ptrType('class') };
+    }
+
+    private visitThrowExpression(node: ast.ThrowExpression): ExpressionResult {
         const expr = this.visitExpression(node.expr, undefined);
-        this.context.currentFunction?.throw(expr.register);
+        this.func().throw(expr.register);
         const temp = this.tmp();
-        return { register: temp };
+        this.func().undef(temp, voidType());
+        return { register: temp, type: voidType() };
     }
 
-    private visitYieldExpression(node: ast.YieldExpression, varname?: string): ExpressionResult {
-        // TODO: Generate coro_yield
-        const temp = this.tmp();
-        return { register: temp };
-    }
-
-    private visitCoroutineExpression(node: ast.CoroutineExpression, varname?: string): ExpressionResult {
-        // TODO: Generate coro_alloc
-        const temp = this.tmp();
-        return { register: temp };
-    }
-
-    private visitTupleExpression(node: ast.TupleExpression, varname?: string): ExpressionResult {
-        // TODO: Handle tuple expressions (multiple values)
-        if (node.expressions.length === 1) {
-            return this.visitExpression(node.expressions[0], varname);
+    private visitYieldExpression(node: ast.YieldExpression): ExpressionResult {
+        if (node.expr) {
+            const expr = this.visitExpression(node.expr, undefined);
+            this.func().coroYield([expr.register], [expr.type]);
+        } else {
+            this.func().coroYield([], []);
         }
+        // After yield, the coroutine resumes and the result comes back
         const temp = this.tmp();
-        return { register: temp };
+        const resultType = this.getNodeIRType(node);
+        this.func().undef(temp, resultType);
+        return { register: temp, type: resultType };
     }
 
-    private visitInstanceCheckExpression(node: ast.InstanceCheckExpression, varname?: string): ExpressionResult {
-        // TODO: Generate type check instruction
+    private visitCoroutineExpression(node: ast.CoroutineExpression): ExpressionResult {
         const temp = this.tmp();
-        return { register: temp };
+        const funcExpr = this.visitExpression(node.fn, undefined);
+        // The expression should resolve to a function name for coroutine allocation
+        this.func().coroAlloc(temp, funcExpr.register);
+        return { register: temp, type: ptrType('coroutine') };
     }
 
-    private visitTypeCastExpression(node: ast.TypeCastExpression, varname?: string): ExpressionResult {
-        /// @ts-ignore
+    private visitTupleExpression(node: ast.TupleExpression): ExpressionResult {
+        if (node.expressions.length === 1) {
+            // Single element tuple = unwrap (parenthesized expression)
+            return this.visitExpression(node.expressions[0], undefined);
+        }
+
+        // Multi-element: visit first element as representative return
+        // Tuple returns are handled at the call site
+        if (node.expressions.length > 0) {
+            return this.visitExpression(node.expressions[0], undefined);
+        }
+
+        const temp = this.tmp();
+        this.func().undef(temp, voidType());
+        return { register: temp, type: voidType() };
+    }
+
+    // ============================================================================
+    // Type Operations
+    // ============================================================================
+
+    private visitInstanceCheckExpression(node: ast.InstanceCheckExpression): ExpressionResult {
+        const f = this.func();
         const expr = this.visitExpression(node.left, undefined);
         const temp = this.tmp();
-        // TODO: Generate cast instruction based on castType
-        return { register: temp };
-    }
 
-    // ============================================================================
-    // Type Conversion
-    // ============================================================================
-
-    private convertType(node: ast.DataType): DataType | undefined {
-        if (ast.isPrimitiveType(node)) {
-            if (node.integerType) return basicType(node.integerType);
-            if (node.floatType) return basicType(node.floatType);
-            if (node.boolType) return basicType('bool');
-            if (node.stringType) return basicType('string');
-            // void, never, null - handle specially
+        // Resolve the target type to determine the class ID
+        const targetTd = this.getType(node.destType);
+        const resolvedTarget = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
+        let classId = 0;
+        if (isClassType(resolvedTarget)) {
+            // Use a hash of the class name as a simple class identifier
+            const classDesc = resolvedTarget as ClassTypeDescription;
+            const classNode = classDesc.node;
+            const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
+                ? (classNode.$container as ast.TypeDeclaration).name : '';
+            classId = this.hashClassName(className);
         }
-        
-        if (ast.isArrayType(node)) {
-            const elementType = this.convertType(node.arrayOf);
-            if (elementType) return arrayType(elementType);
+
+        f.interfaceIsClass(temp, expr.register, classId);
+        return { register: temp, type: scalarType('bool') };
+    }
+
+    private hashClassName(name: string): number {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = ((hash << 5) - hash) + name.charCodeAt(i);
+            hash |= 0; // Convert to 32-bit int
         }
-        
-        if (ast.isNullableType(node)) {
-            const baseType = this.convertType(node.baseType);
-            if (baseType) return nullableType(baseType);
-        }
-        
-        if (ast.isReferenceType(node)) {
-            // TODO: Handle named types (classes, structs, interfaces)
-            return basicType('struct');
-        }
-        
-        if (ast.isStructType(node)) {
-            return basicType('struct');
-        }
-        
-        if (ast.isClassType(node)) {
-            return basicType('class');
-        }
-        
-        if (ast.isInterfaceType(node)) {
-            return basicType('interface');
-        }
-        
-        if (ast.isFunctionType(node)) {
-            return basicType('function');
-        }
-        
-        if (ast.isCoroutineType(node)) {
-            return basicType('coroutine');
-        }
-        
-        return undefined;
+        return Math.abs(hash);
     }
 
-    private convertFunctionParameters(params: ast.FunctionParameter[]): FunctionArg[] {
-        return params.map(param => ({
-            name: param.name,
-            type: param.type ? this.convertType(param.type) : undefined
-        }));
-    }
+    private visitTypeCastExpression(node: ast.TypeCastExpression): ExpressionResult {
+        const expr = this.visitExpression(node.left, undefined);
+        const temp = this.tmp();
+        const targetType = this.convertTypeWithSubstitution(node.destType);
 
-    private convertBinaryOp(op: string): BinaryOp {
-        const opMap: Record<string, BinaryOp> = {
-            '+': 'add', '-': 'sub', '*': 'mul', '/': 'div', '%': 'mod',
-            '<<': 'shl', '>>': 'shr',
-            '&': 'band', '|': 'bor', '^': 'bxor',
-            '==': 'eq', '!=': 'neq', '<': 'lt', '>': 'gt', '<=': 'le', '>=': 'ge',
-            '&&': 'and', '||': 'or'
-        };
-        return opMap[op] ?? 'add';
-    }
+        // Determine cast kind
+        if (isScalar(expr.type) && isScalar(targetType)) {
+            const srcScalar = (expr.type as ScalarIRType).scalar;
+            const tgtScalar = (targetType as ScalarIRType).scalar;
 
-    private convertUnaryOp(op: string): UnaryOp {
-        const opMap: Record<string, UnaryOp> = {
-            '!': 'not', '~': 'bnot', '-': 'neg', '+': 'id'
-        };
-        return opMap[op] ?? 'id';
-    }
+            if (srcScalar === tgtScalar) {
+                // No-op cast
+                this.func().mov(temp, expr.register, targetType);
+            } else if (isInteger(expr.type) && isInteger(targetType)) {
+                // Int-to-int: widen or narrow
+                const srcType = srcScalar as IntType;
+                const tgtType = tgtScalar as IntType;
+                const srcSize = this.intTypeSize(srcType);
+                const tgtSize = this.intTypeSize(tgtType);
 
-    // ============================================================================
-    // Helper Methods
-    // ============================================================================
-
-
-    /**
-     * @returns a new vregister name
-     */
-
-    private tmp(): string {
-        return `%t${this.context.tempCounter++}`;
-    }
-
-    private generateLabel(prefix: string): string {
-        return `${prefix}_${this.context.labelCounter++}`;
-    }
-
-    private allocateVariable(name: string): string {
-        const varReg = `%${name}_${this.context.scopeDepth}`;
-        this.context.variables.set(name, varReg);
-        return varReg;
-    }
-
-    private enterScope(): void {
-        this.context.scopeDepth++;
-    }
-
-    private exitScope(): void {
-        this.context.scopeDepth--;
-        // TODO: Clean up variables from exited scope
-    }
-
-    private pushLoop(breakLabel: string, continueLabel: string): void {
-        this.context.loopStack.push({ breakLabel, continueLabel });
-    }
-
-    private popLoop(): void {
-        this.context.loopStack.pop();
-    }
-
-    private currentLoop(): { breakLabel: string; continueLabel: string } | undefined {
-        return this.context.loopStack[this.context.loopStack.length - 1];
-    }
-
-    private parseIntegerLiteral(value: string): number {
-        // Remove type suffix if present
-        const cleanValue = value.replace(/[ui](8|16|32|64)$/, '');
-        
-        if (cleanValue.startsWith('0x')) {
-            return parseInt(cleanValue, 16);
-        } else if (cleanValue.startsWith('0b')) {
-            return parseInt(cleanValue.slice(2), 2);
-        } else if (cleanValue.startsWith('0o')) {
-            return parseInt(cleanValue.slice(2), 8);
+                if (tgtSize > srcSize) {
+                    this.func().widen(temp, expr.register, srcType, tgtType);
+                } else {
+                    this.func().narrow(temp, expr.register, srcType, tgtType);
+                }
+            } else if (isInteger(expr.type) && (isFloat(targetType) || isDouble(targetType))) {
+                const castKind: CastKind = isSignedInt(expr.type)
+                    ? (isFloat(targetType) ? 'i_f' : 'i_d')
+                    : (isFloat(targetType) ? 'u_f' : 'u_d');
+                this.func().cast(temp, expr.register, castKind);
+            } else if ((isFloat(expr.type) || isDouble(expr.type)) && isInteger(targetType)) {
+                const castKind: CastKind = isSignedInt(targetType)
+                    ? (isFloat(expr.type) ? 'f_i' : 'd_i')
+                    : (isFloat(expr.type) ? 'f_u' : 'd_u');
+                this.func().cast(temp, expr.register, castKind);
+            } else if (isFloat(expr.type) && isDouble(targetType)) {
+                this.func().cast(temp, expr.register, 'f_d');
+            } else if (isDouble(expr.type) && isFloat(targetType)) {
+                this.func().cast(temp, expr.register, 'd_f');
+            } else {
+                this.func().mov(temp, expr.register, targetType);
+            }
         } else {
-            return parseInt(cleanValue, 10);
+            // Pointer cast: just mov (the VM tracks types)
+            this.func().mov(temp, expr.register, targetType);
         }
+
+        return { register: temp, type: targetType };
+    }
+
+    private visitDenullExpression(node: ast.DenullExpression): ExpressionResult {
+        const f = this.func();
+        const expr = this.visitExpression(node.expr, undefined);
+        const temp = this.tmp();
+        const nullCheck = this.tmp();
+        const okLabel = this.generateLabel('denull_ok');
+        const failLabel = this.generateLabel('denull_fail');
+
+        f.isNull(nullCheck, expr.register);
+        f.br(nullCheck, failLabel, okLabel);
+
+        f.label(failLabel);
+        // Throw on null
+        const errMsg = this.tmp();
+        f.strConst(errMsg, "Null dereference");
+        f.throw(errMsg);
+
+        f.label(okLabel);
+        f.mov(temp, expr.register, expr.type);
+
+        return { register: temp, type: expr.type };
+    }
+
+    // ---- Index Set Expression ----
+
+    private visitIndexSet(node: ast.IndexSet): ExpressionResult {
+        const f = this.func();
+        const obj = this.visitExpression(node.expr, undefined);
+        const value = this.visitExpression(node.value, undefined);
+
+        // Check for []= operator overload
+        const objTd = this.getType(node.expr);
+        if (node.indexes && node.indexes.length > 0) {
+            const indexResults = node.indexes.map(idx => this.visitExpression(idx, undefined));
+            const indexTds = node.indexes.map(idx => this.getType(idx));
+            const valueTd = this.getType(node.value);
+            const allArgTds = [...indexTds, valueTd];
+            const overload = this.resolveOperatorMethod(objTd, '[]=', allArgTds);
+            if (overload) {
+                const allArgRegs = [...indexResults.map(r => r.register), value.register];
+                const allArgIRTypes = [...indexResults.map(r => r.type), value.type];
+                return this.emitOperatorCall(
+                    obj, overload.methodId, overload.returnType,
+                    allArgRegs, allArgIRTypes
+                );
+            }
+
+            // Primitive array set
+            f.arraySet(obj.register, indexResults[0].register, value.register, value.type);
+        }
+
+        return value;
+    }
+
+    // ---- Reverse Index Access ----
+
+    private visitReverseIndexAccess(node: ast.ReverseIndexAccess): ExpressionResult {
+        const f = this.func();
+        const obj = this.visitExpression(node.expr, undefined);
+        const index = this.visitExpression(node.index, undefined);
+
+        // Check for [-] operator overload
+        const objTd = this.getType(node.expr);
+        const indexTd = this.getType(node.index);
+        const overload = this.resolveOperatorMethod(objTd, '[-]', [indexTd]);
+        if (overload) {
+            return this.emitOperatorCall(
+                obj, overload.methodId, overload.returnType,
+                [index.register], [index.type]
+            );
+        }
+
+        // Primitive: compute arr[arr.length - 1 - index]
+        const temp = this.tmp();
+        const lenReg = this.tmp();
+        const oneReg = this.tmp();
+        const adjustedIdx = this.tmp();
+        const realIdx = this.tmp();
+        const elemType = this.getNodeIRType(node);
+
+        f.arrayLength(lenReg, obj.register);
+        f.constInt(oneReg, 1, 'u64');
+        f.sub(adjustedIdx, lenReg, oneReg, 'u64');
+        f.sub(realIdx, adjustedIdx, index.register, 'u64');
+        f.arrayGet(temp, obj.register, realIdx, elemType);
+
+        return { register: temp, type: elemType };
+    }
+
+    // ---- Reverse Index Set ----
+
+    private visitReverseIndexSet(node: ast.ReverseIndexSet): ExpressionResult {
+        const f = this.func();
+        const obj = this.visitExpression(node.expr, undefined);
+        const index = this.visitExpression(node.index, undefined);
+        const value = this.visitExpression(node.value, undefined);
+
+        // Check for [-]= operator overload
+        const objTd = this.getType(node.expr);
+        const indexTd = this.getType(node.index);
+        const valueTd = this.getType(node.value);
+        const overload = this.resolveOperatorMethod(objTd, '[-]=', [indexTd, valueTd]);
+        if (overload) {
+            return this.emitOperatorCall(
+                obj, overload.methodId, overload.returnType,
+                [index.register, value.register], [index.type, value.type]
+            );
+        }
+
+        // Primitive: arr[arr.length - 1 - index] = value
+        const lenReg = this.tmp();
+        const oneReg = this.tmp();
+        const adjustedIdx = this.tmp();
+        const realIdx = this.tmp();
+
+        f.arrayLength(lenReg, obj.register);
+        f.constInt(oneReg, 1, 'u64');
+        f.sub(adjustedIdx, lenReg, oneReg, 'u64');
+        f.sub(realIdx, adjustedIdx, index.register, 'u64');
+        f.arraySet(obj.register, realIdx, value.register, value.type);
+
+        return value;
+    }
+
+    // ---- Object Update ----
+
+    private visitObjectUpdate(node: ast.ObjectUpdate): ExpressionResult {
+        const f = this.func();
+        const obj = this.visitExpression(node.expr, undefined);
+        const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const resultType = this.getNodeIRType(node);
+
+        // Clone the struct/class then set the updated fields
+        if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
+            const shapeId = this.getOrDeclareStructShape(resolvedObjTd);
+            const clone = this.tmp();
+            // Allocate a new struct and copy fields
+            f.structAlloc(clone, shapeId);
+
+            // Copy all fields from original
+            const structTd = resolvedObjTd as StructTypeDescription;
+            for (let i = 0; i < structTd.fields.length; i++) {
+                const fieldType = this.convertTypeDescriptionToIR(structTd.fields[i].type);
+                const nameId = this.getOrCreateFieldNameId(structTd.fields[i].name);
+                const fieldVal = this.tmp();
+                f.structGet(fieldVal, obj.register, nameId, fieldType);
+                f.structSet(clone, nameId, fieldVal, fieldType);
+            }
+
+            // Override with updated fields
+            for (const pair of node.pairs) {
+                const fieldIndex = this.getStructFieldIndex(resolvedObjTd, pair.name);
+                const newValue = this.visitExpression(pair.expr, undefined);
+                f.structSet(clone, fieldIndex, newValue.register, newValue.type);
+            }
+
+            return { register: clone, type: resultType };
+        }
+
+        if (isClassType(resolvedObjTd)) {
+            // For classes, update fields on the object directly (or clone if immutable)
+            // For now, create a simple update pattern
+            for (const pair of node.pairs) {
+                const fieldIndex = this.getClassFieldIndex(resolvedObjTd, pair.name);
+                const newValue = this.visitExpression(pair.expr, undefined);
+                f.classSet(obj.register, fieldIndex, newValue.register, newValue.type);
+            }
+            return obj;
+        }
+
+        // Fallback
+        return obj;
+    }
+
+    // ---- Wildcard Expression ----
+
+    private visitWildcardExpression(): ExpressionResult {
+        // Wildcard (_) — produces an undefined/unused value
+        const temp = this.tmp();
+        this.func().undef(temp, voidType());
+        return { register: temp, type: voidType() };
+    }
+
+    // ---- Unreachable Expression ----
+
+    private visitUnreachableExpression(): ExpressionResult {
+        const f = this.func();
+        const errMsg = this.tmp();
+        f.strConst(errMsg, "Unreachable code reached");
+        f.throw(errMsg);
+        // Return void — should never actually be used
+        const temp = this.tmp();
+        f.undef(temp, voidType());
+        return { register: temp, type: voidType() };
+    }
+
+    // ---- Mutate Expression ----
+
+    private visitMutateExpression(node: ast.MutateExpression): ExpressionResult {
+        // `mutate expr` — evaluate the expression (the mutation is a semantic marker)
+        // At the IR level, this is just the expression itself since the compiler
+        // tracks mutability at the type level, not the IR level
+        return this.visitExpression(node.expr, undefined);
+    }
+
+    // ---- Binary String Literal ----
+
+    private visitBinaryStringLiteral(node: ast.BinaryStringLiteralExpression): ExpressionResult {
+        const f = this.func();
+        const temp = this.tmp();
+        // Binary strings (b"...") are arrays of u8
+        const bytes = node.value;
+        const sizeReg = this.tmp();
+        f.constInt(sizeReg, bytes.length, 'u64');
+        f.arrayAlloc(temp, scalarType('u8'), sizeReg);
+
+        // Fill in each byte
+        for (let i = 0; i < bytes.length; i++) {
+            const byteReg = this.tmp();
+            const idxReg = this.tmp();
+            f.constInt(byteReg, bytes.charCodeAt(i), 'u8');
+            f.constInt(idxReg, i, 'u64');
+            f.arraySet(temp, idxReg, byteReg, scalarType('u8'));
+        }
+
+        return { register: temp, type: ptrType('array') };
+    }
+
+    // ============================================================================
+    // Shape & Field Helpers
+    // ============================================================================
+
+    /** Cache for struct shape IDs based on structural identity */
+    private structShapeCache = new Map<string, string>();
+
+    private getOrDeclareStructShape(td: TypeDescription): string {
+        // Generate a deterministic key from the type's field names and types
+        const structKey = this.computeStructTypeKey(td);
+        const cached = this.structShapeCache.get(structKey);
+        if (cached) return cached;
+
+        const id = `struct_${this.structShapeCounter++}`;
+        this.structShapeCache.set(structKey, id);
+
+        if (isStructType(td)) {
+            const shape = {
+                id,
+                fields: (td as StructTypeDescription).fields.map((field) => ({
+                    globalFieldId: this.getOrCreateFieldNameId(field.name),
+                    type: this.convertTypeDescriptionToIR(field.type),
+                    name: field.name
+                }))
+            };
+            this.program.declareStruct(shape);
+            return id;
+        }
+        // For variants, create struct shape with tag + fields
+        return id;
     }
 
     /**
-     * Extract name from various IdentifiableReference types
+     * Compute a structural key for a type to enable shape deduplication.
+     * Two structurally identical types will produce the same key.
      */
-    private getReferenceName(ref: ast.IdentifiableReference | undefined): string {
-        if (!ref) throw "Invalid ref";
-        
-        // Most reference types have a 'name' property
-        if ('name' in ref && typeof ref.name === 'string') {
-            return ref.name;
+    private computeStructTypeKey(td: TypeDescription): string {
+        if (isStructType(td)) {
+            const structTd = td as StructTypeDescription;
+            const fields = structTd.fields
+                .map(f => `${f.name}:${serializeIRType(this.convertTypeDescriptionToIR(f.type))}`)
+                .join(',');
+            return `struct{${fields}}`;
         }
-        
-        // ClassMethod has nested structure
-        if (ast.isClassMethod(ref) && ref.method) {
-            // Methods can have multiple names (overloaded operators)
-            return ref.method.names?.[0];
+        if (isVariantConstructorType(td)) {
+            const vcTd = td as VariantConstructorTypeDescription;
+            return `vc_${vcTd.constructorName}_${vcTd.baseVariant.constructors.length}`;
         }
-        
-        throw "Ref has no name attribute!";
+        if (isVariantType(td)) {
+            const vTd = td as { constructors: readonly { name: string }[] };
+            return `variant_${vTd.constructors.map(c => c.name).join('|')}`;
+        }
+        return `type_${this.structShapeCounter}`;
     }
 
-    assert(condition: boolean, message: string) {
-        if(!condition) {
-            throw "Error: "+message
+    private getStructFieldIndex(td: TypeDescription, fieldName: string): number {
+        if (isStructType(td)) {
+            return this.getOrCreateFieldNameId(fieldName);
+        }
+        return 0;
+    }
+
+    private getClassFieldIndex(td: TypeDescription, fieldName: string): number {
+        if (isClassType(td)) {
+            const idx = (td as ClassTypeDescription).attributes.findIndex(a => a.name === fieldName);
+            return idx >= 0 ? idx : 0;
+        }
+        return 0;
+    }
+
+    private getClassShapeKey(td: TypeDescription): string {
+        return `class_${this.classShapeCounter++}`;
+    }
+
+    private getMethodId(td: TypeDescription, methodName: string): number {
+        if (isClassType(td)) {
+            const idx = (td as ClassTypeDescription).methods.findIndex(
+                m => m.names.includes(methodName)
+            );
+            return idx >= 0 ? idx : 0;
+        }
+        if (isInterfaceType(td)) {
+            const idx = (td as InterfaceTypeDescription).methods.findIndex(
+                m => m.names.includes(methodName)
+            );
+            return idx >= 0 ? idx : 0;
+        }
+        return 0;
+    }
+
+    private getVariantConstructorTag(constructorRef: ast.VariantConstructor): number {
+        const variantType = constructorRef.$container;
+        if (ast.isVariantType(variantType)) {
+            return variantType.constructors.indexOf(constructorRef);
+        }
+        return 0;
+    }
+
+    private getVariantConstructorTagFromType(td: VariantConstructorTypeDescription): number {
+        const baseVariant = td.baseVariant;
+        const name = td.constructorName;
+        const idx = baseVariant.constructors.findIndex(c => c.name === name);
+        return idx >= 0 ? idx : 0;
+    }
+
+    private getVariantFieldType(td: VariantConstructorTypeDescription, fieldIndex: number): IRType {
+        const constructorName = td.constructorName;
+        const baseVariant = td.baseVariant;
+        const constructor = baseVariant.constructors.find(c => c.name === constructorName);
+        if (constructor && constructor.parameters && fieldIndex < constructor.parameters.length) {
+            return this.convertTypeDescriptionToIR(constructor.parameters[fieldIndex].type);
+        }
+        return voidType();
+    }
+
+    private intTypeSize(t: IntType): number {
+        switch (t) {
+            case 'i8': case 'u8': return 1;
+            case 'i16': case 'u16': return 2;
+            case 'i32': case 'u32': return 4;
+            case 'i64': case 'u64': return 8;
         }
     }
 }

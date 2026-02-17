@@ -1,0 +1,13 @@
+{
+    "name": "hello-world",
+    "version": "1.0.0",
+    "author": "praisethemoon",
+    "dependencies": {},
+    "description": "Minimal hello world for VM testing",
+    "compiler": {
+        "target": "runnable",
+        "entry": "main.tc"
+    },
+    "dependenciesFolder": "./libs",
+    "sourceFolder": "./src"
+}

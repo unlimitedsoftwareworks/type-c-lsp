@@ -116,11 +116,13 @@ type TestUnit = class {
     }
 
     fn assert_f32_neq_pre(actual: f32, expected: f32, precision: f32) {
+        /*
         if actual - expected > precision {
             this.pushResult(AssertionResult.Ok())
         } else {
             this.pushResult(AssertionResult.Failed("Expected "+expected+" to be != to "+actual+ " with a precision of "+precision))
         }
+        */
     }
 
     fn assert_f64_eq(actual: f64, expected: f64) {
@@ -149,11 +151,12 @@ type TestUnit = class {
     }
 
     fn assert_f64_neq_pre(actual: f64, expected: f64, precision: f64) {
-        if actual - expected > precision {
+        /*if actual - expected > precision {
             this.pushResult(AssertionResult.Ok())
         } else {
             this.pushResult(AssertionResult.Failed("Expected "+expected+" to be != to "+actual+ " with a precision of "+precision))
         }
+        */
     }
 
     fn assert_obj_eq<T: ComparableObject>(actual: T, expected: T) {

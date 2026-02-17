@@ -2,27 +2,28 @@
 from std.internal.io import io
 
 namespace stdio {
-    type StdStream = u64
-    let const stdOut = io.getStdOut()
-    let const stdErr = io.getStdErr()
+    fn flush() -> void {
+        io.flush()
+    }
 
-    fn flush(stream: StdStream) -> void {
-        io.flush(stream)
+    fn flush_stderr() -> void {
+        io.flush_stderr()
     }
 }
 
+// string print (direct, no buffer conversion needed)
 fn print(s: string) -> void {
-    io.print_string(s.buffer(), s.bytesLength())
+    io.print_str(s)
 }
 
 fn println(s: string) -> void {
-    io.println_string(s.buffer(), s.bytesLength())
+    io.println_str(s)
 }
 
 fn printErr(s: string) -> void {
-    io.print_string_stderr(s.buffer(), s.bytesLength())
+    io.eprint_str(s)
 }
 
 fn printlnErr(s: string) -> void {
-    io.println_string_stderr(s.buffer(), s.bytesLength())
+    io.eprintln_str(s)
 }

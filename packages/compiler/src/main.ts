@@ -6,8 +6,9 @@ import * as path from 'node:path';
 import * as url from 'node:url';
 import { createTypeCServices } from 'type-c-language';
 import { buildWorkspace } from './compiler/module-loader.js';
-import { LIRGenerator } from './compiler/tc-compiler.js';
+import { IRGenerator } from './compiler/tc-compiler.js';
 import { serializeFunction } from './ir/serializer.js';
+import { generateBytecode } from './codegen/index.js';
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
 
 const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -28,13 +29,27 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
         process.exit(-1);
     }
 
-    let generator = new LIRGenerator(services);
-    generator.generate(documents);
+    let generator = new IRGenerator(services);
+    const irProgram = generator.generate(documents);
     console.log(serializeFunction(generator.globalFunc));
+
+    // Code generation: IR → Type-V bytecode
+    if (irProgram) {
+        try {
+            const binary = generateBytecode(irProgram);
+            const outPath = opts.output
+                ?? path.join(opts.destination ?? path.dirname(fileName), 'output.tvbc');
+            await fs.writeFile(outPath, binary);
+            console.log(chalk.green(`Bytecode written to ${outPath} (${binary.length} bytes)`));
+        } catch (e) {
+            console.log(chalk.yellow(`Codegen: ${(e as Error).message}`));
+        }
+    }
 };
 
 export type GenerateOptions = {
     destination?: string;
+    output?: string;
 }
 
 export default function(): void {
@@ -45,6 +60,7 @@ export default function(): void {
     program
         .command('compile')
         .argument('<folder>', `source folder (containing module.json)`)
+        .option('-o, --output <path>', 'output file path for the .tvbc binary')
         .description('Compiles type-c')
         .action(generateAction);
 

@@ -1,0 +1,10 @@
+extern io from "stdio" = {
+    fn print_u64(val: u64) -> void
+    fn println_u64(val: u64) -> void
+}
+
+fn main() -> u32 {
+    let x: u32 = 42
+    io.println_u64(x)
+    return 0
+}

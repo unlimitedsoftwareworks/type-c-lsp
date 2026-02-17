@@ -1,831 +1,654 @@
 /**
- * LIR Builder API
- * Fluent API for constructing LIR programs
+ * Type-C IR Builder API
+ *
+ * Fluent API for constructing typed IR programs.
+ * Every instruction method returns `this` for chaining.
  */
 
-import {
-    DataType,
-    Literal,
-    BinaryOp,
-    UnaryOp,
-    NoArgOp,
-    CastType,
+import type {
+    IRType,
     IntType,
-    StringConcatType
+    FloatType,
+    NumericType,
+    CmpType,
+    CastKind
 } from './types.js';
 
-import {
-    Instruction,
-    LabelInstruction,
-    ConstInstruction,
-    BinaryOpInstruction,
-    UnaryOpInstruction,
-    AllocInstruction,
-    CallInstruction,
-    JumpInstruction,
-    BranchInstruction,
-    ReturnInstruction,
-    ExitInstruction,
-    ForInitInstruction,
-    ForLoopInstruction,
-    PhiInstruction,
-    PhiPair,
-    SetInstruction,
-    GetInstruction,
-    UndefInstruction,
-    GuardInstruction,
-    PrintInstruction,
-    NoArgInstruction,
-    GlobalLoadInstruction,
-    GlobalStoreInstruction,
-    WidenInstruction,
-    NarrowInstruction,
-    CastInstruction,
-    StringAllocInstruction,
-    StringConcatInstruction,
-    StringAllocFromBytesInstruction,
-    IsTrueCopyInstruction,
-    IsFalseCopyInstruction,
-    StructAllocInstruction,
-    StructGetInstruction,
-    StructSetInstruction,
-    ClassAllocInstruction,
-    ClassGetInstruction,
-    ClassSetInstruction,
-    ClassGetMethodInstruction,
-    InterfaceIsInstruction,
-    InterfaceHasMethodInstruction,
-    ArrayAllocInstruction,
-    ArrayLengthInstruction,
-    ArrayExtendInstruction,
-    ArraySliceInstruction,
-    ArrayGetInstruction,
-    ArraySetInstruction,
-    ClosureAllocInstruction,
-    ClosurePushEnvInstruction,
-    ClosureCallInstruction,
-    ClosureReturnInstruction,
-    CoroAllocInstruction,
-    CoroStateInstruction,
-    CoroCallInstruction,
-    CoroYieldInstruction,
-    CoroReturnInstruction,
-    CoroResetInstruction,
-    CoroFinishInstruction,
-    FFIRegisterInstruction,
-    FFICallInstruction,
-    FFICloseInstruction,
-    ThrowInstruction
+import type {
+    IRInstruction,
+    VReg,
+    PhiPair
 } from './instructions.js';
 
-// ===== Function Argument =====
+// ===== Function Parameter =====
 
-export interface FunctionArg {
+export interface FunctionParam {
     readonly name: string;
-    readonly type?: DataType;
+    readonly type: IRType;
 }
 
-// ===== Function =====
+// ===== Program-Level Metadata =====
 
-export class LIRFunction {
+export interface StructFieldShape {
+    globalFieldId: number;  // Mutable: rewritten by coloring (nameId → slot)
+    readonly type: IRType;
     readonly name: string;
-    readonly args: FunctionArg[];
-    readonly returnType?: DataType;
-    readonly instructions: Instruction[] = [];
+}
 
-    constructor(name: string, args: FunctionArg[] = [], returnType?: DataType) {
+export interface StructShape {
+    readonly id: string;
+    readonly fields: StructFieldShape[];
+}
+
+export interface ClassFieldShape {
+    readonly localFieldId: number;
+    readonly type: IRType;
+    readonly name: string;
+}
+
+export interface ClassMethodShape {
+    readonly methodId: number;
+    readonly name: string;
+    readonly funcName: string;
+}
+
+export interface ClassShape {
+    readonly id: string;
+    readonly uid: number;
+    readonly fields: ClassFieldShape[];
+    readonly methods: ClassMethodShape[];
+    readonly implementedInterfaces: string[];
+}
+
+export interface GlobalDecl {
+    readonly id: string;
+    readonly type: IRType;
+    readonly initializer?: string;
+}
+
+// ===== IR Function =====
+
+export class IRFunction {
+    readonly name: string;
+    readonly params: FunctionParam[];
+    readonly returnTypes: IRType[];
+    readonly isCoroutine: boolean;
+    readonly isClosure: boolean;
+    readonly instructions: IRInstruction[] = [];
+
+    constructor(
+        name: string,
+        params: FunctionParam[] = [],
+        returnTypes: IRType[] = [],
+        options?: { isCoroutine?: boolean; isClosure?: boolean }
+    ) {
         this.name = name;
-        this.args = args;
-        this.returnType = returnType;
+        this.params = params;
+        this.returnTypes = returnTypes;
+        this.isCoroutine = options?.isCoroutine ?? false;
+        this.isClosure = options?.isClosure ?? false;
     }
 
-    // ===== Label =====
+    // ===== Constants & Moves =====
 
-    label(name: string): this {
-        const instruction: LabelInstruction = {
-            kind: 'label',
-            name
-        };
-        this.instructions.push(instruction);
+    constInt(dest: VReg, value: bigint | number, intType: IntType): this {
+        this.instructions.push({
+            kind: 'const_int',
+            dest,
+            value: typeof value === 'number' ? BigInt(value) : value,
+            intType
+        });
         return this;
     }
 
-    // ===== Const =====
-
-    const(dest: string, value: Literal, type?: DataType): this {
-        const instruction: ConstInstruction = {
-            kind: 'const',
-            dest,
-            type,
-            value
-        };
-        this.instructions.push(instruction);
+    constFloat(dest: VReg, value: number, floatType: FloatType): this {
+        this.instructions.push({ kind: 'const_float', dest, value, floatType });
         return this;
     }
 
-    // ===== Binary Operations =====
-
-    binaryOp(dest: string, op: BinaryOp, arg1: string, arg2: string, type?: DataType): this {
-        const instruction: BinaryOpInstruction = {
-            kind: 'binary_op',
-            dest,
-            type,
-            op,
-            arg1,
-            arg2
-        };
-        this.instructions.push(instruction);
+    constBool(dest: VReg, value: boolean): this {
+        this.instructions.push({ kind: 'const_bool', dest, value });
         return this;
     }
 
-    add(dest: string, arg1: string, arg2: string, type?: DataType): this {
-        return this.binaryOp(dest, 'add', arg1, arg2, type);
-    }
-
-    sub(dest: string, arg1: string, arg2: string, type?: DataType): this {
-        return this.binaryOp(dest, 'sub', arg1, arg2, type);
-    }
-
-    mul(dest: string, arg1: string, arg2: string, type?: DataType): this {
-        return this.binaryOp(dest, 'mul', arg1, arg2, type);
-    }
-
-    div(dest: string, arg1: string, arg2: string, type?: DataType): this {
-        return this.binaryOp(dest, 'div', arg1, arg2, type);
-    }
-
-    mod(dest: string, arg1: string, arg2: string, type?: DataType): this {
-        return this.binaryOp(dest, 'mod', arg1, arg2, type);
-    }
-
-    // ===== Unary Operations =====
-
-    unaryOp(dest: string, op: UnaryOp, arg: string, type?: DataType): this {
-        const instruction: UnaryOpInstruction = {
-            kind: 'unary_op',
-            dest,
-            type,
-            op,
-            arg
-        };
-        this.instructions.push(instruction);
+    constNull(dest: VReg): this {
+        this.instructions.push({ kind: 'const_null', dest });
         return this;
     }
 
-    not(dest: string, arg: string, type?: DataType): this {
-        return this.unaryOp(dest, 'not', arg, type);
+    mov(dest: VReg, src: VReg, type: IRType): this {
+        this.instructions.push({ kind: 'mov', dest, src, type });
+        return this;
     }
 
-    neg(dest: string, arg: string, type?: DataType): this {
-        return this.unaryOp(dest, 'neg', arg, type);
+    // ===== Arithmetic =====
+
+    add(dest: VReg, lhs: VReg, rhs: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'add', dest, lhs, rhs, numType });
+        return this;
     }
 
-    // ===== Memory Operations =====
+    sub(dest: VReg, lhs: VReg, rhs: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'sub', dest, lhs, rhs, numType });
+        return this;
+    }
 
-    alloc(dest: string, size: string, type?: DataType): this {
-        const instruction: AllocInstruction = {
-            kind: 'alloc',
-            dest,
-            type,
-            size
-        };
-        this.instructions.push(instruction);
+    mul(dest: VReg, lhs: VReg, rhs: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'mul', dest, lhs, rhs, numType });
+        return this;
+    }
+
+    div(dest: VReg, lhs: VReg, rhs: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'div', dest, lhs, rhs, numType });
+        return this;
+    }
+
+    mod(dest: VReg, lhs: VReg, rhs: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'mod', dest, lhs, rhs, numType });
+        return this;
+    }
+
+    neg(dest: VReg, src: VReg, numType: NumericType): this {
+        this.instructions.push({ kind: 'neg', dest, src, numType });
+        return this;
+    }
+
+    // ===== Bitwise =====
+
+    shl(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'shl', dest, lhs, rhs });
+        return this;
+    }
+
+    shr(dest: VReg, lhs: VReg, rhs: VReg, signed: boolean): this {
+        this.instructions.push({ kind: 'shr', dest, lhs, rhs, signed });
+        return this;
+    }
+
+    band(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'band', dest, lhs, rhs });
+        return this;
+    }
+
+    bor(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'bor', dest, lhs, rhs });
+        return this;
+    }
+
+    bxor(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'bxor', dest, lhs, rhs });
+        return this;
+    }
+
+    bnot(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'bnot', dest, src });
+        return this;
+    }
+
+    // ===== Comparisons =====
+
+    cmpLt(dest: VReg, lhs: VReg, rhs: VReg, cmpType: NumericType): this {
+        this.instructions.push({ kind: 'cmp_lt', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpLe(dest: VReg, lhs: VReg, rhs: VReg, cmpType: NumericType): this {
+        this.instructions.push({ kind: 'cmp_le', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpGt(dest: VReg, lhs: VReg, rhs: VReg, cmpType: NumericType): this {
+        this.instructions.push({ kind: 'cmp_gt', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpGe(dest: VReg, lhs: VReg, rhs: VReg, cmpType: NumericType): this {
+        this.instructions.push({ kind: 'cmp_ge', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpEq(dest: VReg, lhs: VReg, rhs: VReg, cmpType: CmpType): this {
+        this.instructions.push({ kind: 'cmp_eq', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpNe(dest: VReg, lhs: VReg, rhs: VReg, cmpType: CmpType): this {
+        this.instructions.push({ kind: 'cmp_ne', dest, lhs, rhs, cmpType });
+        return this;
+    }
+
+    cmpEqStr(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'cmp_eq_str', dest, lhs, rhs });
+        return this;
+    }
+
+    cmpNeStr(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'cmp_ne_str', dest, lhs, rhs });
+        return this;
+    }
+
+    isNull(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'is_null', dest, src });
+        return this;
+    }
+
+    isTrue(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'is_true', dest, src });
+        return this;
+    }
+
+    isFalse(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'is_false', dest, src });
+        return this;
+    }
+
+    // ===== Logical =====
+
+    and(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'and', dest, lhs, rhs });
+        return this;
+    }
+
+    or(dest: VReg, lhs: VReg, rhs: VReg): this {
+        this.instructions.push({ kind: 'or', dest, lhs, rhs });
+        return this;
+    }
+
+    not(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'not', dest, src });
+        return this;
+    }
+
+    istc(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'istc', dest, src });
+        return this;
+    }
+
+    isfc(dest: VReg, src: VReg): this {
+        this.instructions.push({ kind: 'isfc', dest, src });
         return this;
     }
 
     // ===== Control Flow =====
 
-    call(func: string, args: string[] = [], dest?: string, type?: DataType): this {
-        const instruction: CallInstruction = {
-            kind: 'call',
-            dest,
-            type,
-            func,
-            args
-        };
-        this.instructions.push(instruction);
+    label(name: string): this {
+        this.instructions.push({ kind: 'label', name });
         return this;
     }
 
-    jmp(label: string): this {
-        const instruction: JumpInstruction = {
-            kind: 'jmp',
-            label
-        };
-        this.instructions.push(instruction);
+    jmp(target: string): this {
+        this.instructions.push({ kind: 'jmp', target });
         return this;
     }
 
-    br(condition: string, trueLabel: string, falseLabel: string): this {
-        const instruction: BranchInstruction = {
-            kind: 'br',
-            condition,
-            trueLabel,
-            falseLabel
-        };
-        this.instructions.push(instruction);
+    br(condition: VReg, trueLabel: string, falseLabel: string): this {
+        this.instructions.push({ kind: 'br', condition, trueLabel, falseLabel });
         return this;
     }
 
-    ret(value?: string): this {
-        const instruction: ReturnInstruction = {
-            kind: 'ret',
-            value
-        };
-        this.instructions.push(instruction);
+    ret(values: VReg[] = [], types: IRType[] = []): this {
+        this.instructions.push({ kind: 'ret', values, types });
         return this;
     }
 
-    exit(code: string): this {
-        const instruction: ExitInstruction = {
-            kind: 'exit',
-            code
-        };
-        this.instructions.push(instruction);
+    exit(code: VReg): this {
+        this.instructions.push({ kind: 'exit', code });
         return this;
     }
 
-    // ===== Loop Operations =====
+    // ===== Loops =====
 
-    fori(loopStart: string, initial: string, dest: string, step: string, loopEnd: string): this {
-        const instruction: ForInitInstruction = {
-            kind: 'fori',
-            loopStart,
-            initial,
-            dest,
-            step,
-            loopEnd
-        };
-        this.instructions.push(instruction);
+    forInit(base: VReg, init: VReg, limit: VReg, step: VReg, exitLabel: string): this {
+        this.instructions.push({ kind: 'for_init', base, init, limit, step, exitLabel });
         return this;
     }
 
-    forl(loopStart: string, initial: string, dest: string, step: string, loopEnd: string): this {
-        const instruction: ForLoopInstruction = {
-            kind: 'forl',
-            loopStart,
-            initial,
-            dest,
-            step,
-            loopEnd
-        };
-        this.instructions.push(instruction);
+    forLoop(base: VReg, exitLabel: string): this {
+        this.instructions.push({ kind: 'for_loop', base, exitLabel });
         return this;
     }
 
-    // ===== SSA Operations =====
+    // ===== Function Calls =====
 
-    phi(dest: string, pairs: PhiPair[], type?: DataType): this {
-        const instruction: PhiInstruction = {
-            kind: 'phi',
-            dest,
-            type,
-            pairs
-        };
-        this.instructions.push(instruction);
+    call(
+        dests: VReg[],
+        func: string,
+        args: VReg[],
+        argTypes: IRType[],
+        retTypes: IRType[]
+    ): this {
+        this.instructions.push({ kind: 'call', dests, func, args, argTypes, retTypes });
         return this;
     }
 
-    set(dest: string, source: string): this {
-        const instruction: SetInstruction = {
-            kind: 'set',
-            dest,
-            source
-        };
-        this.instructions.push(instruction);
+    callMethod(
+        dests: VReg[],
+        object: VReg,
+        methodId: number,
+        args: VReg[],
+        argTypes: IRType[],
+        retTypes: IRType[]
+    ): this {
+        this.instructions.push({
+            kind: 'call_method', dests, object, methodId, args, argTypes, retTypes
+        });
         return this;
     }
 
-    get(dest: string, type?: DataType): this {
-        const instruction: GetInstruction = {
-            kind: 'get',
-            dest,
-            type
-        };
-        this.instructions.push(instruction);
+    callClosure(
+        dests: VReg[],
+        closure: VReg,
+        args: VReg[],
+        argTypes: IRType[],
+        retTypes: IRType[]
+    ): this {
+        this.instructions.push({
+            kind: 'call_closure', dests, closure, args, argTypes, retTypes
+        });
         return this;
     }
 
-    undef(dest: string, type?: DataType): this {
-        const instruction: UndefInstruction = {
-            kind: 'undef',
-            dest,
-            type
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== Speculation =====
-
-    guard(condition: string, label: string): this {
-        const instruction: GuardInstruction = {
-            kind: 'guard',
-            condition,
-            label
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== Miscellaneous =====
-
-    print(...args: string[]): this {
-        const instruction: PrintInstruction = {
-            kind: 'print',
-            args
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    noArgOp(op: NoArgOp): this {
-        const instruction: NoArgInstruction = {
-            kind: 'no_arg',
-            op
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    nop(): this {
-        return this.noArgOp('nop');
-    }
-
-    // ===== Global Variables =====
-
-    globalLoad(dest: string, globalId: string, type?: DataType): this {
-        const instruction: GlobalLoadInstruction = {
-            kind: 'global_load',
-            dest,
-            type,
-            globalId
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    globalStore(globalId: string, value: string): this {
-        const instruction: GlobalStoreInstruction = {
-            kind: 'global_store',
-            globalId,
-            value
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== Type Conversion =====
-
-    widen(dest: string, sourceType: IntType, targetType: IntType, value: string, type?: DataType): this {
-        const instruction: WidenInstruction = {
-            kind: 'widen',
-            dest,
-            type,
-            sourceType,
-            targetType,
-            value
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    narrow(dest: string, sourceType: IntType, targetType: IntType, value: string, type?: DataType): this {
-        const instruction: NarrowInstruction = {
-            kind: 'narrow',
-            dest,
-            type,
-            sourceType,
-            targetType,
-            value
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    cast(dest: string, targetType: CastType, value: string, type?: DataType): this {
-        const instruction: CastInstruction = {
-            kind: 'cast',
-            dest,
-            type,
-            targetType,
-            value
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== String Operations =====
-
-    strAlloc(dest: string, type?: DataType): this {
-        const instruction: StringAllocInstruction = {
-            kind: 'str_alloc',
-            dest,
-            type
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    strConcat(dest: string, src: string, valueType: StringConcatType, value: string, type?: DataType): this {
-        const instruction: StringConcatInstruction = {
-            kind: 'str_concat',
-            dest,
-            type,
-            src,
-            valueType,
-            value
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    strFromBytes(dest: string, array: string, type?: DataType): this {
-        const instruction: StringAllocFromBytesInstruction = {
-            kind: 'str_from_bytes',
-            dest,
-            type,
-            array
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== Copy Operations =====
-
-    isTrueCopy(dest: string, src: string, type?: DataType): this {
-        const instruction: IsTrueCopyInstruction = {
-            kind: 'istc',
-            dest,
-            type,
-            src
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    isFalseCopy(dest: string, src: string, type?: DataType): this {
-        const instruction: IsFalseCopyInstruction = {
-            kind: 'isfc',
-            dest,
-            type,
-            src
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    // ===== Array Operations =====
-
-    arrayAlloc(dest: string, elementType: DataType, size: string, type?: DataType): this {
-        const instruction: ArrayAllocInstruction = {
-            kind: 'array_alloc',
-            dest,
-            type,
-            elementType,
-            size
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    arrayLength(dest: string, array: string, type?: DataType): this {
-        const instruction: ArrayLengthInstruction = {
-            kind: 'array_length',
-            dest,
-            type,
-            array
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    arrayExtend(array: string, newSize: string): this {
-        const instruction: ArrayExtendInstruction = {
-            kind: 'array_extend',
-            array,
-            newSize
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    arraySlice(dest: string, array: string, start: string, end: string, type?: DataType): this {
-        const instruction: ArraySliceInstruction = {
-            kind: 'array_slice',
-            dest,
-            type,
-            array,
-            start,
-            end
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    arrayGet(dest: string, array: string, index: string, type?: DataType): this {
-        const instruction: ArrayGetInstruction = {
-            kind: 'array_get',
-            dest,
-            type,
-            array,
-            index
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    arraySet(array: string, index: string, value: string): this {
-        const instruction: ArraySetInstruction = {
-            kind: 'array_set',
-            array,
-            index,
-            value
-        };
-        this.instructions.push(instruction);
+    callFFI(
+        dests: VReg[],
+        handle: VReg,
+        methodId: number,
+        args: VReg[],
+        argTypes: IRType[],
+        retTypes: IRType[]
+    ): this {
+        this.instructions.push({
+            kind: 'call_ffi', dests, handle, methodId, args, argTypes, retTypes
+        });
         return this;
     }
 
     // ===== Struct Operations =====
 
-    structAlloc(dest: string, typeId: string, type?: DataType): this {
-        const instruction: StructAllocInstruction = {
-            kind: 'struct_alloc',
-            dest,
-            type,
-            typeId
-        };
-        this.instructions.push(instruction);
+    structAlloc(dest: VReg, typeId: string): this {
+        this.instructions.push({ kind: 'struct_alloc', dest, typeId });
         return this;
     }
 
-    structGet(dest: string, struct: string, fieldId: string, type?: DataType): this {
-        const instruction: StructGetInstruction = {
-            kind: 'struct_get',
-            dest,
-            type,
-            struct,
-            fieldId
-        };
-        this.instructions.push(instruction);
+    structGet(dest: VReg, src: VReg, fieldId: number, resultType: IRType): this {
+        this.instructions.push({ kind: 'struct_get', dest, src, fieldId, resultType });
         return this;
     }
 
-    structSet(struct: string, fieldId: string, value: string): this {
-        const instruction: StructSetInstruction = {
-            kind: 'struct_set',
-            struct,
-            fieldId,
-            value
-        };
-        this.instructions.push(instruction);
+    structSet(struct: VReg, fieldId: number, value: VReg, valueType: IRType): this {
+        this.instructions.push({ kind: 'struct_set', struct, fieldId, value, valueType });
         return this;
     }
 
     // ===== Class Operations =====
 
-    classAlloc(dest: string, typeId: string, type?: DataType): this {
-        const instruction: ClassAllocInstruction = {
-            kind: 'class_alloc',
-            dest,
-            type,
-            typeId
-        };
-        this.instructions.push(instruction);
+    classAlloc(dest: VReg, typeId: string): this {
+        this.instructions.push({ kind: 'class_alloc', dest, typeId });
         return this;
     }
 
-    classGet(dest: string, classObj: string, fieldId: string, type?: DataType): this {
-        const instruction: ClassGetInstruction = {
-            kind: 'class_get',
-            dest,
-            type,
-            class: classObj,
-            fieldId
-        };
-        this.instructions.push(instruction);
+    classGet(dest: VReg, src: VReg, fieldId: number, resultType: IRType): this {
+        this.instructions.push({ kind: 'class_get', dest, src, fieldId, resultType });
         return this;
     }
 
-    classSet(classObj: string, fieldId: string, value: string): this {
-        const instruction: ClassSetInstruction = {
-            kind: 'class_set',
-            class: classObj,
-            fieldId,
-            value
-        };
-        this.instructions.push(instruction);
+    classSet(classReg: VReg, fieldId: number, value: VReg, valueType: IRType): this {
+        this.instructions.push({
+            kind: 'class_set', class: classReg, fieldId, value, valueType
+        });
         return this;
     }
 
-    classGetMethod(dest: string, classObj: string, methodId: string, type?: DataType): this {
-        const instruction: ClassGetMethodInstruction = {
-            kind: 'class_get_method',
-            dest,
-            type,
-            class: classObj,
-            methodId
-        };
-        this.instructions.push(instruction);
+    classGetMethod(dest: VReg, classReg: VReg, methodId: number): this {
+        this.instructions.push({
+            kind: 'class_get_method', dest, class: classReg, methodId
+        });
         return this;
     }
 
     // ===== Interface Operations =====
 
-    interfaceIs(interfaceVar: string, classId: string): this {
-        const instruction: InterfaceIsInstruction = {
-            kind: 'interface_is',
-            interface: interfaceVar,
-            classId
-        };
-        this.instructions.push(instruction);
+    interfaceIsClass(dest: VReg, interfaceReg: VReg, classId: number): this {
+        this.instructions.push({
+            kind: 'interface_is_class', dest, interface: interfaceReg, classId
+        });
         return this;
     }
 
-    interfaceHasMethod(interfaceVar: string, methodId: string): this {
-        const instruction: InterfaceHasMethodInstruction = {
-            kind: 'interface_has_method',
-            interface: interfaceVar,
-            methodId
-        };
-        this.instructions.push(instruction);
+    interfaceHasMethod(dest: VReg, interfaceReg: VReg, methodId: number): this {
+        this.instructions.push({
+            kind: 'interface_has_method', dest, interface: interfaceReg, methodId
+        });
+        return this;
+    }
+
+    // ===== Array Operations =====
+
+    arrayAlloc(dest: VReg, elementType: IRType, size: VReg): this {
+        this.instructions.push({ kind: 'array_alloc', dest, elementType, size });
+        return this;
+    }
+
+    arrayGet(dest: VReg, array: VReg, index: VReg, elementType: IRType): this {
+        this.instructions.push({ kind: 'array_get', dest, array, index, elementType });
+        return this;
+    }
+
+    arraySet(array: VReg, index: VReg, value: VReg, elementType: IRType): this {
+        this.instructions.push({ kind: 'array_set', array, index, value, elementType });
+        return this;
+    }
+
+    arrayLength(dest: VReg, array: VReg): this {
+        this.instructions.push({ kind: 'array_length', dest, array });
+        return this;
+    }
+
+    arrayExtend(array: VReg, newSize: VReg): this {
+        this.instructions.push({ kind: 'array_extend', array, newSize });
+        return this;
+    }
+
+    arraySlice(dest: VReg, array: VReg, start: VReg, end: VReg): this {
+        this.instructions.push({ kind: 'array_slice', dest, array, start, end });
+        return this;
+    }
+
+    // ===== String Operations =====
+
+    strConst(dest: VReg, value: string): this {
+        this.instructions.push({ kind: 'str_const', dest, value });
+        return this;
+    }
+
+    strAllocEmpty(dest: VReg): this {
+        this.instructions.push({ kind: 'str_alloc_empty', dest });
+        return this;
+    }
+
+    strConcat(dest: VReg, str: VReg, value: VReg, valueType: IRType): this {
+        this.instructions.push({ kind: 'str_concat', dest, str, value, valueType });
+        return this;
+    }
+
+    strFromBytes(dest: VReg, array: VReg): this {
+        this.instructions.push({ kind: 'str_from_bytes', dest, array });
         return this;
     }
 
     // ===== Closure Operations =====
 
-    closureAlloc(dest: string, func: string, type?: DataType): this {
-        const instruction: ClosureAllocInstruction = {
-            kind: 'closure_alloc',
-            dest,
-            type,
-            func
-        };
-        this.instructions.push(instruction);
+    closureAlloc(dest: VReg, funcName: string): this {
+        this.instructions.push({ kind: 'closure_alloc', dest, funcName });
         return this;
     }
 
-    closurePushEnv(closure: string, value: string): this {
-        const instruction: ClosurePushEnvInstruction = {
-            kind: 'closure_push_env',
-            closure,
-            value
-        };
-        this.instructions.push(instruction);
+    closurePushEnv(closure: VReg, value: VReg, valueType: IRType): this {
+        this.instructions.push({ kind: 'closure_push_env', closure, value, valueType });
         return this;
     }
 
-    closureCall(closure: string, args: string[] = [], dest?: string, type?: DataType): this {
-        const instruction: ClosureCallInstruction = {
-            kind: 'closure_call',
-            dest,
-            type,
-            closure,
-            args
-        };
-        this.instructions.push(instruction);
-        return this;
-    }
-
-    closureReturn(value?: string): this {
-        const instruction: ClosureReturnInstruction = {
-            kind: 'closure_return',
-            value
-        };
-        this.instructions.push(instruction);
+    closureRet(values: VReg[] = [], types: IRType[] = []): this {
+        this.instructions.push({ kind: 'closure_ret', values, types });
         return this;
     }
 
     // ===== Coroutine Operations =====
 
-    coroAlloc(dest: string, func: string, type?: DataType): this {
-        const instruction: CoroAllocInstruction = {
-            kind: 'coro_alloc',
-            dest,
-            type,
-            func
-        };
-        this.instructions.push(instruction);
+    coroAlloc(dest: VReg, funcName: string): this {
+        this.instructions.push({ kind: 'coro_alloc', dest, funcName });
         return this;
     }
 
-    coroState(dest: string, coro: string, type?: DataType): this {
-        const instruction: CoroStateInstruction = {
-            kind: 'coro_state',
-            dest,
-            type,
-            coro
-        };
-        this.instructions.push(instruction);
+    coroState(dest: VReg, coro: VReg): this {
+        this.instructions.push({ kind: 'coro_state', dest, coro });
         return this;
     }
 
-    coroCall(coro: string, args: string[] = [], dest?: string, type?: DataType): this {
-        const instruction: CoroCallInstruction = {
-            kind: 'coro_call',
-            dest,
-            type,
-            coro,
-            args
-        };
-        this.instructions.push(instruction);
+    coroCall(
+        dests: VReg[],
+        coro: VReg,
+        args: VReg[],
+        argTypes: IRType[],
+        retTypes: IRType[]
+    ): this {
+        this.instructions.push({
+            kind: 'coro_call', dests, coro, args, argTypes, retTypes
+        });
         return this;
     }
 
-    coroYield(value?: string): this {
-        const instruction: CoroYieldInstruction = {
-            kind: 'coro_yield',
-            value
-        };
-        this.instructions.push(instruction);
+    coroYield(values: VReg[] = [], types: IRType[] = []): this {
+        this.instructions.push({ kind: 'coro_yield', values, types });
         return this;
     }
 
-    coroReturn(value?: string): this {
-        const instruction: CoroReturnInstruction = {
-            kind: 'coro_return',
-            value
-        };
-        this.instructions.push(instruction);
+    coroRet(values: VReg[] = [], types: IRType[] = []): this {
+        this.instructions.push({ kind: 'coro_ret', values, types });
         return this;
     }
 
-    coroReset(coro: string): this {
-        const instruction: CoroResetInstruction = {
-            kind: 'coro_reset',
-            coro
-        };
-        this.instructions.push(instruction);
+    coroReset(coro: VReg): this {
+        this.instructions.push({ kind: 'coro_reset', coro });
         return this;
     }
 
-    coroFinish(coro: string): this {
-        const instruction: CoroFinishInstruction = {
-            kind: 'coro_finish',
-            coro
-        };
-        this.instructions.push(instruction);
+    coroFinish(coro: VReg): this {
+        this.instructions.push({ kind: 'coro_finish', coro });
         return this;
     }
 
-    // ===== FFI Operations =====
+    // ===== Global Variables =====
 
-    ffiRegister(libname: string, id: number): this {
-        const instruction: FFIRegisterInstruction = {
-            kind: 'ffi_register',
-            libname,
-            id
-        };
-        this.instructions.push(instruction);
+    globalLoad(dest: VReg, globalId: string, type: IRType): this {
+        this.instructions.push({ kind: 'global_load', dest, globalId, type });
         return this;
     }
 
-    ffiCall(handle: string, args: string[] = [], dest?: string, type?: DataType): this {
-        const instruction: FFICallInstruction = {
-            kind: 'ffi_call',
-            dest,
-            type,
-            handle,
-            args
-        };
-        this.instructions.push(instruction);
+    globalStore(globalId: string, value: VReg, type: IRType): this {
+        this.instructions.push({ kind: 'global_store', globalId, value, type });
         return this;
     }
 
-    ffiClose(handle: string): this {
-        const instruction: FFICloseInstruction = {
-            kind: 'ffi_close',
-            handle
-        };
-        this.instructions.push(instruction);
+    // ===== Type Conversion =====
+
+    widen(dest: VReg, src: VReg, from: IntType, to: IntType): this {
+        this.instructions.push({ kind: 'widen', dest, src, from, to });
         return this;
     }
 
-    // ===== Exception Handling =====
+    narrow(dest: VReg, src: VReg, from: IntType, to: IntType): this {
+        this.instructions.push({ kind: 'narrow', dest, src, from, to });
+        return this;
+    }
 
-    throw(value: string): this {
-        const instruction: ThrowInstruction = {
-            kind: 'throw',
-            value
-        };
-        this.instructions.push(instruction);
+    cast(dest: VReg, src: VReg, castKind: CastKind): this {
+        this.instructions.push({ kind: 'cast', dest, src, castKind });
+        return this;
+    }
+
+    // ===== SSA =====
+
+    phi(dest: VReg, pairs: PhiPair[], type: IRType): this {
+        this.instructions.push({ kind: 'phi', dest, pairs, type });
+        return this;
+    }
+
+    undef(dest: VReg, type: IRType): this {
+        this.instructions.push({ kind: 'undef', dest, type });
+        return this;
+    }
+
+    // ===== FFI =====
+
+    ffiRegister(dest: VReg, libName: string): this {
+        this.instructions.push({ kind: 'ffi_register', dest, libName });
+        return this;
+    }
+
+    ffiClose(handle: VReg): this {
+        this.instructions.push({ kind: 'ffi_close', handle });
+        return this;
+    }
+
+    // ===== Exception =====
+
+    throw(value: VReg): this {
+        this.instructions.push({ kind: 'throw', value });
+        return this;
+    }
+
+    // ===== Debug =====
+
+    debug(comment: string): this {
+        this.instructions.push({ kind: 'debug', comment });
         return this;
     }
 }
 
-// ===== Program =====
+// ===== IR Program =====
 
-export class LIRProgram {
-    readonly functions: LIRFunction[] = [];
+export class IRProgram {
+    readonly functions: IRFunction[] = [];
+    readonly structShapes: StructShape[] = [];
+    readonly classShapes: ClassShape[] = [];
+    readonly globals: GlobalDecl[] = [];
+    readonly stringConstants: string[] = [];
+    entryFunction: string = '';
+    /** Set by field coloring pass — total number of colored slots */
+    numFieldSlots: number = 0;
 
-    createFunction(name: string, args: FunctionArg[] = [], returnType?: DataType): LIRFunction {
-        const func = new LIRFunction(name, args, returnType);
+    createFunction(
+        name: string,
+        params: FunctionParam[] = [],
+        returnTypes: IRType[] = [],
+        options?: { isCoroutine?: boolean; isClosure?: boolean }
+    ): IRFunction {
+        const func = new IRFunction(name, params, returnTypes, options);
         this.functions.push(func);
         return func;
     }
 
-    addFunction(func: LIRFunction): this {
+    addFunction(func: IRFunction): this {
         this.functions.push(func);
         return this;
+    }
+
+    declareStruct(shape: StructShape): void {
+        this.structShapes.push(shape);
+    }
+
+    declareClass(shape: ClassShape): void {
+        this.classShapes.push(shape);
+    }
+
+    declareGlobal(decl: GlobalDecl): void {
+        this.globals.push(decl);
+    }
+
+    addStringConstant(value: string): number {
+        const existing = this.stringConstants.indexOf(value);
+        if (existing >= 0) return existing;
+        this.stringConstants.push(value);
+        return this.stringConstants.length - 1;
     }
 }

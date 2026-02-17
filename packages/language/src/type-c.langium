@@ -692,6 +692,7 @@ MethodOperatorName returns string:
 type IdentifiableReference =
     FunctionDeclaration |
     VariableDeclaration |
+    DestructuringElement | // Variables from tuple/array/struct destructuring
     NamespaceDecl |
     FunctionParameter |
     TypeDeclaration |

@@ -1,45 +1,47 @@
 /**
  * Example: Function calls with parameters
- * Recreates examples/05-function-calls.lir
+ * Demonstrates typed function calls with arg/return types.
  */
 
-import { LIRProgram, basicType, intLiteral, toLIRFile } from '../ir/index.js';
+import { IRProgram, scalarType, toLIRFile } from '../ir/index.js';
 
 export function runFuncCallDemo() {
-    
-    const program = new LIRProgram();
-    
+
+    const program = new IRProgram();
+
+    const i32 = scalarType('i32');
+
     // Create @add function with parameters
     const addFunc = program.createFunction(
         '@add',
         [
-            { name: 'a', type: basicType('i32') },
-            { name: 'b', type: basicType('i32') }
+            { name: 'a', type: i32 },
+            { name: 'b', type: i32 }
         ],
-        basicType('i32') // return type
+        [i32]
     );
-    
-    // result: int = add a b;
-    addFunc.add('result', 'a', 'b', basicType('i32'));
-    
-    // ret result;
-    addFunc.ret('result');
-    
+
+    // result: i32 = add.i32 a b
+    addFunc.add('result', 'a', 'b', 'i32');
+
+    // ret result: i32
+    addFunc.ret(['result'], [i32]);
+
     // Create @main function
     const main = program.createFunction('@main');
-    
-    // x: int = const 10;
-    main.const('x', intLiteral(10), basicType('i32'));
-    
-    // y: int = const 20;
-    main.const('y', intLiteral(20), basicType('i32'));
-    
-    // sum: int = call @add x y;
-    main.call('@add', ['x', 'y'], 'sum', basicType('i32'));
-    
-    // ret;
+
+    // x: i32 = const_int 10
+    main.constInt('x', 10, 'i32');
+
+    // y: i32 = const_int 20
+    main.constInt('y', 20, 'i32');
+
+    // sum: i32 = call @add(x: i32, y: i32)
+    main.call(['sum'], '@add', ['x', 'y'], [i32, i32], [i32]);
+
+    // ret
     main.ret();
-    
+
     // Generate .lir file
     console.log(toLIRFile(program));
 }

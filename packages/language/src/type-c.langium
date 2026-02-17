@@ -253,7 +253,7 @@ LogicalExpression infers Expression:
 LtGtExpression infers Expression:
     ComparisonExpression (
         {infer BinaryExpression.left = current}
-        op=(LESS_THAN | '>')
+        op=(LESS_THAN | '>' | '<<' | RightShiftOp)
         right=ComparisonExpression
     )*;
 
@@ -266,21 +266,14 @@ ComparisonExpression infers Expression:
     )*;
 
 BitwiseExpression infers Expression:
-    ShiftExpression (
-        {infer BinaryExpression.left = current}
-        op=('&' | '|' | '^')
-        right=ShiftExpression
-    )*;
-
-ShiftExpression infers Expression:
     AdditiveExpression (
         {infer BinaryExpression.left = current}
-        op=('<<' | RightShiftOp)
+        op=('&' | '|' | '^')
         right=AdditiveExpression
     )*;
 
 RightShiftOp returns string:
-    '>>';
+    '>' '>';
 
 AdditiveExpression infers Expression:
     MultiplicativeExpression (
@@ -669,7 +662,7 @@ MethodOperatorName returns string:
     '>' | 
     LESS_THAN '=' | 
     '>' '=' | 
-    '>' '>' | 
+    '>' '>' |
     LESS_THAN LESS_THAN | 
     '!' | 
     '~' | 
@@ -784,6 +777,7 @@ hidden terminal WS: /\s+/;
 // Treat `<` as GENERICS_OPEN only if there is a `>` later in the same "segment"
 terminal GENERICS_OPEN: /<(?=[_a-zA-Z"{])/;
 terminal LESS_THAN: /</;
+
 
 /**
  * Literals, order matters.

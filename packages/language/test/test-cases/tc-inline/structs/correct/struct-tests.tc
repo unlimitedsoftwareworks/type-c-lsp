@@ -146,10 +146,18 @@ fn testMultipleStructs() {
     return dx + dy
 }
 
+// Type alias resolution in struct fields
+// List<i32> is an alias for i32[], so i32[] must be assignable to List<i32>
+type List<T> = T[]
+type MapAlias<U, V> = {x: U, y: V}
+
 fn main() -> void {
     /// @Type(point): struct { x: f64, y: f64 }
     let point = createPoint()
     /// @Type(sum): f64
     let sum = accessFields()
+
+    /// @NoError
+    let aliasedMap: MapAlias<string, List<i32>> = {x: "hi", y: [1i32]}
 }
 

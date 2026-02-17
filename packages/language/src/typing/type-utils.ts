@@ -879,6 +879,17 @@ export class TypeCTypeUtils {
             return this.isReferenceAssignableToReference(from, to);
         }
 
+        // Resolve type alias references as a fallback before giving up.
+        // This handles cases like `i32[]` vs `List<i32>` (where List<T> = T[]),
+        // or any other type alias that wasn't caught by the specific checks above.
+        {
+            const resolvedFrom = this.resolveIfReference(from);
+            const resolvedTo = this.resolveIfReference(to);
+            if (resolvedFrom !== from || resolvedTo !== to) {
+                return this.isAssignable(resolvedFrom, resolvedTo);
+            }
+        }
+
         // Default: not assignable
         return failure(`${from.toString()} is not assignable to ${to.toString()}`);
     }

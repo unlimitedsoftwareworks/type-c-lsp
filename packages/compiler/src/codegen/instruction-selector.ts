@@ -649,7 +649,7 @@ export function selectInstructions(
 
             // === Array ===
             case 'array_alloc':
-                emit(makeABC(Op.ARRAY_ALLOC, r(regMap, inst.dest), r(regMap, inst.size), 0));
+                emit(makeABC(Op.ARRAY_ALLOC, r(regMap, inst.dest), r(regMap, inst.size), isPointer(inst.elementType) ? 1 : 0));
                 break;
             case 'array_get':
                 emit(makeABC(Op.ARRAY_GET_R, r(regMap, inst.dest), r(regMap, inst.array), r(regMap, inst.index)));

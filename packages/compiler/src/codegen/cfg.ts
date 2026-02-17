@@ -25,7 +25,8 @@ export interface BasicBlock {
 function isTerminator(inst: IRInstruction): boolean {
     return inst.kind === 'jmp' || inst.kind === 'br' || inst.kind === 'ret'
         || inst.kind === 'exit' || inst.kind === 'closure_ret'
-        || inst.kind === 'coro_ret' || inst.kind === 'coro_yield';
+        || inst.kind === 'coro_ret' || inst.kind === 'coro_yield'
+        || inst.kind === 'for_init';
 }
 
 function getTargets(inst: IRInstruction): string[] {
@@ -102,6 +103,10 @@ export function buildCFG(instructions: IRInstruction[]): BasicBlock[] {
             for (const t of targets) {
                 const targetBlockId = blockByLabel.get(t) ?? t;
                 succs.push(targetBlockId);
+            }
+            // for_init also falls through to body when initial condition passes
+            if (lastInst.kind === 'for_init' && i + 1 < blocks.length) {
+                succs.push(blocks[i + 1].id);
             }
             // br can fall through in some IR patterns; jmp/ret do not
         } else if (i + 1 < blocks.length) {

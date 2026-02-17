@@ -530,12 +530,18 @@ export function selectInstructions(
                 break;
 
             // === Loops ===
-            case 'for_init':
-                emit(makeABC(Op.MOV_RR, r(regMap, inst.base), r(regMap, inst.init), 0));
-                // base+1 = limit, base+2 = step
-                // The caller must ensure these are in consecutive registers
-                emitJump(Op.FORI, r(regMap, inst.base), inst.exitLabel);
+            case 'for_init': {
+                const base = r(regMap, inst.base);
+                // Copy init value into base register (iterator)
+                emit(makeABC(Op.MOV_RR, base, r(regMap, inst.init), 0));
+                // Copy limit into base+1 (consecutive register reserved by allocator)
+                emit(makeABC(Op.MOV_RR, base + 1, r(regMap, inst.limit), 0));
+                // Copy step into base+2 (consecutive register reserved by allocator)
+                emit(makeABC(Op.MOV_RR, base + 2, r(regMap, inst.step), 0));
+                // FORI: check condition, jump to exitLabel if iter >= limit
+                emitJump(Op.FORI, base, inst.exitLabel);
                 break;
+            }
 
             case 'for_loop':
                 emitJump(Op.FORL, r(regMap, inst.base), inst.exitLabel);

@@ -391,6 +391,14 @@ export function allocateRegisters(
     const numParams = params.length;
     const firstGeneral = numParams + numReturns;
 
+    // Detect for_init instructions that need consecutive register groups (base, base+1, base+2)
+    const consecutiveGroups = new Map<VReg, number>();
+    for (const inst of instructions) {
+        if (inst.kind === 'for_init') {
+            consecutiveGroups.set(inst.base, 3);
+        }
+    }
+
     // Sort intervals by start position
     intervals.sort((a, b) => a.start - b.start);
 
@@ -427,29 +435,83 @@ export function allocateRegisters(
         // Expire old intervals
         expireOld(active, interval.start, freeRegs);
 
-        if (freeRegs.length === 0) {
-            throw new Error(
-                `Register allocation failed: function requires more than 256 registers. ` +
-                `Consider splitting the function. (vreg: ${interval.vreg})`
-            );
+        const groupSize = consecutiveGroups.get(interval.vreg);
+        if (groupSize) {
+            // FORI/FORL: need `groupSize` consecutive physical registers
+            const sorted = [...freeRegs].sort((a, b) => a - b);
+            let found = -1;
+            for (let i = 0; i <= sorted.length - groupSize; i++) {
+                let consecutive = true;
+                for (let j = 1; j < groupSize; j++) {
+                    if (sorted[i + j] !== sorted[i] + j) {
+                        consecutive = false;
+                        break;
+                    }
+                }
+                if (consecutive) {
+                    found = sorted[i];
+                    break;
+                }
+            }
+            if (found === -1) {
+                throw new Error(
+                    `Register allocation failed: cannot find ${groupSize} consecutive registers ` +
+                    `for FORI/FORL base vreg ${interval.vreg}`
+                );
+            }
+
+            // Assign base register
+            interval.physReg = found;
+            regMap.set(interval.vreg, found);
+            removeFromFreeRegs(freeRegs, found);
+            if (isPointer(interval.type)) pointerRegs.add(found);
+            if (found > maxRegUsed) maxRegUsed = found;
+            insertActive(active, interval);
+
+            // Reserve ghost registers base+1 .. base+(groupSize-1) for the same lifetime
+            for (let g = 1; g < groupSize; g++) {
+                const ghostReg = found + g;
+                removeFromFreeRegs(freeRegs, ghostReg);
+                const ghostInterval: LiveInterval = {
+                    vreg: `${interval.vreg}__ghost_${g}` as VReg,
+                    type: { tag: 'scalar', scalar: 'i64' },
+                    start: interval.start,
+                    end: interval.end,
+                    physReg: ghostReg,
+                };
+                if (ghostReg > maxRegUsed) maxRegUsed = ghostReg;
+                insertActive(active, ghostInterval);
+            }
+        } else {
+            // Normal allocation path
+            if (freeRegs.length === 0) {
+                throw new Error(
+                    `Register allocation failed: function requires more than 256 registers. ` +
+                    `Consider splitting the function. (vreg: ${interval.vreg})`
+                );
+            }
+
+            const reg = freeRegs.pop()!;
+            interval.physReg = reg;
+            regMap.set(interval.vreg, reg);
+
+            if (isPointer(interval.type)) {
+                pointerRegs.add(reg);
+            }
+
+            if (reg > maxRegUsed) maxRegUsed = reg;
+
+            // Insert into active, maintaining sorted-by-end order
+            insertActive(active, interval);
         }
-
-        // Allocate
-        const reg = freeRegs.pop()!;
-        interval.physReg = reg;
-        regMap.set(interval.vreg, reg);
-
-        if (isPointer(interval.type)) {
-            pointerRegs.add(reg);
-        }
-
-        if (reg > maxRegUsed) maxRegUsed = reg;
-
-        // Insert into active, maintaining sorted-by-end order
-        insertActive(active, interval);
     }
 
     return { regMap, pointerRegs, maxRegUsed };
+}
+
+function removeFromFreeRegs(freeRegs: number[], reg: number): void {
+    const idx = freeRegs.indexOf(reg);
+    if (idx >= 0) freeRegs.splice(idx, 1);
 }
 
 function expireOld(active: LiveInterval[], currentStart: number, freeRegs: number[]): void {

@@ -1327,6 +1327,12 @@ export class IRGenerator {
     }
 
     private visitForStatement(node: ast.ForStatement): void {
+        // Try the optimized FORI/FORL path for simple numeric loops
+        if (this.tryEmitFORILoop(node)) {
+            return;
+        }
+
+        // Fall back to generic path
         const f = this.func();
         const loopStart = this.generateLabel('for_start');
         const loopBody = this.generateLabel('for_body');
@@ -1360,6 +1366,133 @@ export class IRGenerator {
         f.label(loopEnd);
         this.exitScope();
         this.popLoop();
+    }
+
+    /**
+     * Try to emit optimized FORI/FORL instructions for a numeric for-loop.
+     * Pattern: for let i: <int> = <init>; i < <limit>; i = i + <step> { body }
+     *
+     * Returns true if the optimized path was taken, false to fall back to generic.
+     */
+    private tryEmitFORILoop(node: ast.ForStatement): boolean {
+        // All three parts must be present
+        if (!node.init || !node.condition || !node.update) return false;
+
+        // 1. Init must be a single variable declaration with initializer
+        if (!ast.isVariableDeclarationStatement(node.init)) return false;
+        const initStmt = node.init;
+        if (initStmt.declarations.variables.length !== 1) return false;
+        const varDecl = initStmt.declarations.variables[0];
+        if (!ast.isVariableDeclSingle(varDecl) || !varDecl.initializer) return false;
+
+        // Variable must be integer type
+        const varIRType = this.getNodeIRType(varDecl);
+        if (!isInteger(varIRType)) return false;
+
+        // 2. Condition must be: loopVar < expr
+        if (!ast.isBinaryExpression(node.condition)) return false;
+        if (node.condition.op !== '<') return false;
+        if (!ast.isQualifiedReference(node.condition.left)) return false;
+        if (node.condition.left.reference?.ref !== varDecl) return false;
+
+        // 3. Update must be: loopVar = loopVar + step  OR  loopVar += step
+        if (!ast.isBinaryExpression(node.update)) return false;
+        let stepExpr: ast.Expression | undefined;
+
+        if (node.update.op === '=') {
+            // Pattern: i = i + step
+            if (!ast.isQualifiedReference(node.update.left)) return false;
+            if (node.update.left.reference?.ref !== varDecl) return false;
+            if (!ast.isBinaryExpression(node.update.right)) return false;
+            if (node.update.right.op !== '+') return false;
+            if (!ast.isQualifiedReference(node.update.right.left)) return false;
+            if (node.update.right.left.reference?.ref !== varDecl) return false;
+            stepExpr = node.update.right.right;
+        } else if (node.update.op === '+=') {
+            // Pattern: i += step
+            if (!ast.isQualifiedReference(node.update.left)) return false;
+            if (node.update.left.reference?.ref !== varDecl) return false;
+            stepExpr = node.update.right;
+        } else {
+            return false;
+        }
+
+        // 4. Loop variable must not be modified inside body
+        if (this.isVarModifiedInBody(varDecl, node.body)) return false;
+
+        // === All checks passed: emit FORI/FORL ===
+        const f = this.func();
+        this.enterScope();
+
+        const exitLabel = this.generateLabel('fori_exit');
+        const bodyLabel = this.generateLabel('fori_body');
+        const updateLabel = this.generateLabel('fori_update');
+
+        // break → exitLabel (after FORL), continue → updateLabel (before FORL)
+        this.pushLoop(exitLabel, updateLabel);
+
+        // Evaluate init, limit, step expressions
+        const initResult = this.visitExpression(varDecl.initializer, undefined);
+        const limitResult = this.visitExpression(node.condition.right, undefined);
+        const stepResult = this.visitExpression(stepExpr!, undefined);
+
+        // Allocate the loop variable (base register for FORI/FORL)
+        const baseReg = this.allocateVariable(varDecl.name, varIRType);
+
+        // forInit: sets base=init, checks condition, jumps to exit if iter >= limit
+        f.forInit(baseReg, initResult.register, limitResult.register,
+                  stepResult.register, exitLabel);
+
+        // Body
+        f.label(bodyLabel);
+        this.visitBlockStatement(node.body);
+
+        // Update point (continue target) + FORL
+        f.label(updateLabel);
+        // forLoop's label is the backward jump target (bodyLabel):
+        // FORL increments iter, then jumps backward to bodyLabel if iter < limit,
+        // otherwise falls through to exitLabel
+        f.forLoop(baseReg, bodyLabel);
+
+        // Exit
+        f.label(exitLabel);
+        this.exitScope();
+        this.popLoop();
+
+        return true;
+    }
+
+    /**
+     * Check if a variable is modified (assigned or postfix-operated) anywhere in a block.
+     * Used to guard FORI/FORL optimization — if the loop variable is modified in the body,
+     * we must fall back to the generic loop path.
+     */
+    private isVarModifiedInBody(
+        varDecl: ast.VariableDeclSingle,
+        body: ast.BlockStatement
+    ): boolean {
+        for (const node of AstUtils.streamAllContents(body)) {
+            // Check assignment expressions (=, +=, -=, etc.)
+            if (ast.isBinaryExpression(node)) {
+                const op = node.op;
+                if (op === '=' || op === '+=' || op === '-=' || op === '*=' ||
+                    op === '/=' || op === '%=' || op === '<<=' || op === '>>=' ||
+                    op === '&=' || op === '|=' || op === '^=') {
+                    if (ast.isQualifiedReference(node.left) &&
+                        node.left.reference?.ref === varDecl) {
+                        return true;
+                    }
+                }
+            }
+            // Check postfix operations (i++, i--)
+            if (ast.isPostfixOp(node)) {
+                if (ast.isQualifiedReference(node.expr) &&
+                    node.expr.reference?.ref === varDecl) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private visitForeachStatement(node: ast.ForeachStatement): void {

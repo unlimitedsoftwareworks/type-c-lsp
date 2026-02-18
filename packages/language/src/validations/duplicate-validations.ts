@@ -67,7 +67,7 @@ export class DuplicateValidator extends TypeCBaseValidation {
             LambdaExpression: this.checkLambdaParameters,
             FunctionType: this.checkFunctionTypeParameters,
             VariablesDeclarations: this.checkVariableDeclarationsInStatement,
-            Module: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope],
+            Module: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope, this.checkMainFunction],
             NamespaceDecl: [this.checkVariablesInScope, this.checkTypeDeclarationsInScope],
             BlockStatement: this.checkVariablesInScope,
             StructType: this.checkStructTypeFields,
@@ -502,6 +502,30 @@ export class DuplicateValidator extends TypeCBaseValidation {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Check that the 'main' function is not declared more than once in a module.
+     * The 'main' function serves as the program entry point and must be unique.
+     */
+    checkMainFunction = (node: ast.Module, accept: ValidationAcceptor): void => {
+        const mainFunctions = node.definitions.filter(
+            (d): d is ast.FunctionDeclaration => ast.isFunctionDeclaration(d) && d.name === 'main'
+        );
+
+        if (mainFunctions.length > 1) {
+            // Report on all but the first occurrence
+            for (let i = 1; i < mainFunctions.length; i++) {
+                accept('error',
+                    `Duplicate 'main' function: A 'main' function is already declared in this module.`,
+                    {
+                        node: mainFunctions[i],
+                        property: 'name',
+                        code: ErrorCode.TC_DUPLICATE_MAIN_FUNCTION
+                    }
+                );
             }
         }
     }

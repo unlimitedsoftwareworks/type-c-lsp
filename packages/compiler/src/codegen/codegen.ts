@@ -15,6 +15,7 @@
 
 import type { IRProgram, IRFunction } from '../ir/builder.js';
 import { colorFieldSlots } from './field-coloring.js';
+import { colorMethodSlots } from './method-coloring.js';
 import { eliminateSSA } from './cfg.js';
 import { allocateRegisters } from './register-allocator.js';
 import { selectInstructions } from './instruction-selector.js';
@@ -48,6 +49,35 @@ function applyFieldColoring(program: IRProgram): void {
                 const slot = coloring.slotMap.get(inst.fieldId);
                 if (slot !== undefined) {
                     inst.fieldId = slot;
+                }
+            }
+        }
+    }
+}
+
+// === Phase 0b: Method Coloring — rewrite nameIds to colored slots ===
+
+function applyMethodColoring(program: IRProgram): void {
+    const coloring = colorMethodSlots(program.classShapes);
+    program.numMethodSlots = coloring.numSlots;
+
+    // Rewrite class shape metadata: methodId (nameId) → slot
+    for (const shape of program.classShapes) {
+        for (const method of shape.methods) {
+            const slot = coloring.slotMap.get(method.methodId);
+            if (slot !== undefined) {
+                method.methodId = slot;
+            }
+        }
+    }
+
+    // Rewrite all call_method instructions: methodId (nameId) → slot
+    for (const fn of program.functions) {
+        for (const inst of fn.instructions) {
+            if (inst.kind === 'call_method') {
+                const slot = coloring.slotMap.get(inst.methodId);
+                if (slot !== undefined) {
+                    inst.methodId = slot;
                 }
             }
         }
@@ -100,6 +130,9 @@ function compileFunction(fn: IRFunction, stringConstants: string[], funcNameToIn
 export function generateBytecode(program: IRProgram): Uint8Array {
     // Phase 0: Field coloring (must run before per-function compilation)
     applyFieldColoring(program);
+
+    // Phase 0b: Method coloring (must run before per-function compilation)
+    applyMethodColoring(program);
 
     // Build string pool early — needed by instruction selector for FFI library names
     const strings = [...program.stringConstants];
@@ -166,6 +199,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         functions: compiledFunctions,
         entryFuncIndex,
         numFieldSlots: program.numFieldSlots,
+        numMethodSlots: program.numMethodSlots,
     };
 
     return encodeBinary(compiled);

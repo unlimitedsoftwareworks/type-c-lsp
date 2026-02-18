@@ -572,11 +572,16 @@ export function selectInstructions(
 
             case 'call_method': {
                 const objReg = r(regMap, inst.object);
-                // Get method pointer
-                emit(makeABC(Op.CLASS_GET_METHOD_I, objReg, objReg, inst.methodId));
-                // FN_ALLOC
-                const funcOffset = pool.add32(0);
-                emit(makeAD(Op.FN_ALLOC, 0, funcOffset));
+                // Use a scratch register for the func index loaded from vtable.
+                // Must NOT clobber objReg (needed for self). Use dests[0] if
+                // available (gets overwritten by return value anyway), else reg 253.
+                const scratchReg = inst.dests.length > 0
+                    ? r(regMap, inst.dests[0])
+                    : 253;
+                // Load func_idx from vtable into scratch register
+                emit(makeABC(Op.CLASS_GET_METHOD_I, scratchReg, objReg, inst.methodId));
+                // Allocate function frame from register-held func index
+                emit(makeABC(Op.FN_ALLOC_R, scratchReg, 0, 0));
                 // self = arg 0
                 emit(makeABC(Op.FN_SET_REG_PTR, 0, objReg, 0));
                 // remaining args

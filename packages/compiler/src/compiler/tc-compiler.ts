@@ -163,6 +163,22 @@ export class IRGenerator {
         return id;
     }
 
+    /** Maps method name string → unique numeric ID for method coloring */
+    private methodNameToId = new Map<string, number>();
+    private methodNameIdCounter = 0;
+
+    private getOrCreateMethodNameId(name: string): number {
+        let id = this.methodNameToId.get(name);
+        if (id === undefined) {
+            id = this.methodNameIdCounter++;
+            this.methodNameToId.set(name, id);
+        }
+        return id;
+    }
+
+    /** Maps class TypeDeclaration node → IR class name (for direct method dispatch) */
+    private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
+
     constructor(services: TypeCServices) {
         this.program = new IRProgram();
         this.context = this.createContext();
@@ -561,6 +577,14 @@ export class IRGenerator {
         if (ast.isClassMethod(ref) && ref.method) {
             return ref.method.names?.[0];
         }
+        // Interface method references resolve to MethodHeader directly
+        if (ast.isMethodHeader(ref)) {
+            return ref.names?.[0];
+        }
+        // Impl block method references
+        if (ast.isImplementationMethodDecl(ref) && ref.method) {
+            return ref.method.names?.[0];
+        }
         throw new Error("Ref has no name attribute!");
     }
 
@@ -777,6 +801,9 @@ export class IRGenerator {
 
         console.log(`Generating class: ${className}`);
 
+        // Record class name for direct dispatch at call sites
+        this.classNodeToIRName.set(classDecl, className);
+
         // Declare class shape in program metadata
         const classTd = this.getType(classDecl) as ClassTypeDescription;
         const classFields: ClassFieldShape[] = classTd.attributes.map((attr, idx) => ({
@@ -790,9 +817,9 @@ export class IRGenerator {
         for (const method of classTd.methods) {
             const primaryName = method.names[0] || `method_${methodIdx}`;
             classMethods.push({
-                methodId: methodIdx,
+                methodId: this.getOrCreateMethodNameId(primaryName),
                 name: primaryName,
-                funcName: `${className}::${primaryName}`
+                funcName: this.monoMorph.mangleName(`${className}::${primaryName}`)
             });
             methodIdx++;
         }
@@ -1184,7 +1211,22 @@ export class IRGenerator {
                 const objTd = this.getType(memberAccess.expr);
                 const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
 
-                if ((isClassType(resolvedObjTd) || isInterfaceType(resolvedObjTd)) && memberRef) {
+                if (isClassType(resolvedObjTd) && memberRef) {
+                    // Concrete class — direct call
+                    const methodName = this.getReferenceName(memberRef);
+                    const classNode = resolvedObjTd.node;
+                    const className = classNode && ast.isTypeDeclaration(classNode)
+                        ? this.classNodeToIRName.get(classNode) || classNode.name
+                        : undefined;
+                    if (className) {
+                        const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                        f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+                    } else {
+                        const methodId = this.getMethodId(resolvedObjTd, methodName);
+                        f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+                    }
+                } else if (isInterfaceType(resolvedObjTd) && memberRef) {
+                    // Interface — vtable dispatch
                     const methodName = this.getReferenceName(memberRef);
                     const methodId = this.getMethodId(resolvedObjTd, methodName);
                     f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
@@ -2524,11 +2566,29 @@ export class IRGenerator {
             const ffiMethodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
             const methodId = ffiTd.methods.findIndex(m => m.names.includes(ffiMethodName));
             f.callFFI(dests, obj.register, methodId >= 0 ? methodId : 0, argRegs, argTypes, retTypes);
-        } else if (isClassType(resolvedObjTd) || isInterfaceType(resolvedObjTd)) {
-            // Method call on class/interface
+        } else if (isClassType(resolvedObjTd)) {
+            // Concrete class type — direct call (no vtable dispatch needed)
             if (memberRef) {
                 const methodName = this.getReferenceName(memberRef);
-                // For now, use method ID 0 - TODO: proper method ID resolution
+                const classNode = resolvedObjTd.node;
+                const className = classNode && ast.isTypeDeclaration(classNode)
+                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    : undefined;
+                if (className) {
+                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+                } else {
+                    // Fallback to vtable dispatch if class name unknown
+                    const methodId = this.getMethodId(resolvedObjTd, methodName);
+                    f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+                }
+            } else {
+                f.callMethod(dests, obj.register, 0, argRegs, argTypes, retTypes);
+            }
+        } else if (isInterfaceType(resolvedObjTd)) {
+            // Interface type — vtable dispatch via colored method slots
+            if (memberRef) {
+                const methodName = this.getReferenceName(memberRef);
                 const methodId = this.getMethodId(resolvedObjTd, methodName);
                 f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
             } else {
@@ -3854,19 +3914,8 @@ export class IRGenerator {
     }
 
     private getMethodId(td: TypeDescription, methodName: string): number {
-        if (isClassType(td)) {
-            const idx = (td as ClassTypeDescription).methods.findIndex(
-                m => m.names.includes(methodName)
-            );
-            return idx >= 0 ? idx : 0;
-        }
-        if (isInterfaceType(td)) {
-            const idx = (td as InterfaceTypeDescription).methods.findIndex(
-                m => m.names.includes(methodName)
-            );
-            return idx >= 0 ? idx : 0;
-        }
-        return 0;
+        // Use global method name ID for coloring — same name always gets same ID
+        return this.getOrCreateMethodNameId(methodName);
     }
 
     private getVariantConstructorTag(constructorRef: ast.VariantConstructor): number {

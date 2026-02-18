@@ -1,0 +1,8 @@
+// Test duplicate main function declarations - should report error on second main
+
+fn main() {
+}
+
+/// @Error(TCE230): Duplicate 'main' function: A 'main' function is already declared in this module.
+fn main() {
+}

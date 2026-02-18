@@ -47,7 +47,7 @@ export interface ClassFieldShape {
 }
 
 export interface ClassMethodShape {
-    readonly methodId: number;
+    methodId: number;  // Mutable: rewritten by method coloring (nameId → slot)
     readonly name: string;
     readonly funcName: string;
 }
@@ -616,6 +616,8 @@ export class IRProgram {
     entryFunction: string = '';
     /** Set by field coloring pass — total number of colored slots */
     numFieldSlots: number = 0;
+    /** Set by method coloring pass — total number of colored method slots */
+    numMethodSlots: number = 0;
 
     createFunction(
         name: string,

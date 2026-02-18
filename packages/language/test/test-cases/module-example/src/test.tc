@@ -1,8 +1,34 @@
 from std.io import println
 
+type Animal = interface {
+    fn quack() -> void
+}
+
+type Dog = class Animal {
+    fn quack() {
+        println("Woof")
+    }
+}
+
+type Cat = class Animal {
+    fn quack() {
+        println("Meoow")
+    }
+}
+
 fn main() {
-    let c = {name: "zelda"}
-    println(c.name)
-    return 0
+
+    let dog: Animal = new Dog()
+    let cat: Animal = new Dog()
+
+    dog.quack()
+    println("done")
+/*
+    let objs: Animal[] =  [
+        dog, cat, dog   
+    ]
+
+    objs[0].quack()
+*/
 }
 

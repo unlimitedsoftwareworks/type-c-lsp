@@ -8,7 +8,7 @@
  *
  * [Header]
  *   magic:          u32    (0x54564243 = "TVBC")
- *   version:        u16    (1)
+ *   version:        u16    (3)
  *   flags:          u16    (reserved)
  *   numStrings:     u16
  *   numGlobals:     u16
@@ -16,6 +16,8 @@
  *   numClasses:     u16
  *   numFunctions:   u16
  *   entryFuncIndex: u16
+ *   numFieldSlots:  u16
+ *   numMethodSlots: u16
  *
  * [String Pool]
  *   For each string:
@@ -68,7 +70,7 @@ import type { IRType } from '../ir/types.js';
 // === Magic and Version ===
 
 export const BINARY_MAGIC = 0x54564243;  // "TVBC" in ASCII
-export const BINARY_VERSION = 2;
+export const BINARY_VERSION = 3;
 
 // === Type Tag Encoding ===
 
@@ -142,6 +144,7 @@ export interface CompiledProgram {
     readonly functions: CompiledFunction[];
     readonly entryFuncIndex: number;
     readonly numFieldSlots: number;
+    readonly numMethodSlots: number;
 }
 
 // === Binary Writer ===
@@ -218,6 +221,7 @@ export function encodeBinary(program: CompiledProgram): Uint8Array {
     w.writeU16(program.functions.length);
     w.writeU16(program.entryFuncIndex);
     w.writeU16(program.numFieldSlots);
+    w.writeU16(program.numMethodSlots);
 
     // --- String Pool ---
     const encoder = new TextEncoder();

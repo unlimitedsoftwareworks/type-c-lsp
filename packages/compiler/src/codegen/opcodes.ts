@@ -208,6 +208,9 @@ export enum Op {
 
     // --- Exit ---
     EXIT,
+
+    // --- Dynamic Function Alloc ---
+    FN_ALLOC_R,     // allocate function frame from register-held func index
 }
 
 // === Instruction Encoding ===

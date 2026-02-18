@@ -691,6 +691,8 @@ type IdentifiableReference =
     TypeDeclaration |
     ClassAttributeDecl |  // Add class attributes
     ClassMethod |         // Add class methods
+    MethodHeader |        // Interface method references resolve directly to MethodHeader
+    ImplementationMethodDecl | // Impl block method references
     VariantConstructor |  // Add variant constructors
     EnumCase |
     GenericType |

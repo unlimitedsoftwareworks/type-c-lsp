@@ -334,7 +334,7 @@ export interface CallMethodInstruction extends Instruction {
     readonly kind: 'call_method';
     readonly dests: VReg[];
     readonly object: VReg;
-    readonly methodId: number;
+    methodId: number;  // Mutable: rewritten by method coloring (nameId → slot)
     readonly args: VReg[];
     readonly argTypes: IRType[];
     readonly retTypes: IRType[];

@@ -1,0 +1,76 @@
+extern MathAPI from "stdmath" = {
+    /**
+     * Arithmetic functions
+     */
+    fn absf(f: f32) -> f32
+    fn absd(f: f64) -> f64
+    fn abs_i32(i: i32) -> i32
+    fn abs_i64(i: i64) -> i64
+    fn powf(base: f32, exp: f32) -> f32
+    fn powd(base: f64, exp: f64) -> f64
+    fn sqrtf(f: f32) -> f32
+    fn sqrtd(f: f64) -> f64
+    fn expf(f: f32) -> f32
+    fn expd(f: f64) -> f64
+    fn logf(f: f32) -> f32
+    fn logd(f: f64) -> f64
+    fn log10f(f: f32) -> f32
+    fn log10d(f: f64) -> f64
+    fn log2f(f: f32) -> f32
+    fn log2d(f: f64) -> f64
+    fn ceilf(f: f32) -> f32
+    fn ceild(f: f64) -> f64
+    fn floorf(f: f32) -> f32
+    fn floord(f: f64) -> f64
+    fn roundf(f: f32) -> f32
+    fn roundd(f: f64) -> f64
+
+    /**
+     * Trigonometric functions
+     */
+    fn sinf(f: f32) -> f32
+    fn sind(f: f64) -> f64
+    fn cosf(f: f32) -> f32
+    fn cosd(f: f64) -> f64
+    fn tanf(f: f32) -> f32
+    fn tand(f: f64) -> f64
+    fn asinf(f: f32) -> f32
+    fn asind(f: f64) -> f64
+    fn acosf(f: f32) -> f32
+    fn acosd(f: f64) -> f64
+    fn atanf(f: f32) -> f32
+    fn atand(f: f64) -> f64
+    fn sinhf(f: f32) -> f32
+    fn sinhd(f: f64) -> f64
+    fn coshf(f: f32) -> f32
+    fn coshd(f: f64) -> f64
+    fn tanhf(f: f32) -> f32
+    fn tanhd(f: f64) -> f64
+
+    /**
+     * Hyperbolic functions
+     */
+    fn asinhf(f: f32) -> f32
+    fn asinhd(f: f64) -> f64
+    fn acoshf(f: f32) -> f32
+    fn acoshd(f: f64) -> f64
+    fn atanhf(f: f32) -> f32
+    fn atanhd(f: f64) -> f64
+
+    /**
+     * Misc
+     */
+    // hypothenuse
+    fn hypotf(a: f32, b: f32) -> f32
+    fn hypotd(a: f64, b: f64) -> f64
+
+    // Copy sign of a to b
+    fn copysignf(a: f32, b: f32) -> f32
+    fn copysignd(a: f64, b: f64) -> f64
+
+    // NaN & Infinity
+    fn isnanf(f: f32) -> bool
+    fn isnand(f: f64) -> bool
+    fn isinff(f: f32) -> bool
+    fn isinfd(f: f64) -> bool
+}

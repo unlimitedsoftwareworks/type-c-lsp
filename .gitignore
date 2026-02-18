@@ -13,3 +13,4 @@ syntaxes/
 learning.md
 packages/language/test/test-cases/output.tvbc
 .claude/
+.claude/settings.local.json

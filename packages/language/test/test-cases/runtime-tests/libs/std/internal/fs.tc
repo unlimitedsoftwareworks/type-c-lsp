@@ -1,0 +1,59 @@
+/**
+ * @file fs.tc
+ * @brief Lowlevel VM filesystem API
+ * @details This file contains the API for the lowlevel VM filesystem.
+ * @author Praisethemoon
+ * @license see LICENSE.md
+ * @date 2025-11-11
+ */
+
+from std.fs import FSError
+
+extern fs from "stdfs" = { 
+    fn fs_open(name: u8[], mode: u8) -> (u64, FSError)
+    fn fs_close(handler: u64) -> FSError
+    fn fs_read_one(handler: u64, length: u64) -> (u8, FSError)
+    fn fs_read(handler: u64, length: u64) -> (u8[], FSError)
+    fn fs_readline(handler: u64) -> (u8[], FSError)
+    fn fs_readall(handler: u64) -> (u8[], FSError)
+    fn fs_write(handler: u64, data: u8[], length: u64) -> (u64, FSError)
+    fn fs_seek(handler: u64, offset: i64, whence: u8) -> FSError
+    fn fs_tell(handler: u64) -> (i64, FSError)
+    fn fs_eof(handler: u64) -> (u8, FSError)
+    fn fs_flush(handler: u64) -> FSError
+    fn fs_file_size(handler: u64) -> (u64, FSError)
+    fn fs_delete(name: u8[]) -> FSError
+    fn fs_mkdir(name: u8[]) -> FSError
+    fn fs_rmdir(name: u8[]) -> FSError
+    fn fs_listdir(name: u8[]) -> (u8[][], FSError)
+    fn fs_create_temp() -> (u8[], u64, FSError)
+    fn fs_get_current_directory() -> (u8[], FSError)
+    fn fs_get_user_directory() -> (u8[], FSError)
+    fn fs_get_file_attributes(name: u8[]) -> (u32, u32, u32, u64, u64, u64, u64, u64, u64, u32, u32, u64, u64, FSError)
+    fn fs_chmod(name: u8[], mode: u8) -> FSError
+    fn fs_exists(name: u8[]) -> (u8, FSError)
+    fn fs_copy(src: u8[], dest: u8[]) -> FSError
+    fn fs_move(src: u8[], dest: u8[]) -> FSError
+    fn fs_symlink(src: u8[], dest: u8[]) -> FSError
+    fn fs_readlink(name: u8[]) -> (u8[], FSError)
+    fn fs_realpath(name: u8[]) -> (u8[], FSError)
+    fn fs_getenv(name: u8[]) -> (u8[], FSError)
+    fn fs_setenv(name: u8[], value: u8[], overwrite: bool) -> FSError
+    fn fs_unsetenv(name: u8[]) -> FSError
+    fn fs_get_separator() -> u8
+
+    /**
+     * Path API
+     */
+    fn path_get_basename(path: u8[]) -> u8[]
+    fn path_change_basename(path: u8[], newBaseName: u8[]) -> u8[]
+    fn path_get_dirname(path: u8[]) -> u8[]
+    fn path_get_root(path: u8[]) -> u8[]
+    fn path_change_root(path: u8[], newRoot: u8[]) -> u8[]
+    fn path_is_absolute(path: u8[]) -> bool
+    fn path_is_relative(path: u8[]) -> bool
+    fn path_join(path1: u8[], path2: u8[]) -> u8[]
+    fn path_normalize(path: u8[]) -> u8[]
+    fn path_intersection(path1: u8[], path2: u8[]) -> u8[]
+
+}

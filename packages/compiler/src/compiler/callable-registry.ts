@@ -104,18 +104,20 @@ export class CallableRegistry {
     getGenericMethodName(
         classKey: string,
         methodDecl: ast.MethodHeader,
-        methodTypeArgs: readonly TypeDescription[]
+        methodTypeArgs: readonly TypeDescription[],
+        classDeclaration?: ast.TypeDeclaration
     ): string {
         // Register the instantiation with monomorphization registry
         const key = this.monoRegistry.registerMethodInstantiation(
             classKey,
             methodDecl,
-            methodTypeArgs
+            methodTypeArgs,
+            classDeclaration
         );
-        
+
         // Get mangled name from the key
         const mangledName = this.monoRegistry.mangleName(key);
-        
+
         return mangledName;
     }
 

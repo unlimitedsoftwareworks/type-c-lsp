@@ -552,18 +552,18 @@ export function selectInstructions(
 
             // === Function Calls ===
             case 'call': {
-                // FN_ALLOC: allocate callee frame with function index
-                const funcIdx = funcNameToIndex.get(inst.func) ?? 0xFFFF;
-                const funcOffset = pool.add32(funcIdx);
-                emit(makeAD(Op.FN_ALLOC, 0, funcOffset));
-                // FN_SET_REG for each argument
+                // FN_ALLOC: bare frame allocation (no func index)
+                emit(makeAD(Op.FN_ALLOC, 0, 0));
+                // FN_SET_REG for each argument (writes to frame->next)
                 for (let j = 0; j < inst.args.length; j++) {
                     const argReg = r(regMap, inst.args[j]);
                     const isPtr = isPointer(inst.argTypes[j]);
                     emit(makeABC(isPtr ? Op.FN_SET_REG_PTR : Op.FN_SET_REG, j, argReg, 0));
                 }
-                // FN_CALL
-                emit(makeABC(Op.FN_CALL, inst.args.length, inst.dests.length, 0));
+                // FN_CALL: AD format, D = constant pool offset for func index
+                const funcIdx = funcNameToIndex.get(inst.func) ?? 0xFFFF;
+                const funcOffset = pool.add32(funcIdx);
+                emit(makeAD(Op.FN_CALL, 0, funcOffset));
                 // FN_GET_RET_R: return values are in callee's regs 255, 254, 253...
                 for (let j = 0; j < inst.dests.length; j++) {
                     const destReg = r(regMap, inst.dests[j]);
@@ -583,9 +583,9 @@ export function selectInstructions(
                     : 253;
                 // Load func_idx from vtable into scratch register
                 emit(makeABC(Op.CLASS_GET_METHOD_I, scratchReg, objReg, inst.methodId));
-                // Allocate function frame from register-held func index
-                emit(makeABC(Op.FN_ALLOC_R, scratchReg, 0, 0));
-                // self = arg 0
+                // FN_ALLOC: bare frame allocation
+                emit(makeAD(Op.FN_ALLOC, 0, 0));
+                // self = arg 0 (writes to frame->next)
                 emit(makeABC(Op.FN_SET_REG_PTR, 0, objReg, 0));
                 // remaining args
                 for (let j = 0; j < inst.args.length; j++) {
@@ -593,7 +593,8 @@ export function selectInstructions(
                     const isPtr = isPointer(inst.argTypes[j]);
                     emit(makeABC(isPtr ? Op.FN_SET_REG_PTR : Op.FN_SET_REG, j + 1, argReg, 0));
                 }
-                emit(makeABC(Op.FN_CALL, inst.args.length + 1, inst.dests.length, 0));
+                // FN_CALL_R: dispatch using func index from scratch register
+                emit(makeABC(Op.FN_CALL_R, scratchReg, 0, 0));
                 // Return values at callee regs 255, 254, 253...
                 for (let j = 0; j < inst.dests.length; j++) {
                     const destReg = r(regMap, inst.dests[j]);
@@ -605,7 +606,22 @@ export function selectInstructions(
 
             case 'call_closure': {
                 const closureReg = r(regMap, inst.closure);
-                emit(makeABC(Op.CLOSURE_CALL, closureReg, inst.args.length, inst.dests.length));
+                // FN_ALLOC: bare frame allocation
+                emit(makeAD(Op.FN_ALLOC, 0, 0));
+                // FN_SET_REG for each argument (writes to frame->next)
+                for (let j = 0; j < inst.args.length; j++) {
+                    const argReg = r(regMap, inst.args[j]);
+                    const argIsPtr = isPointer(inst.argTypes[j]);
+                    emit(makeABC(argIsPtr ? Op.FN_SET_REG_PTR : Op.FN_SET_REG, j, argReg, 0));
+                }
+                // CLOSURE_CALL: copies upvalues into frame->next and dispatches
+                emit(makeABC(Op.CLOSURE_CALL, closureReg, 0, 0));
+                // Retrieve return values
+                for (let j = 0; j < inst.dests.length; j++) {
+                    const destReg = r(regMap, inst.dests[j]);
+                    const retIsPtr = isPointer(inst.retTypes[j]);
+                    emit(makeABC(retIsPtr ? Op.FN_GET_RET_PTR_R : Op.FN_GET_RET_R, destReg, 255 - j, 0));
+                }
                 break;
             }
 

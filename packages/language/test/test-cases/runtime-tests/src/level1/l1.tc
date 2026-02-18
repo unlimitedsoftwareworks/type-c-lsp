@@ -1,0 +1,5 @@
+from level1.numbers import l1Numbers
+
+fn l1() {
+    l1Numbers()
+}

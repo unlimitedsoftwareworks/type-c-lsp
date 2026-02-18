@@ -1,0 +1,17 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn level1TestNumbers(runner: TestUnit) {
+    let val: u64 = 0
+    let len: u64 = 10
+    for let i: u64 = val; i < len; i += 1 {
+        runner.assert_eq<u64>(i, i)
+        runner.assert_eq<u64>(len, 10u64)
+    }
+}
+
+fn l1Numbers() {
+    let test_1 = new TestUnit("test 1", "Test register allocation with jumps", level1TestNumbers)
+
+    let set = new UnitSet("STD Test 0", "Tests basic language constructors", [test_1])
+    return set.run()
+}

@@ -9,11 +9,6 @@ import { buildWorkspace } from './compiler/module-loader.js';
 import { IRGenerator } from './compiler/tc-compiler.js';
 import { serializeFunction } from './ir/serializer.js';
 import { generateBytecode } from './codegen/index.js';
-const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
-
-const packagePath = path.resolve(__dirname, '..', 'package.json');
-const packageContent = await fs.readFile(packagePath, 'utf-8');
-
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     const services = createTypeCServices(NodeFileSystem).TypeC;
     const {documents} = await buildWorkspace(fileName, services);
@@ -25,8 +20,9 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
     else {
         console.log(chalk.red("Some fails contain errors"))
         let failed = documents.filter(e => (e.diagnostics ?? [])?.filter(e => e.severity === 1).length > 0);
-        console.log(chalk.red(failed.map(e => e.uri.path).join(", ")))
-        process.exit(-1);
+        const failedPaths = failed.map(e => e.uri.path).join(", ");
+        console.log(chalk.red(failedPaths))
+        throw new Error(`Compilation failed: errors in ${failedPaths}`);
     }
 
     let generator = new IRGenerator(services);
@@ -52,7 +48,10 @@ export type GenerateOptions = {
     output?: string;
 }
 
-export default function(): void {
+export default async function(): Promise<void> {
+    const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+    const packagePath = path.resolve(__dirname, '..', 'package.json');
+    const packageContent = await fs.readFile(packagePath, 'utf-8');
     const program = new Command();
 
     program.version(JSON.parse(packageContent).version);
@@ -62,7 +61,13 @@ export default function(): void {
         .argument('<folder>', `source folder (containing module.json)`)
         .option('-o, --output <path>', 'output file path for the .tvbc binary')
         .description('Compiles type-c')
-        .action(generateAction);
+        .action(async (folder, opts) => {
+            try {
+                await generateAction(folder, opts);
+            } catch {
+                process.exit(-1);
+            }
+        });
 
     program.parse(process.argv);
 }

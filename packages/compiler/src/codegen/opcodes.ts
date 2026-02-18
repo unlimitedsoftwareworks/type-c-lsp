@@ -211,6 +211,7 @@ export enum Op {
 
     // --- Dynamic Function Alloc ---
     FN_ALLOC_R,     // allocate function frame from register-held func index
+    FN_CALL_R,      // dispatch frame->next (same as FN_CALL, for register-based calls)
 }
 
 // === Instruction Encoding ===

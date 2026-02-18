@@ -842,10 +842,70 @@ export class IRGenerator {
             }
         }
 
+        // Generate monomorphized versions of generic methods
+        this.generateGenericMethodInstantiations(classDecl, className);
+
         // Generate methods from implementation blocks
         // Implementation methods are stored separately in classType.implementations
         // and must be generated unless shadowed by an override in the class itself
         this.generateImplMethods(className, classType);
+    }
+
+    /**
+     * Generate monomorphized versions of generic methods in a class.
+     * For each registered instantiation of a generic method, compiles a specialized version.
+     */
+    private generateGenericMethodInstantiations(
+        classDecl: ast.TypeDeclaration,
+        className: string
+    ): void {
+        const classKey = className;
+        const methodInstantiations = this.monoMorph.getMethodInstantiations(classKey);
+
+        // Also check with the declaration name for non-generic classes
+        // (the classKey in the registry uses the declaration name)
+        let allInstantiations = methodInstantiations;
+        if (classDecl.name !== className) {
+            const extraInstantiations = this.monoMorph.getMethodInstantiations(classDecl.name);
+            allInstantiations = [...methodInstantiations, ...extraInstantiations];
+        }
+
+        for (const instantiation of allInstantiations) {
+            const methodDecl = instantiation.methodDeclaration;
+
+            // Find the ClassMethod AST node that contains this MethodHeader
+            const classType = classDecl.definition as ast.ClassType;
+            const classMethod = classType.methods.find(m => m.method === methodDecl);
+            if (!classMethod || !classMethod.method) continue;
+
+            const methodHeader = classMethod.method;
+            if (!methodHeader.genericParameters || methodHeader.genericParameters.length === 0) continue;
+
+            // Build substitutions for the method's generic parameters
+            const substitutions = new Map<string, TypeDescription>();
+            methodHeader.genericParameters.forEach((param, index) => {
+                if (index < instantiation.methodTypeArgs.length) {
+                    substitutions.set(param.name, instantiation.methodTypeArgs[index]);
+                }
+            });
+
+            // Get the mangled name for this instantiation
+            const funcName = this.callableRegistry.getGenericMethodName(
+                classKey,
+                methodHeader,
+                instantiation.methodTypeArgs,
+                classDecl
+            );
+
+            console.log(`  Generating generic method instantiation: ${funcName}`);
+
+            this.pushSubstitutions(substitutions);
+            try {
+                this.generateMethodWithName(className, classMethod, funcName);
+            } finally {
+                this.popSubstitutions();
+            }
+        }
     }
 
     /**
@@ -911,6 +971,87 @@ export class IRGenerator {
         );
 
         console.log(`  Generating method: ${fullMethodName}`);
+
+        // Build params: implicit 'this' + user params
+        const params: FunctionParam[] = [
+            { name: 'this', type: ptrType('class') }
+        ];
+        for (const param of methodHeader.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            params.push({ name: param.name, type: paramType });
+        }
+
+        // Return types
+        const returnTypes: IRType[] = [];
+        if (methodHeader.header.returnType) {
+            returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+        }
+
+        const lirFunc = this.program.createFunction(
+            fullMethodName, params, returnTypes
+        );
+
+        // Save and set context
+        const prevFunction = this.context.currentFunction;
+        const prevVars = new Map(this.context.variables);
+        const prevTemp = this.context.tempCounter;
+        const prevLabel = this.context.labelCounter;
+        const prevScope = this.context.scopeDepth;
+
+        this.context.currentFunction = lirFunc;
+        this.context.variables.clear();
+        this.context.tempCounter = 0;
+        this.context.labelCounter = 0;
+        this.context.scopeDepth = 0;
+
+        // Map 'this' parameter
+        this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+
+        // Map user parameters
+        for (const param of methodHeader.header.args) {
+            const paramType = param.type
+                ? this.convertTypeWithSubstitution(param.type)
+                : voidType();
+            this.context.variables.set(param.name, { register: param.name, type: paramType });
+        }
+
+        // Generate body
+        if (classMethod.body) {
+            this.visitBlockStatement(classMethod.body);
+        } else if (classMethod.expr) {
+            const result = this.visitExpression(classMethod.expr, undefined);
+            lirFunc.ret([result.register], [result.type]);
+        }
+
+        // Ensure function ends with a return (implicit void return)
+        const lastInst = lirFunc.instructions[lirFunc.instructions.length - 1];
+        if (!lastInst || (lastInst.kind !== 'ret' && lastInst.kind !== 'exit')) {
+            lirFunc.ret();
+        }
+
+        console.log(serializeFunction(lirFunc));
+
+        // Restore context
+        this.context.currentFunction = prevFunction;
+        this.context.variables = prevVars;
+        this.context.tempCounter = prevTemp;
+        this.context.labelCounter = prevLabel;
+        this.context.scopeDepth = prevScope;
+    }
+
+    /**
+     * Generate a method with an explicit mangled name.
+     * Used for monomorphized generic method instantiations.
+     */
+    private generateMethodWithName(
+        className: string,
+        classMethod: ast.ClassMethod,
+        fullMethodName: string
+    ): void {
+        if (!classMethod.method) return;
+        const methodHeader = classMethod.method;
 
         // Build params: implicit 'this' + user params
         const params: FunctionParam[] = [
@@ -2557,12 +2698,34 @@ export class IRGenerator {
         const objTd = this.getType(memberAccess.expr);
         const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
 
+        // Variant constructor via member access (e.g., AssertionResult.Ok())
+        if (memberRef && ast.isVariantConstructor(memberRef)) {
+            return this.visitVariantConstruction(node, memberRef);
+        }
+
         // Builtin prototype method calls (array.resize, string.cat, coro.reset, etc.)
         if (memberRef && ast.isBuiltinSymbolFn(memberRef)) {
             const methodName = this.getReferenceName(memberRef);
             return this.visitBuiltinMethodCall(
                 resolvedObjTd, methodName, obj, argRegs, argTypes, dests, retTypes
             );
+        }
+
+        // Field with function type — load field and call as closure
+        if (memberRef && ast.isClassAttributeDecl(memberRef)) {
+            const memberTd = this.getType(memberAccess);
+            const resolvedMemberTd = isReferenceType(memberTd) ? this.typeUtils.resolveIfReference(memberTd) : memberTd;
+            if (isFunctionType(resolvedMemberTd)) {
+                const fieldName = this.getReferenceName(memberRef);
+                const fieldIndex = this.getClassFieldIndex(resolvedObjTd, fieldName);
+                const closureReg = this.tmp();
+                f.classGet(closureReg, obj.register, fieldIndex, ptrType('closure'));
+                f.callClosure(dests, closureReg, argRegs, argTypes, retTypes);
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
         }
 
         if (isFFIType(resolvedObjTd)) {
@@ -2575,12 +2738,38 @@ export class IRGenerator {
             // Concrete class type — direct call (no vtable dispatch needed)
             if (memberRef) {
                 const methodName = this.getReferenceName(memberRef);
-                const classNode = resolvedObjTd.node;
+                let classNode = resolvedObjTd.node;
+                // Navigate from ClassType to its parent TypeDeclaration if needed
+                if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                    classNode = classNode.$container;
+                }
                 const className = classNode && ast.isTypeDeclaration(classNode)
                     ? this.classNodeToIRName.get(classNode) || classNode.name
                     : undefined;
                 if (className) {
-                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    // Check if the method is generic and resolve type arguments
+                    let methodHeader: ast.MethodHeader | undefined;
+                    if (ast.isClassMethod(memberRef)) {
+                        methodHeader = memberRef.method;
+                    } else if (ast.isMethodHeader(memberRef)) {
+                        methodHeader = memberRef;
+                    }
+
+                    let funcName: string;
+                    if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0
+                        && node.genericArgs && node.genericArgs.length > 0) {
+                        // Generic method call — resolve type arguments and use monomorphized name
+                        const methodTypeArgs = node.genericArgs.map(ga => this.getType(ga));
+                        const classDecl = classNode && ast.isTypeDeclaration(classNode) ? classNode : undefined;
+                        funcName = this.callableRegistry.getGenericMethodName(
+                            className,
+                            methodHeader,
+                            methodTypeArgs,
+                            classDecl
+                        );
+                    } else {
+                        funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    }
                     f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
                 } else {
                     // Fallback to vtable dispatch if class name unknown
@@ -3789,18 +3978,15 @@ export class IRGenerator {
             );
         }
 
-        // Primitive: compute arr[arr.length - 1 - index]
+        // Primitive: compute arr[arr.length - index]
+        // Grammar parses arr[-1] as index=1, so length-1 = last element
         const temp = this.tmp();
         const lenReg = this.tmp();
-        const oneReg = this.tmp();
-        const adjustedIdx = this.tmp();
         const realIdx = this.tmp();
         const elemType = this.getNodeIRType(node);
 
         f.arrayLength(lenReg, obj.register);
-        f.constInt(oneReg, 1, 'u64');
-        f.sub(adjustedIdx, lenReg, oneReg, 'u64');
-        f.sub(realIdx, adjustedIdx, index.register, 'u64');
+        f.sub(realIdx, lenReg, index.register, 'u64');
         f.arrayGet(temp, obj.register, realIdx, elemType);
 
         return { register: temp, type: elemType };
@@ -3826,16 +4012,13 @@ export class IRGenerator {
             );
         }
 
-        // Primitive: arr[arr.length - 1 - index] = value
+        // Primitive: arr[arr.length - index] = value
+        // Grammar parses arr[-1] as index=1, so length-1 = last element
         const lenReg = this.tmp();
-        const oneReg = this.tmp();
-        const adjustedIdx = this.tmp();
         const realIdx = this.tmp();
 
         f.arrayLength(lenReg, obj.register);
-        f.constInt(oneReg, 1, 'u64');
-        f.sub(adjustedIdx, lenReg, oneReg, 'u64');
-        f.sub(realIdx, adjustedIdx, index.register, 'u64');
+        f.sub(realIdx, lenReg, index.register, 'u64');
         f.arraySet(obj.register, realIdx, value.register, value.type);
 
         return value;

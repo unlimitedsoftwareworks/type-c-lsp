@@ -1,0 +1,12 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run",
+            "type": "node-terminal",
+            "request": "launch",
+            "preLaunchTask": "Type-C: Compile",
+            "command": "${config:typeC.typevBinaryPath} ${workspaceFolder}/out/output.tvbc"
+        }
+    ]
+}

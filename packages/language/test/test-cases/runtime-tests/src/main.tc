@@ -1,0 +1,6 @@
+from level1.l1 import l1
+
+fn main() {
+    l1()
+}
+

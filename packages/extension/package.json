@@ -11,6 +11,59 @@
         "Programming Languages"
     ],
     "contributes": {
+        "configuration": {
+            "title": "Type-C",
+            "properties": {
+                "typeC.typevBinaryPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the typev VM binary used to execute compiled .tvbc files."
+                },
+                "typeC.compilerCliPath": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the Type-C compiler CLI script (cli.js)."
+                }
+            }
+        },
+        "commands": [
+            {
+                "command": "typeC.compile",
+                "title": "Type-C: Compile",
+                "icon": "$(gear)"
+            },
+            {
+                "command": "typeC.compileAndRun",
+                "title": "Type-C: Compile and Run",
+                "icon": "$(play)"
+            }
+        ],
+        "keybindings": [
+            {
+                "command": "typeC.compile",
+                "key": "ctrl+shift+b",
+                "when": "typeC.isProject"
+            },
+            {
+                "command": "typeC.compileAndRun",
+                "key": "f5",
+                "when": "typeC.isProject && !inDebugMode"
+            }
+        ],
+        "menus": {
+            "editor/title": [
+                {
+                    "command": "typeC.compile",
+                    "when": "resourceLangId == type-c",
+                    "group": "navigation"
+                },
+                {
+                    "command": "typeC.compileAndRun",
+                    "when": "resourceLangId == type-c",
+                    "group": "navigation"
+                }
+            ]
+        },
         "languages": [{
             "id": "type-c",
             "aliases": ["Type-C", "type-c", "tc"],
@@ -24,7 +77,7 @@
         }]
     },
     "activationEvents": [
-        "onLanguage:type-c", "onFileSystem:tcd"
+        "onLanguage:type-c", "onFileSystem:tcd", "workspaceContains:module.json"
     ],
     "main": "./out/extension/main.cjs",
     "scripts": {
@@ -37,6 +90,7 @@
     },
     "dependencies": {
         "type-c-language": "0.0.1",
+        "type-c-compiler": "0.0.1",
         "vscode-languageclient": "~9.0.1",
         "vscode-languageserver": "~9.0.1"
     },

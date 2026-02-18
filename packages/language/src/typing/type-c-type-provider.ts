@@ -3489,18 +3489,18 @@ export class TypeCTypeProvider {
                         classDeclaration,
                         classGenericArgs
                     );
-                    
+
                     // Get the method declaration from the member access
                     const methodRef = node.expr.element.ref;
                     let methodHeader: ast.MethodHeader | undefined;
-                    
+
                     // The ref could be a ClassMethod or a MethodHeader directly
                     if (methodRef && ast.isClassMethod(methodRef)) {
                         methodHeader = methodRef.method;
                     } else if (methodRef && ast.isMethodHeader(methodRef)) {
                         methodHeader = methodRef;
                     }
-                    
+
                     if (methodHeader) {
                         // Extract method's generic parameters from substitutions if it has any
                         // For non-generic methods, pass empty array (they still need monomorphization since class is generic)
@@ -3511,6 +3511,30 @@ export class TypeCTypeProvider {
                             classKey,
                             methodHeader,
                             methodTypeArgs
+                        );
+                    }
+                }
+
+                // Register generic method instantiations on non-generic classes
+                // e.g., TestUnit.assert_eq<u64>(...) where TestUnit is non-generic but assert_eq has type params
+                if (classDeclaration && classGenericArgs.length === 0 && substitutions && substitutions.size > 0) {
+                    const methodRef = node.expr.element.ref;
+                    let methodHeader: ast.MethodHeader | undefined;
+
+                    if (methodRef && ast.isClassMethod(methodRef)) {
+                        methodHeader = methodRef.method;
+                    } else if (methodRef && ast.isMethodHeader(methodRef)) {
+                        methodHeader = methodRef;
+                    }
+
+                    if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
+                        const classKey = classDeclaration.name;
+                        const methodTypeArgs = Array.from(substitutions.values());
+                        this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
+                            classKey,
+                            methodHeader,
+                            methodTypeArgs,
+                            classDeclaration
                         );
                     }
                 }

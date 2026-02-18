@@ -170,26 +170,28 @@ export class MonomorphizationRegistry {
     registerMethodInstantiation(
         classKey: string,
         methodDecl: ast.MethodHeader,
-        methodTypeArgs: readonly TypeDescription[]
+        methodTypeArgs: readonly TypeDescription[],
+        classDeclaration?: ast.TypeDeclaration
     ): string {
         const classInst = this.classes.get(classKey);
-        if (!classInst) {
-            throw new Error(`Cannot register method instantiation: class instantiation not found for key '${classKey}'`);
+        const declaration = classInst?.declaration ?? classDeclaration;
+        if (!declaration) {
+            throw new Error(`Cannot register method instantiation: class instantiation not found for key '${classKey}' and no classDeclaration provided`);
         }
 
         const key = this.makeMethodKey(classKey, methodDecl, methodTypeArgs);
-        
+
         if (!this.methods.has(key)) {
             this.methods.set(key, {
                 classKey,
-                classDeclaration: classInst.declaration,
-                classTypeArgs: classInst.typeArgs,
+                classDeclaration: declaration,
+                classTypeArgs: classInst?.typeArgs ?? [],
                 methodDeclaration: methodDecl,
                 methodTypeArgs: [...methodTypeArgs], // Create a copy
                 key
             });
         }
-        
+
         return key;
     }
 
@@ -289,13 +291,21 @@ export class MonomorphizationRegistry {
     /**
      * Returns all method instantiations for a specific class instantiation.
      * Used during code generation to produce specialized method versions.
-     * 
+     *
      * @param classKey The class instantiation key
      * @returns Array of method instantiations for that class
      */
     getMethodInstantiations(classKey: string): MethodInstantiation[] {
         return Array.from(this.methods.values())
             .filter(m => m.classKey === classKey);
+    }
+
+    /**
+     * Returns all registered method instantiations.
+     * Used during code generation to produce specialized method versions.
+     */
+    getAllMethodInstantiations(): MethodInstantiation[] {
+        return Array.from(this.methods.values());
     }
 
     /**

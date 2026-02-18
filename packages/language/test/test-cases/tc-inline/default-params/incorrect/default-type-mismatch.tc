@@ -1,0 +1,5 @@
+// Test: Default value type doesn't match parameter type
+
+/// @Error(TCE026): Default value type mismatch
+fn bad(x: u32, y: u32 = "hello") -> void {
+}

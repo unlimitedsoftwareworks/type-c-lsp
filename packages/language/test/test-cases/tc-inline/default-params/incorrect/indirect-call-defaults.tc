@@ -1,0 +1,12 @@
+// Test: Assigning a function with defaults to a variable strips defaults.
+// Calling via the variable with fewer args should fail.
+
+fn greet(name: string, greeting: string = "Hello") -> string {
+    return greeting
+}
+
+fn main() -> void {
+    let f = greet
+    /// @Error(TCE020): Function call argument count mismatch: Expected 2 argument(s), but got 1
+    f("World")
+}

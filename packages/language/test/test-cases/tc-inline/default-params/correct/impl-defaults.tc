@@ -1,0 +1,5 @@
+// Test: Defaults belong on impl, not interface
+
+type Logger = interface {
+    fn log(msg: string, level: u32) -> void
+}

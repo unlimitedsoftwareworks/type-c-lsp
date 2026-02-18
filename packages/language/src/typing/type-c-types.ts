@@ -320,6 +320,17 @@ export interface FunctionParameterType {
     readonly name: string;
     readonly type: TypeDescription;
     readonly isMut: boolean;
+    readonly hasDefault: boolean;
+}
+
+/** Get the minimum arity (number of required params) of a function/method */
+export function getMinArity(params: readonly FunctionParameterType[]): number {
+    return params.filter(p => !p.hasDefault).length;
+}
+
+/** Get the maximum arity (always params.length) */
+export function getMaxArity(params: readonly FunctionParameterType[]): number {
+    return params.length;
 }
 
 export interface FunctionTypeDescription extends TypeDescription {

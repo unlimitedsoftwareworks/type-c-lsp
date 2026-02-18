@@ -19,6 +19,7 @@ import { isAssignmentOperator } from './operator-utils.js';
 import {
     FunctionTypeDescription,
     GenericTypeDescription,
+    getMinArity,
     InterfaceTypeDescription,
     isArrayType,
     isClassType,
@@ -676,9 +677,12 @@ export class TypeCTypeProvider {
                 // Look for init methods
                 const initMethods = resolvedClassType.methods.filter(m => m.names.includes('init'));
 
-                // Filter by argument count to find matching candidates
+                // Filter by argument count to find matching candidates (accounts for default parameters)
                 const argCount = parent.args.length;
-                const candidates = initMethods.filter(m => m.parameters.length === argCount);
+                const candidates = initMethods.filter(m => {
+                    const minArity = getMinArity(m.parameters);
+                    return argCount >= minArity && argCount <= m.parameters.length;
+                });
 
                 // Context-driven inference strategy:
                 // - If exactly 1 candidate: use expected type from that candidate's parameters
@@ -1342,7 +1346,8 @@ export class TypeCTypeProvider {
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
-                    arg.isMut
+                    arg.isMut,
+                    !!arg.defaultValue
                 )) ?? [];
 
                 // If method has explicit return type, use it for better accuracy
@@ -1393,7 +1398,8 @@ export class TypeCTypeProvider {
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
-                    arg.isMut
+                    arg.isMut,
+                    !!arg.defaultValue
                 )) ?? [];
 
                 // Check if we're already inferring this method (cycle detection)
@@ -1489,7 +1495,8 @@ export class TypeCTypeProvider {
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
-                    arg.isMut
+                    arg.isMut,
+                    !!arg.defaultValue
                 )) ?? [];
 
                 // If method has explicit return type, use it for better accuracy
@@ -1537,7 +1544,8 @@ export class TypeCTypeProvider {
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
                     arg.name,
                     this.getType(arg.type),
-                    arg.isMut
+                    arg.isMut,
+                    !!arg.defaultValue
                 )) ?? [];
 
                 // Check if we're already inferring this method (cycle detection)
@@ -1610,7 +1618,8 @@ export class TypeCTypeProvider {
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
-            arg.isMut
+            arg.isMut,
+            !!arg.defaultValue
         )) ?? [];
         const returnType = node.header?.returnType
             ? this.getType(node.header.returnType)
@@ -1638,7 +1647,8 @@ export class TypeCTypeProvider {
         const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
-            arg.isMut
+            arg.isMut,
+            !!arg.defaultValue
         )) ?? [];
 
         // Check if we're already inferring this method (cycle detection)
@@ -1857,7 +1867,8 @@ export class TypeCTypeProvider {
             const params = m.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
                 arg.name,
                 this.getType(arg.type),
-                arg.isMut
+                arg.isMut,
+                !!arg.defaultValue
             )) ?? [];
             const returnType = m.header.returnType
                 ? this.getType(m.header.returnType)
@@ -1984,7 +1995,8 @@ export class TypeCTypeProvider {
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name,
             this.getType(arg.type),
-            arg.isMut
+            arg.isMut,
+            !!arg.defaultValue
         )) ?? [];
 
         const isCoroutine = node.fnType === 'cfn';
@@ -2296,7 +2308,14 @@ export class TypeCTypeProvider {
         if (ast.isUnaryExpression(node)) return this.inferUnaryExpression(node);
 
         // Member access
-        if (ast.isMemberAccess(node)) return this.inferMemberAccess(node);
+        // Strip function defaults when member access is used as a value (not a call target)
+        if (ast.isMemberAccess(node)) {
+            const memberType = this.inferMemberAccess(node);
+            if (!this.isInCalleePosition(node)) {
+                return this.typeFactory.stripFunctionDefaults(memberType);
+            }
+            return memberType;
+        }
         if (ast.isFunctionCall(node)) return this.inferFunctionCall(node);
         if (ast.isIndexAccess(node)) return this.inferIndexAccess(node);
         if (ast.isIndexSet(node)) return this.inferIndexSet(node);
@@ -2427,6 +2446,15 @@ export class TypeCTypeProvider {
         return this.typeFactory.createF64Type(node);
     }
 
+    /**
+     * Check whether an expression node is in callee position (i.e., the `expr` of a FunctionCall).
+     * When a function reference is used as a value (not being called), we strip hasDefault
+     * from its parameters since default expansion is a declaration-site feature.
+     */
+    private isInCalleePosition(node: ast.Expression): boolean {
+        return ast.isFunctionCall(node.$container) && node.$container.expr === node;
+    }
+
     private inferQualifiedReference(node: ast.QualifiedReference): TypeDescription {
         // Langium cross-references have a .ref property pointing to the target AST node
         const ref = node.reference;
@@ -2490,7 +2518,12 @@ export class TypeCTypeProvider {
                 }
 
                 // Apply substitutions to the function type
-                return this.typeUtils.substituteGenerics(type, substitutions);
+                const substituted = this.typeUtils.substituteGenerics(type, substitutions);
+                // Strip defaults when function reference is used as a value (not direct call)
+                if (!this.isInCalleePosition(node)) {
+                    return this.typeFactory.stripFunctionDefaults(substituted);
+                }
+                return substituted;
             }
 
             // If not a function type, having generic args is an error
@@ -2514,6 +2547,10 @@ export class TypeCTypeProvider {
             return this.typeFactory.createMetaClassType(type, node);
         }
 
+        // Strip defaults when function reference is used as a value (not direct call)
+        if (!this.isInCalleePosition(node)) {
+            return this.typeFactory.stripFunctionDefaults(originalType);
+        }
         return originalType;
     }
 
@@ -5007,28 +5044,42 @@ export class TypeCTypeProvider {
      */
     resolveFunctionCall(args: ast.Expression[], functions: FunctionTypeDescription[]): number[] {
         const expressionTypes = args.map(arg => this.inferExpression(arg));
-        const argBasedCandidates = functions.filter(fn => fn.parameters.length === expressionTypes.length);
+        const argCount = expressionTypes.length;
 
+        // Filter candidates by arity range (accounts for default parameters)
+        const argBasedCandidates = functions.filter(fn => {
+            const minArity = getMinArity(fn.parameters);
+            return argCount >= minArity && argCount <= fn.parameters.length;
+        });
 
         if (argBasedCandidates.length === 1) {
             return [functions.indexOf(argBasedCandidates[0])];
         }
 
-
         const finalCandidates = [];
-        // First prio is exact match
-        for (const fn of functions) {
-            if (fn.parameters.every((param, index) => this.typeUtils.areTypesEqual(expressionTypes[index], param.type).success)) {
-                finalCandidates.push(fn);
+        // First prio is exact match (only check provided args)
+        for (const fn of argBasedCandidates) {
+            let allMatch = true;
+            for (let i = 0; i < argCount; i++) {
+                if (!this.typeUtils.areTypesEqual(expressionTypes[i], fn.parameters[i].type).success) {
+                    allMatch = false;
+                    break;
+                }
             }
+            if (allMatch) finalCandidates.push(fn);
         }
 
-        // Second prio is assignable match
+        // Second prio is assignable match (only check provided args)
         if (finalCandidates.length === 0) {
             for (const fn of argBasedCandidates) {
-                if (fn.parameters.every((param, index) => this.typeUtils.isAssignable(expressionTypes[index], param.type).success)) {
-                    finalCandidates.push(fn);
+                let allMatch = true;
+                for (let i = 0; i < argCount; i++) {
+                    if (!this.typeUtils.isAssignable(expressionTypes[i], fn.parameters[i].type).success) {
+                        allMatch = false;
+                        break;
+                    }
                 }
+                if (allMatch) finalCandidates.push(fn);
             }
         }
         return finalCandidates.map(fn => functions.indexOf(fn));

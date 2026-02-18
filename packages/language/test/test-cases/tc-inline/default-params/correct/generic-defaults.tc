@@ -1,0 +1,10 @@
+// Test: Default parameters with generic type parameters
+
+fn wrap<T>(val: T, tag: string = "default") -> string {
+    return tag
+}
+
+fn main() -> void {
+    let a = wrap<u32>(42u32)
+    let b = wrap<u32>(42u32, "custom")
+}

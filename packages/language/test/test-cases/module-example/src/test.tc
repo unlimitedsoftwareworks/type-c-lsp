@@ -1,34 +1,29 @@
 from std.io import println
 
-type Animal = interface {
-    fn quack() -> void
+type AbstractStorage = interface {
+    fn openFile(uri: string, mode: string)
 }
 
-type Dog = class Animal {
-    fn quack() {
-        println("Woof")
+type FileStorage = class {
+    fn openFile(uri: string, mode: string = "read") {
+        println("protocol: file://")
+        println(uri)
+        println(mode)
     }
 }
 
-type Cat = class Animal {
-    fn quack() {
-        println("Meoow")
+type S3Storage = class {
+    fn openFile(uri: string, mode: string = "write") {
+        println("protocol: s3://")
+        println(uri)
+        println(mode)
     }
 }
 
 fn main() {
-
-    let dog: Animal = new Dog()
-    let cat: Animal = new Dog()
-
-    dog.quack()
-    println("done")
-/*
-    let objs: Animal[] =  [
-        dog, cat, dog   
-    ]
-
-    objs[0].quack()
-*/
+    let const fs1: AbstractStorage = new FileStorage()
+    fs1.openFile("file1.tc", "write")
+    let const fs2: AbstractStorage = new S3Storage()
+    fs2.openFile("file2.tc", "write")
 }
 

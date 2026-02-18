@@ -56,6 +56,7 @@ import {
     VariantConstructorTypeDescription,
     VariantTypeDescription,
     VoidTypeDescription,
+    isFunctionType,
     isReferenceType,
 } from "./type-c-types.js";
 import { serializer } from "./type-serialization.js";
@@ -532,9 +533,23 @@ function createAttributeType(
 function createFunctionParameterType(
     name: string,
     type: TypeDescription,
-    isMut: boolean = false
+    isMut: boolean = false,
+    hasDefault: boolean = false
 ): FunctionParameterType {
-    return { name, type, isMut };
+    return { name, type, isMut, hasDefault };
+}
+
+/**
+ * Returns a copy of a function type with all hasDefault flags set to false.
+ * Used when a function reference is used as a value (not a direct call target),
+ * since default parameter expansion is a declaration-site feature.
+ */
+function stripFunctionDefaults(type: TypeDescription): TypeDescription {
+    if (!isFunctionType(type)) return type;
+    const strippedParams = type.parameters.map(p =>
+        createFunctionParameterType(p.name, p.type, p.isMut, false)
+    );
+    return createFunctionType(strippedParams, type.returnType, type.fnType, type.genericParameters, type.node);
 }
 
 function createFunctionType(
@@ -555,8 +570,8 @@ function createFunctionType(
             const genericsStr = genericParameters.length > 0 
                 ? `<${genericParameters.map(g => g.toString()).join(', ')}>`
                 : '';
-            const paramStrs = parameters.map(p => 
-                `${p.isMut ? 'mut ' : ''}${p.name}: ${p.type.toString()}`
+            const paramStrs = parameters.map(p =>
+                `${p.isMut ? 'mut ' : ''}${p.name}: ${p.type.toString()}${p.hasDefault ? ' = ...' : ''}`
             ).join(', ');
             return `${fnType}${genericsStr}(${paramStrs}) -> ${returnType.toString()}`;
         }
@@ -933,6 +948,7 @@ export class TypeCTypeFactory {
     createAttributeType = createAttributeType;
     createFunctionParameterType = createFunctionParameterType;
     createFunctionType = createFunctionType;
+    stripFunctionDefaults = stripFunctionDefaults;
     createCoroutineType = createCoroutineType;
     createReturnType = createReturnType;
     createTypeGuardType = createTypeGuardType;

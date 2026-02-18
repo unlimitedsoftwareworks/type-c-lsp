@@ -1020,7 +1020,8 @@ export class TypeCTypeUtils {
                             parameters: m.parameters.map(p => ({
                                 name: p.name,
                                 type: this.substituteGenerics(p.type, implSubstitutions!),
-                                isMut: p.isMut
+                                isMut: p.isMut,
+                                hasDefault: p.hasDefault
                             })),
                             returnType: this.substituteGenerics(m.returnType, implSubstitutions!)
                         }));
@@ -1938,7 +1939,8 @@ export class TypeCTypeUtils {
                 this.typeFactory.createFunctionParameterType(
                     p.name,
                     this.substituteGenericsImpl(p.type, substitutions, p.name ? `function parameter '${p.name}'` : `function parameter ${idx + 1}`, errors),
-                    p.isMut
+                    p.isMut,
+                    p.hasDefault
                 )
             );
             const substitutedReturn = this.substituteGenericsImpl(type.returnType, substitutions, 'function return type', errors);
@@ -2208,7 +2210,8 @@ export class TypeCTypeUtils {
                         this.typeFactory.createFunctionParameterType(
                             p.name,
                             this.substituteGenerics(p.type, substitutions, p.name ? `class method '${methodSig}' parameter '${p.name}'` : `class method '${methodSig}' parameter ${idx + 1}`, errors),
-                            p.isMut
+                            p.isMut,
+                            p.hasDefault
                         )
                     ),
                     this.substituteGenerics(m.returnType, substitutions, `class method '${methodSig}' return type`, errors),
@@ -2290,7 +2293,8 @@ export class TypeCTypeUtils {
                         return this.typeFactory.createFunctionParameterType(
                             p.name,
                             this.substituteGenerics(p.type, substitutions, paramContext, errors),
-                            p.isMut
+                            p.isMut,
+                            p.hasDefault
                         );
                     }),
                     this.substituteGenerics(m.returnType, substitutions, `interface method '${methodSig}' return type`, errors),
@@ -2818,7 +2822,7 @@ export class TypeCTypeUtils {
                 
                 // Unify parameter types (find common type for each position)
                 // This allows never to unify with concrete types
-                const unifiedParams: { name: string; type: TypeDescription; isMut: boolean }[] = [];
+                const unifiedParams: { name: string; type: TypeDescription; isMut: boolean; hasDefault: boolean }[] = [];
                 for (let i = 0; i < firstFunc.parameters.length; i++) {
                     const paramTypesAtPosition = functionTypes.map(fn => fn.parameters[i].type);
                     const commonParamType = this.getCommonType(paramTypesAtPosition);
@@ -2834,7 +2838,8 @@ export class TypeCTypeUtils {
                     unifiedParams.push({
                         name: firstFunc.parameters[i].name,
                         type: commonParamType,
-                        isMut: firstFunc.parameters[i].isMut
+                        isMut: firstFunc.parameters[i].isMut,
+                        hasDefault: firstFunc.parameters[i].hasDefault
                     });
                 }
                 

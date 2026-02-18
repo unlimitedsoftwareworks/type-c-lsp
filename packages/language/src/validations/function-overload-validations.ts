@@ -15,6 +15,7 @@ interface MethodSignature {
     genericParamCount: number;
     parameterTypes: string[];  // Serialized type representations
     parameterMutability: boolean[];  // Whether each parameter is mutable
+    defaultCount: number;  // Number of parameters with default values
     node: ast.MethodHeader | ast.FunctionDeclaration;
 }
 
@@ -447,6 +448,57 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                 }
             }
         }
+
+        // Check for ambiguous overloads due to default parameters
+        this.checkDefaultParamAmbiguity(signatures, accept);
+    }
+
+    /**
+     * Detect overload ambiguity caused by default parameters.
+     * Two overloads are ambiguous if their callable arity ranges overlap
+     * and parameter types match for some arity in the overlap.
+     */
+    private checkDefaultParamAmbiguity(signatures: MethodSignature[], accept: ValidationAcceptor): void {
+        for (let i = 0; i < signatures.length; i++) {
+            for (let j = i + 1; j < signatures.length; j++) {
+                const sigA = signatures[i];
+                const sigB = signatures[j];
+
+                if (sigA.name !== sigB.name) continue;
+                if (sigA.genericParamCount !== sigB.genericParamCount) continue;
+
+                const minA = sigA.parameterTypes.length - sigA.defaultCount;
+                const maxA = sigA.parameterTypes.length;
+                const minB = sigB.parameterTypes.length - sigB.defaultCount;
+                const maxB = sigB.parameterTypes.length;
+
+                const overlapMin = Math.max(minA, minB);
+                const overlapMax = Math.min(maxA, maxB);
+
+                if (overlapMin > overlapMax) continue;
+
+                // Check if types match for any arity in the overlap range
+                for (let arity = overlapMin; arity <= overlapMax; arity++) {
+                    let allMatch = true;
+                    for (let k = 0; k < arity; k++) {
+                        if (sigA.parameterTypes[k] !== sigB.parameterTypes[k]) {
+                            allMatch = false;
+                            break;
+                        }
+                    }
+                    if (allMatch) {
+                        accept('error',
+                            `Ambiguous function overload: '${sigA.name}' overloads have overlapping callable arity at ${arity} argument(s) with identical parameter types. Default parameters create ambiguity.`,
+                            {
+                                node: sigB.node,
+                                code: ErrorCode.TC_OVERLOAD_AMBIGUOUS_WITH_DEFAULTS
+                            }
+                        );
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -538,6 +590,9 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                 }
             }
         }
+
+        // Check for ambiguous overloads due to default parameters
+        this.checkDefaultParamAmbiguity(signatures, accept);
     }
 
     /**
@@ -548,12 +603,14 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
         const genericParamCount = fn.genericParameters?.length ?? 0;
         const parameterTypes: string[] = [];
         const parameterMutability: boolean[] = [];
+        let defaultCount = 0;
 
         // Get parameter types and mutability
         for (const param of fn.header.args) {
             const paramType = this.typeProvider.getType(param.type);
             parameterTypes.push(this.serializeType(paramType));
             parameterMutability.push(param.isMut || false);
+            if (param.defaultValue) defaultCount++;
         }
 
         return {
@@ -561,6 +618,7 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             genericParamCount,
             parameterTypes,
             parameterMutability,
+            defaultCount,
             node: fn
         };
     }
@@ -573,12 +631,14 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
         const genericParamCount = method.genericParameters?.length ?? 0;
         const parameterTypes: string[] = [];
         const parameterMutability: boolean[] = [];
+        let defaultCount = 0;
 
         // Get parameter types and mutability
         for (const param of method?.header?.args ?? []) {
             const paramType = this.typeProvider.getType(param.type);
             parameterTypes.push(this.serializeType(paramType));
             parameterMutability.push(param.isMut || false);
+            if (param.defaultValue) defaultCount++;
         }
 
         return {
@@ -586,6 +646,7 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
             genericParamCount,
             parameterTypes,
             parameterMutability,
+            defaultCount,
             node: method
         };
     }

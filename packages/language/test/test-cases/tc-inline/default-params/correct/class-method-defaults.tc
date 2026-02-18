@@ -1,0 +1,14 @@
+// Test: Class methods with default parameter values
+
+type Formatter = class {
+    fn format(value: u32, prefix: string = "[", suffix: string = "]") -> string {
+        return prefix
+    }
+}
+
+fn main() -> void {
+    let fmt = new Formatter()
+    let a = fmt.format(42u32)
+    let b = fmt.format(42u32, "(")
+    let c = fmt.format(42u32, "(", ")")
+}

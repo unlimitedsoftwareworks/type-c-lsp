@@ -10,3 +10,6 @@ syntaxes/
 *.tsbuildinfo
 *.vsix
 .DS_Store
+learning.md
+packages/language/test/test-cases/output.tvbc
+.claude/

@@ -1,0 +1,11 @@
+// Test: Multiple default parameters and partial omission
+
+fn format(value: u32, prefix: string = "[", suffix: string = "]") -> string {
+    return prefix
+}
+
+fn main() -> void {
+    let a = format(42u32)
+    let b = format(42u32, "(")
+    let c = format(42u32, "(", ")")
+}

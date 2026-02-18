@@ -1,0 +1,4 @@
+// Test: Default expressions cannot reference other function parameters (TCE027)
+
+/// @Error(TCE027): Default value for 'y' cannot reference parameter 'x'
+fn bad(x: u32, y: u32 = x) -> void { }

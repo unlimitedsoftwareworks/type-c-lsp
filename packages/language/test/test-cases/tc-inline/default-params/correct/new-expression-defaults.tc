@@ -1,0 +1,57 @@
+// Test: NewExpression with default parameter values on init methods
+
+type Counter = class {
+    let count: u32
+
+    fn init(start: u32 = 0u32) {
+        this.count = start
+    }
+}
+
+type Range = class {
+    let lo: u32
+    let hi: u32
+
+    fn init(lo: u32, hi: u32 = 100u32) {
+        this.lo = lo
+        this.hi = hi
+    }
+}
+
+type Config = class {
+    let width: u32
+    let height: u32
+    let depth: u32
+
+    fn init(width: u32 = 800u32, height: u32 = 600u32, depth: u32 = 32u32) {
+        this.width = width
+        this.height = height
+        this.depth = depth
+    }
+}
+
+fn main() {
+    // All defaults
+    let a = new Counter()
+
+    // Override the default
+    let b = new Counter(10u32)
+
+    // Partial defaults: provide required, omit optional
+    let c = new Range(5u32)
+
+    // Provide all arguments explicitly
+    let d = new Range(5u32, 50u32)
+
+    // All defaults for multiple params
+    let e = new Config()
+
+    // Partial: provide first, rest default
+    let f = new Config(1024u32)
+
+    // Partial: provide first two, last defaults
+    let g = new Config(1024u32, 768u32)
+
+    // All provided
+    let h = new Config(1024u32, 768u32, 24u32)
+}

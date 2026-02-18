@@ -26,6 +26,7 @@ import {
     isUnionType,
     isVariantConstructorType,
     isVariantType,
+    getMinArity,
     MethodType,
     TypeDescription,
     TypeKind
@@ -70,16 +71,17 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             FunctionCall: [this.checkFunctionCall, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
-            FunctionDeclaration: this.checkFunctionDeclaration,
-            ClassMethod: [this.checkClassMethod, this.checkOverrideMethod, this.checkStaticMethodTemplateUsage],
+            FunctionDeclaration: [this.checkFunctionDeclaration, this.checkDefaultParameterOrdering, this.checkDefaultParameterTypes, this.checkDefaultExpressionScope],
+            ClassMethod: [this.checkClassMethod, this.checkOverrideMethod, this.checkStaticMethodTemplateUsage, this.checkClassMethodDefaultParams, this.checkClassMethodDefaultExpressionScope],
             LambdaExpression: this.checkLambdaExpression,
             IndexSet: [this.checkIndexSet, this.checkIndexAccessMultipleIndices],
             ReverseIndexSet: this.checkReverseIndexSet,
             JoinType: this.checkJoinType,
-            InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames],
+            InterfaceType: [this.checkInterfaceInheritance, this.checkInterfaceMethodNames, this.checkInterfaceMethodDefaults],
             ClassType: this.checkClassImplementation,
             ImplementationType: this.checkImplementaiton,
             ClassImplementationMethodDecl: this.checkClassImplDeclaration,
+            ImplementationMethodDecl: [this.checkImplMethodDefaultParams, this.checkImplMethodDefaultExpressionScope],
             MemberAccess: [this.checkVariantConstructorUsage, this.checkMemberAccess, this.checkLocalMemberAccess, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             DenullExpression: [this.checkDenullExpression, this.checkExpressionForErrors],
             NamedStructConstructionExpression: [this.checkStructSpreadFieldTypes, this.checkExpressionForErrors],
@@ -768,10 +770,15 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             const coroutineType = fnType;
             const args = node.args || [];
             
-            // Check argument count
-            if (args.length !== coroutineType.parameters.length) {
+            // Check argument count (accounts for default parameters)
+            const coroMinArity = getMinArity(coroutineType.parameters);
+            const coroMaxArity = coroutineType.parameters.length;
+            if (args.length < coroMinArity || args.length > coroMaxArity) {
                 const errorCode = ErrorCode.TC_COROUTINE_CALL_ARG_COUNT_MISMATCH;
-                accept('error', `Coroutine call argument count mismatch: Expected ${coroutineType.parameters.length} argument(s), but got ${args.length}`, {
+                const expected = coroMinArity === coroMaxArity
+                    ? `${coroMinArity}`
+                    : `${coroMinArity} to ${coroMaxArity}`;
+                accept('error', `Coroutine call argument count mismatch: Expected ${expected} argument(s), but got ${args.length}`, {
                     node,
                     code: errorCode
                 });
@@ -857,21 +864,27 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             paramTypes = paramTypes.map(param => ({
                 name: param.name,
                 type: this.typeUtils.substituteGenerics(param.type, finalSubstitutions),
-                isMut: param.isMut
+                isMut: param.isMut,
+                hasDefault: param.hasDefault
             }));
         }
 
-        // Check argument count
-        if (args.length !== paramTypes.length) {
+        // Check argument count (accounts for default parameters)
+        const fnMinArity = getMinArity(paramTypes);
+        const fnMaxArity = paramTypes.length;
+        if (args.length < fnMinArity || args.length > fnMaxArity) {
             const errorCode = ErrorCode.TC_FUNCTION_CALL_ARG_COUNT_MISMATCH;
-            accept('error', `Function call argument count mismatch: Expected ${paramTypes.length} argument(s), but got ${args.length}`, {
+            const expected = fnMinArity === fnMaxArity
+                ? `${fnMinArity}`
+                : `${fnMinArity} to ${fnMaxArity}`;
+            accept('error', `Function call argument count mismatch: Expected ${expected} argument(s), but got ${args.length}`, {
                 node,
                 code: errorCode
             });
             return;
         }
 
-        // Check each argument type
+        // Check each argument type (only for provided args)
         args.forEach((arg, index) => {
             const expectedType = paramTypes[index].type;
             const actualType = this.typeProvider.getType(arg);
@@ -963,7 +976,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             );
 
             // Check argument count
-            if (args.length !== substitutedParams.length) {
+            if (args.length !== substitutedParams.length) {  // Variant constructors don't support defaults, so exact match
                 const errorCode = ErrorCode.TC_VARIANT_CONSTRUCTOR_ARG_COUNT_MISMATCH;
                 accept('error', `Variant constructor '${constructorType.constructorName}' expects ${substitutedParams.length} argument(s), but got ${args.length}`, {
                     node,
@@ -1453,7 +1466,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                                     parameters: implMethod.parameters.map(p => ({
                                         name: p.name,
                                         type: this.typeUtils.substituteGenerics(p.type, substitutions!),
-                                        isMut: p.isMut
+                                        isMut: p.isMut,
+                                        hasDefault: p.hasDefault
                                     })),
                                     returnType: this.typeUtils.substituteGenerics(implMethod.returnType, substitutions!)
                                 });
@@ -2370,6 +2384,26 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
+     * Interface methods cannot have default parameter values.
+     * Defaults are implementation-specific — they belong on the implementing class or impl, not the interface contract.
+     */
+    checkInterfaceMethodDefaults = (node: ast.InterfaceType, accept: ValidationAcceptor): void => {
+        for (const method of node.methods) {
+            for (const param of method.header?.args ?? []) {
+                if (param.defaultValue) {
+                    accept('error',
+                        `Interface methods cannot have default parameter values. Default values are implementation-specific — move the default to the implementing class or impl.`,
+                        {
+                            node: param.defaultValue,
+                            code: ErrorCode.TC_INTERFACE_DEFAULT_PARAM
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
      * Check class implementation of interfaces.
      *
      * When a class declares it extends interfaces (e.g., `class Container<T>`),
@@ -3039,8 +3073,11 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const args = node.args || [];
         const argCount = args.length;
         
-        // Filter init methods by argument count
-        const matchingArityMethods = initMethods.filter(m => m.parameters.length === argCount);
+        // Filter init methods by argument count (accounts for default parameters)
+        const matchingArityMethods = initMethods.filter(m => {
+            const minArity = getMinArity(m.parameters);
+            return argCount >= minArity && argCount <= m.parameters.length;
+        });
         
         // If no init methods match the argument count, report error
         if (initMethods.length > 0 && matchingArityMethods.length === 0) {
@@ -4258,7 +4295,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                         parameters: interfaceMethod.parameters.map(p => ({
                             name: p.name,
                             type: this.typeUtils.substituteGenerics(p.type, substitutions),
-                            isMut: p.isMut
+                            isMut: p.isMut,
+                            hasDefault: p.hasDefault
                         })),
                         returnType: this.typeUtils.substituteGenerics(interfaceMethod.returnType, substitutions)
                     };
@@ -4300,7 +4338,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                                     parameters: otherImplMethod.parameters.map(p => ({
                                         name: p.name,
                                         type: this.typeUtils.substituteGenerics(p.type, otherSubstitutions!),
-                                        isMut: p.isMut
+                                        isMut: p.isMut,
+                                        hasDefault: p.hasDefault
                                     })),
                                     returnType: this.typeUtils.substituteGenerics(otherImplMethod.returnType, otherSubstitutions!)
                                 });
@@ -5584,6 +5623,168 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
         
         return undefined;
+    }
+
+    // ========================================================================
+    // Default Parameter Validations
+    // ========================================================================
+
+    /**
+     * Check that parameters with default values come after all required parameters.
+     */
+    checkDefaultParameterOrdering = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
+        const params = node.header?.args ?? [];
+        this.validateDefaultParamOrdering(params, accept);
+    }
+
+    /**
+     * Same check for class methods.
+     */
+    checkClassMethodDefaultParams = (node: ast.ClassMethod, accept: ValidationAcceptor): void => {
+        const params = node.method?.header?.args ?? [];
+        this.validateDefaultParamOrdering(params, accept);
+        this.validateDefaultParamTypes(params, accept);
+    }
+
+    private validateDefaultParamOrdering(params: ast.FunctionParameter[], accept: ValidationAcceptor): void {
+        let seenDefault = false;
+        for (const param of params) {
+            if (param.defaultValue) {
+                seenDefault = true;
+            } else if (seenDefault) {
+                accept('error',
+                    `Required parameter '${param.name}' cannot appear after a parameter with a default value.`,
+                    {
+                        node: param,
+                        property: 'name',
+                        code: ErrorCode.TC_DEFAULT_PARAM_BEFORE_REQUIRED
+                    }
+                );
+            }
+        }
+    }
+
+    /**
+     * Check that default expressions have types assignable to their declared parameter types.
+     */
+    checkDefaultParameterTypes = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
+        const params = node.header?.args ?? [];
+        this.validateDefaultParamTypes(params, accept);
+    }
+
+    private validateDefaultParamTypes(params: ast.FunctionParameter[], accept: ValidationAcceptor): void {
+        for (const param of params) {
+            if (param.defaultValue && param.type) {
+                const paramType = this.typeProvider.getType(param.type);
+                const defaultType = this.typeProvider.getType(param.defaultValue);
+
+                const result = this.isTypeCompatible(defaultType, paramType);
+                if (!result.success) {
+                    accept('error',
+                        `Default value type mismatch: Parameter '${param.name}' has type '${paramType.toString()}', but default value has type '${defaultType.toString()}'`,
+                        {
+                            node: param.defaultValue,
+                            code: ErrorCode.TC_DEFAULT_PARAM_TYPE_MISMATCH
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Check that default parameter expressions do not reference other function parameters
+     * or local variables. Default expressions are expanded at the call site, so they cannot
+     * access the declaring function's scope. Only literals and module-level declarations are safe.
+     */
+    checkDefaultExpressionScope = (node: ast.FunctionDeclaration, accept: ValidationAcceptor): void => {
+        const params = node.header?.args ?? [];
+        this.validateDefaultExpressionScope(params, accept);
+    }
+
+    /**
+     * Same check for class methods.
+     */
+    checkClassMethodDefaultExpressionScope = (node: ast.ClassMethod, accept: ValidationAcceptor): void => {
+        const params = node.method?.header?.args ?? [];
+        this.validateDefaultExpressionScope(params, accept);
+    }
+
+    /**
+     * Default parameter validations for impl block methods.
+     * Checks ordering (TCE025) and type compatibility (TCE026).
+     */
+    checkImplMethodDefaultParams = (node: ast.ImplementationMethodDecl, accept: ValidationAcceptor): void => {
+        const params = node.method?.header?.args ?? [];
+        this.validateDefaultParamOrdering(params, accept);
+        this.validateDefaultParamTypes(params, accept);
+    }
+
+    /**
+     * Default expression scope validation for impl block methods (TCE027).
+     */
+    checkImplMethodDefaultExpressionScope = (node: ast.ImplementationMethodDecl, accept: ValidationAcceptor): void => {
+        const params = node.method?.header?.args ?? [];
+        this.validateDefaultExpressionScope(params, accept);
+    }
+
+    private validateDefaultExpressionScope(params: ast.FunctionParameter[], accept: ValidationAcceptor): void {
+        // Collect all parameter names in this function for reference checking
+        const paramNames = new Set(params.map(p => p.name));
+
+        for (const param of params) {
+            if (!param.defaultValue) continue;
+
+            // Walk the default expression node itself AND all its descendants
+            // streamAllContents only yields descendants, so we also need to check the root node
+            const nodesToCheck = [param.defaultValue, ...AstUtils.streamAllContents(param.defaultValue)];
+            for (const child of nodesToCheck) {
+                if (ast.isQualifiedReference(child)) {
+                    const ref = child.reference?.ref;
+                    if (!ref) continue;
+
+                    // Reject references to other function parameters
+                    if (ast.isFunctionParameter(ref) && paramNames.has(ref.name)) {
+                        accept('error',
+                            `Default value for '${param.name}' cannot reference parameter '${ref.name}'. Default expressions are evaluated at the call site and cannot access other parameters.`,
+                            {
+                                node: child,
+                                code: ErrorCode.TC_DEFAULT_PARAM_REFERENCES_LOCAL
+                            }
+                        );
+                    }
+
+                    // Reject references to local variables (VariableDeclaration inside a function body)
+                    if (ast.isVariableDeclaration(ref) || ast.isVariableDeclSingle(ref)) {
+                        // Check if the variable is local (inside a function/method body, not module-level)
+                        const containingFn = AstUtils.getContainerOfType(ref, ast.isFunctionDeclaration);
+                        const containingMethod = AstUtils.getContainerOfType(ref, ast.isClassMethod);
+                        const containingImpl = AstUtils.getContainerOfType(ref, ast.isImplementationMethodDecl);
+                        if (containingFn || containingMethod || containingImpl) {
+                            const varName = ast.isVariableDeclSingle(ref) ? ref.name : '(variable)';
+                            accept('error',
+                                `Default value for '${param.name}' cannot reference local variable '${varName}'. Default expressions are evaluated at the call site and cannot access local scope.`,
+                                {
+                                    node: child,
+                                    code: ErrorCode.TC_DEFAULT_PARAM_REFERENCES_LOCAL
+                                }
+                            );
+                        }
+                    }
+                }
+
+                // Reject 'this' expressions
+                if (ast.isThisExpression(child)) {
+                    accept('error',
+                        `Default value for '${param.name}' cannot reference 'this'. Default expressions are evaluated at the call site.`,
+                        {
+                            node: child,
+                            code: ErrorCode.TC_DEFAULT_PARAM_REFERENCES_LOCAL
+                        }
+                    );
+                }
+            }
+        }
     }
 
 }

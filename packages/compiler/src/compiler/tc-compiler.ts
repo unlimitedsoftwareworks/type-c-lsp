@@ -52,7 +52,8 @@ import {
     isFFIType,
     isCoroutineType,
     isStringType,
-    isStringLiteralType
+    isStringLiteralType,
+    getMinArity
 } from 'type-c-language/types';
 import type {
     VariantConstructorTypeDescription,
@@ -420,10 +421,11 @@ export class IRGenerator {
 
         if (candidates.length === 0) return undefined;
 
-        // Filter by argument count
-        const argFiltered = candidates.filter(
-            ({ method }) => method.parameters.length === rhsTypes.length
-        );
+        // Filter by argument count (accounts for default parameters)
+        const argFiltered = candidates.filter(({ method }) => {
+            const minArity = getMinArity(method.parameters);
+            return rhsTypes.length >= minArity && rhsTypes.length <= method.parameters.length;
+        });
 
         if (argFiltered.length === 0) return undefined;
 
@@ -2458,6 +2460,9 @@ export class IRGenerator {
             }
         }
 
+        // Expand default arguments for any missing parameters
+        this.expandDefaultArguments(node, argRegs, argTypes);
+
         // Determine call type based on expression
         if (ast.isMemberAccess(node.expr)) {
             return this.visitMethodCall(node, argRegs, argTypes);
@@ -2604,6 +2609,95 @@ export class IRGenerator {
             return { register: dests[0], type: retTypes[0] };
         }
         return { register: this.tmp(), type: voidType() };
+    }
+
+    // ---- Default Argument Expansion ----
+
+    /**
+     * Expands default arguments at the call site.
+     * When a function call provides fewer arguments than parameters,
+     * this evaluates the default expressions and appends them to the arg lists.
+     */
+    private expandDefaultArguments(
+        node: ast.FunctionCall,
+        argRegs: VReg[],
+        argTypes: IRType[]
+    ): void {
+        const params = this.resolveCallTargetParams(node);
+        if (!params) return;
+        if (argRegs.length >= params.length) return;
+
+        // For each missing argument, evaluate its default expression
+        for (let i = argRegs.length; i < params.length; i++) {
+            const defaultExpr = params[i].defaultValue;
+            if (!defaultExpr) return; // No more defaults (shouldn't happen post-validation)
+            const result = this.visitExpression(defaultExpr, undefined);
+            argRegs.push(result.register);
+            argTypes.push(result.type);
+        }
+    }
+
+    /**
+     * Resolve the target function/method parameters from a function call node.
+     * Returns the FunctionParameter[] array from the AST declaration, or undefined.
+     *
+     * Returns undefined for indirect calls (lambdas, closure variables, () operator).
+     * This is intentional: stripFunctionDefaults() in the type provider removes hasDefault
+     * when a function is used as a value, so the type checker rejects indirect calls with
+     * too few arguments. The compiler never needs to expand defaults for these cases.
+     */
+    private resolveCallTargetParams(node: ast.FunctionCall): ast.FunctionParameter[] | undefined {
+        if (ast.isMemberAccess(node.expr)) {
+            const ref = node.expr.element?.ref;
+            if (ref && ast.isClassMethod(ref)) {
+                return ref.method?.header?.args;
+            }
+            if (ref && ast.isMethodHeader(ref)) {
+                return ref.header?.args;
+            }
+            if (ref && ast.isImplementationMethodDecl(ref)) {
+                return ref.method?.header?.args;
+            }
+        }
+
+        if (ast.isQualifiedReference(node.expr)) {
+            const ref = node.expr.reference?.ref;
+            if (ref && ast.isFunctionDeclaration(ref)) {
+                return ref.header?.args;
+            }
+            if (ref && ast.isClassMethod(ref)) {
+                return ref.method?.header?.args;
+            }
+            if (ref && ast.isMethodHeader(ref)) {
+                return ref.header?.args;
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Resolve the init method's AST parameters from a NewExpression node.
+     * Returns the FunctionParameter[] array from the init method, or undefined if not found.
+     */
+    private resolveInitMethodParams(node: ast.NewExpression): ast.FunctionParameter[] | undefined {
+        const refType = node.instanceType;
+        if (refType && ast.isReferenceType(refType)) {
+            const classDecl = refType.field?.ref;
+            if (classDecl && ast.isTypeDeclaration(classDecl) && ast.isClassType(classDecl.definition)) {
+                const classDef = classDecl.definition;
+                const initMethods = classDef.methods.filter(m => m.method?.names?.includes('init'));
+                const argCount = node.args?.length ?? 0;
+                // Find the overload whose arity range matches the provided argument count
+                const match = initMethods.find(m => {
+                    const params = m.method?.header?.args ?? [];
+                    const minArity = params.filter(p => !p.defaultValue).length;
+                    return argCount >= minArity && argCount <= params.length;
+                });
+                return match?.method?.header?.args;
+            }
+        }
+        return undefined;
     }
 
     // ---- Builtin Prototype Method Call ----
@@ -2937,21 +3031,34 @@ export class IRGenerator {
         const f = this.func();
         const temp = this.tmp();
 
-        const classTd = this.getType(node);
-        const classKey = this.getClassShapeKey(classTd);
+        const classKey = this.getClassShapeKey(node);
         f.classAlloc(temp, classKey);
 
-        // Call init method if there are arguments
-        if (node.args && node.args.length > 0) {
-            const argRegs: VReg[] = [];
-            const argTypes: IRType[] = [];
+        // Evaluate provided arguments
+        const argRegs: VReg[] = [];
+        const argTypes: IRType[] = [];
+        if (node.args) {
             for (const arg of node.args) {
                 const argResult = this.visitExpression(arg, undefined);
                 argRegs.push(argResult.register);
                 argTypes.push(argResult.type);
             }
+        }
 
-            // Call the init method (constructor)
+        // Expand default arguments for init method
+        const initParams = this.resolveInitMethodParams(node);
+        if (initParams && argRegs.length < initParams.length) {
+            for (let i = argRegs.length; i < initParams.length; i++) {
+                const defaultExpr = initParams[i].defaultValue;
+                if (!defaultExpr) break;
+                const result = this.visitExpression(defaultExpr, undefined);
+                argRegs.push(result.register);
+                argTypes.push(result.type);
+            }
+        }
+
+        // Call init method if there are arguments (including expanded defaults)
+        if (argRegs.length > 0) {
             // Convention: init method ID is 0
             f.callMethod([], temp, 0, argRegs, argTypes, []);
         }
@@ -3891,7 +3998,7 @@ export class IRGenerator {
             const vTd = td as { constructors: readonly { name: string }[] };
             return `variant_${vTd.constructors.map(c => c.name).join('|')}`;
         }
-        return `type_${this.structShapeCounter}`;
+        throw new Error(`Unhandled type in computeStructTypeKey: ${td.kind}`);
     }
 
     private getStructFieldIndex(td: TypeDescription, fieldName: string): number {
@@ -3909,8 +4016,17 @@ export class IRGenerator {
         return 0;
     }
 
-    private getClassShapeKey(td: TypeDescription): string {
-        return `class_${this.classShapeCounter++}`;
+    private getClassShapeKey(node: ast.NewExpression): string {
+        const refType = node.instanceType;
+        if (refType && ast.isReferenceType(refType)) {
+            const classDecl = refType.field?.ref;
+            if (classDecl && ast.isTypeDeclaration(classDecl)) {
+                const className = this.classNodeToIRName.get(classDecl) || classDecl.name;
+                return `class_${className}`;
+            }
+        }
+        // Should not happen for valid class references
+        throw new Error(`Cannot resolve class shape key for NewExpression`);
     }
 
     private getMethodId(td: TypeDescription, methodName: string): number {

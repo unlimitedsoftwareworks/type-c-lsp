@@ -1,0 +1,10 @@
+// Test: Basic default parameter values
+
+fn greet(name: string, greeting: string = "Hello") -> string {
+    return greeting
+}
+
+fn main() -> void {
+    let a = greet("World")
+    let b = greet("World", "Hi")
+}

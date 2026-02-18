@@ -1,0 +1,11 @@
+// Test: Function with defaults called with varying arg counts
+
+fn openFile(path: string, mode: string = "r", bufSize: u32 = 1024u32) -> string {
+    return path
+}
+
+fn main() -> void {
+    let a = openFile("/tmp/file")
+    let b = openFile("/tmp/file", "w")
+    let c = openFile("/tmp/file", "w", 2048u32)
+}

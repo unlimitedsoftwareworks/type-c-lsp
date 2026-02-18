@@ -212,7 +212,10 @@ export function selectInstructions(
     regMap: RegMap,
     pointerRegs: Set<number>,
     stringConstants: string[] = [],
-    funcNameToIndex: Map<string, number> = new Map()
+    funcNameToIndex: Map<string, number> = new Map(),
+    classIdToIndex: Map<string, number> = new Map(),
+    structIdToIndex: Map<string, number> = new Map(),
+    globalIdToIndex: Map<string, number> = new Map()
 ): SelectionResult {
     const out: VMInstruction[] = [];
     const pool = new ConstantPool();
@@ -626,9 +629,11 @@ export function selectInstructions(
             }
 
             // === Struct ===
-            case 'struct_alloc':
-                emit(makeAD(Op.STRUCT_ALLOC_I, r(regMap, inst.dest), pool.add32(0))); // type offset placeholder
+            case 'struct_alloc': {
+                const structIndex = structIdToIndex.get(inst.typeId) ?? 0;
+                emit(makeAD(Op.STRUCT_ALLOC_I, r(regMap, inst.dest), pool.add32(structIndex)));
                 break;
+            }
             case 'struct_get':
                 emit(makeABC(Op.STRUCT_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
                 break;
@@ -637,9 +642,11 @@ export function selectInstructions(
                 break;
 
             // === Class ===
-            case 'class_alloc':
-                emit(makeAD(Op.CLASS_ALLOC, r(regMap, inst.dest), pool.add32(0))); // type offset placeholder
+            case 'class_alloc': {
+                const classIndex = classIdToIndex.get(inst.typeId) ?? 0;
+                emit(makeAD(Op.CLASS_ALLOC, r(regMap, inst.dest), pool.add32(classIndex)));
                 break;
+            }
             case 'class_get':
                 emit(makeABC(Op.CLASS_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
                 break;
@@ -744,14 +751,16 @@ export function selectInstructions(
             // === Global Variables ===
             case 'global_load': {
                 const dest = r(regMap, inst.dest);
+                const globalIndex = globalIdToIndex.get(inst.globalId) ?? 0;
                 const op = isPointer(inst.type) ? Op.MOV_PTR_RG : Op.MOV_RG;
-                emit(makeAD(op, dest, pool.add32(0))); // global index placeholder
+                emit(makeAD(op, dest, pool.add32(globalIndex)));
                 break;
             }
             case 'global_store': {
                 const src = r(regMap, inst.value);
+                const globalIndex = globalIdToIndex.get(inst.globalId) ?? 0;
                 const op = isPointer(inst.type) ? Op.MOV_PTR_GR : Op.MOV_GR;
-                emit(makeAD(op, src, pool.add32(0))); // global index placeholder
+                emit(makeAD(op, src, pool.add32(globalIndex)));
                 break;
             }
 

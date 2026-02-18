@@ -86,7 +86,14 @@ function applyMethodColoring(program: IRProgram): void {
 
 // === Per-Function Compilation ===
 
-function compileFunction(fn: IRFunction, stringConstants: string[], funcNameToIndex: Map<string, number>): CompiledFunction {
+function compileFunction(
+    fn: IRFunction,
+    stringConstants: string[],
+    funcNameToIndex: Map<string, number>,
+    classIdToIndex: Map<string, number>,
+    structIdToIndex: Map<string, number>,
+    globalIdToIndex: Map<string, number>
+): CompiledFunction {
     // Phase 1: SSA elimination
     const flatInstructions = eliminateSSA(fn.instructions);
 
@@ -103,7 +110,10 @@ function compileFunction(fn: IRFunction, stringConstants: string[], funcNameToIn
         allocation.regMap,
         allocation.pointerRegs,
         stringConstants,
-        funcNameToIndex
+        funcNameToIndex,
+        classIdToIndex,
+        structIdToIndex,
+        globalIdToIndex
     );
 
     // Phase 4: Label resolution
@@ -157,10 +167,24 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         funcNameToIndex.set(program.functions[i].name, i);
     }
 
+    // Build shape id → index maps for CLASS_ALLOC / STRUCT_ALLOC resolution
+    const classIdToIndex = new Map<string, number>();
+    for (let i = 0; i < program.classShapes.length; i++) {
+        classIdToIndex.set(program.classShapes[i].id, i);
+    }
+    const structIdToIndex = new Map<string, number>();
+    for (let i = 0; i < program.structShapes.length; i++) {
+        structIdToIndex.set(program.structShapes[i].id, i);
+    }
+    const globalIdToIndex = new Map<string, number>();
+    for (let i = 0; i < program.globals.length; i++) {
+        globalIdToIndex.set(program.globals[i].id, i);
+    }
+
     // Compile all functions (pass string pool for FFI name resolution)
     const compiledFunctions: CompiledFunction[] = [];
     for (const fn of program.functions) {
-        compiledFunctions.push(compileFunction(fn, strings, funcNameToIndex));
+        compiledFunctions.push(compileFunction(fn, strings, funcNameToIndex, classIdToIndex, structIdToIndex, globalIdToIndex));
     }
 
     // Map globals

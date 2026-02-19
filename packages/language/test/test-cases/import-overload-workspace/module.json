@@ -1,0 +1,13 @@
+{
+    "name": "import-overload-workspace",
+    "version": "1.0.0",
+    "author": "type-c-tests",
+    "dependencies": {},
+    "description": "Workspace fixture for overload import scope resolution tests",
+    "compiler": {
+        "target": "runnable",
+        "entry": "src/import_overload/library.tc"
+    },
+    "dependenciesFolder": "./src",
+    "sourceFolder": "./src"
+}

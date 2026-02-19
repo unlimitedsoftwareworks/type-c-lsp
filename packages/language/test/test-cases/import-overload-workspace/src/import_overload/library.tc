@@ -1,0 +1,4 @@
+fn pick(value: u32) -> u32 = value
+fn pick(value: string) -> string = value
+
+fn keep(value: bool) -> bool = value

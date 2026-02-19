@@ -72,6 +72,7 @@ export class TypeCTypeProvider {
 
     /** Cache for pattern validation errors detected during type inference */
     private readonly patternValidationErrorCache: DocumentCache<AstNode, { message: string } | undefined>;
+    private overloadResolutionDepth = 0;
 
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
@@ -255,6 +256,10 @@ export class TypeCTypeProvider {
      * ```
      */
     getExpectedType(node: AstNode): TypeDescription | undefined {
+        if (this.overloadResolutionDepth > 0) {
+            return undefined;
+        }
+
         const documentUri = AstUtils.getDocument(node).uri;
 
         // Get from cache or compute if not cached
@@ -5152,46 +5157,51 @@ export class TypeCTypeProvider {
      * @returns The indexes of all valid targets for a function call
      */
     resolveFunctionCall(args: ast.Expression[], functions: FunctionTypeDescription[]): number[] {
-        const expressionTypes = args.map(arg => this.inferExpression(arg));
-        const argCount = expressionTypes.length;
+        this.overloadResolutionDepth++;
+        try {
+            const expressionTypes = args.map(arg => this.inferExpression(arg));
+            const argCount = expressionTypes.length;
 
-        // Filter candidates by arity range (accounts for default parameters)
-        const argBasedCandidates = functions.filter(fn => {
-            const minArity = getMinArity(fn.parameters);
-            return argCount >= minArity && argCount <= fn.parameters.length;
-        });
+            // Filter candidates by arity range (accounts for default parameters)
+            const argBasedCandidates = functions.filter(fn => {
+                const minArity = getMinArity(fn.parameters);
+                return argCount >= minArity && argCount <= fn.parameters.length;
+            });
 
-        if (argBasedCandidates.length === 1) {
-            return [functions.indexOf(argBasedCandidates[0])];
-        }
-
-        const finalCandidates = [];
-        // First prio is exact match (only check provided args)
-        for (const fn of argBasedCandidates) {
-            let allMatch = true;
-            for (let i = 0; i < argCount; i++) {
-                if (!this.typeUtils.areTypesEqual(expressionTypes[i], fn.parameters[i].type).success) {
-                    allMatch = false;
-                    break;
-                }
+            if (argBasedCandidates.length === 1) {
+                return [functions.indexOf(argBasedCandidates[0])];
             }
-            if (allMatch) finalCandidates.push(fn);
-        }
 
-        // Second prio is assignable match (only check provided args)
-        if (finalCandidates.length === 0) {
+            const finalCandidates = [];
+            // First prio is exact match (only check provided args)
             for (const fn of argBasedCandidates) {
                 let allMatch = true;
                 for (let i = 0; i < argCount; i++) {
-                    if (!this.typeUtils.isAssignable(expressionTypes[i], fn.parameters[i].type).success) {
+                    if (!this.typeUtils.areTypesEqual(expressionTypes[i], fn.parameters[i].type).success) {
                         allMatch = false;
                         break;
                     }
                 }
                 if (allMatch) finalCandidates.push(fn);
             }
+
+            // Second prio is assignable match (only check provided args)
+            if (finalCandidates.length === 0) {
+                for (const fn of argBasedCandidates) {
+                    let allMatch = true;
+                    for (let i = 0; i < argCount; i++) {
+                        if (!this.typeUtils.isAssignable(expressionTypes[i], fn.parameters[i].type).success) {
+                            allMatch = false;
+                            break;
+                        }
+                    }
+                    if (allMatch) finalCandidates.push(fn);
+                }
+            }
+            return finalCandidates.map(fn => functions.indexOf(fn));
+        } finally {
+            this.overloadResolutionDepth--;
         }
-        return finalCandidates.map(fn => functions.indexOf(fn));
     }
 
     /**
@@ -5841,4 +5851,3 @@ export class TypeCTypeProvider {
         return true;
     }
 }
-

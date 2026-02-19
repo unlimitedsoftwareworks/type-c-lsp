@@ -42,6 +42,7 @@ import * as scopeUtils from "./tc-scope-utils.js";
 export class TypeCScopeProvider extends DefaultScopeProvider {
     /** Cache for global scopes, keyed by document and reference type */
     private readonly globalCache: DocumentCache<string, Scope>;
+    private readonly services: TypeCServices;
 
     /** Type provider for inferring expression types */
     private readonly typeProvider: TypeCTypeProvider;
@@ -50,6 +51,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     constructor(services: TypeCServices) {
         super(services);
 
+        this.services = services;
         this.globalCache = new DocumentCache(services.shared);
         this.typeProvider = services.typing.TypeProvider;
         const wsManager = services.shared.workspace.WorkspaceManager;
@@ -232,6 +234,19 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
         return undefined;
     }
 
+    private resolveDescriptionNode(description: AstNodeDescription): AstNode | undefined {
+        if (description.node) {
+            return description.node;
+        }
+
+        const document = this.services.shared.workspace.LangiumDocuments.getDocument(description.documentUri);
+        if (!document) {
+            return undefined;
+        }
+
+        return this.services.workspace.AstNodeLocator.getAstNode(document.parseResult.value, description.path);
+    }
+
     private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
         const document = AstUtils.getDocument(context.container);
         const parseResult = document.parseResult.value;
@@ -261,11 +276,50 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             const nodes = this.indexManager
                 .allElements(ast.IdentifiableReference.$type, new Set([uri]))
                 .toArray()
-                .map(description => description.node)
+                .map(description => this.resolveDescriptionNode(description))
                 .filter((node): node is AstNode => node !== undefined);
             return nodes.map(node => this.descriptions.createDescription(node, this.nameProvider.getName(node)));
         }
         return [];
+    }
+
+    private getNamedImportRefsFromModule(importEntry: ast.Import, subModule: ast.SubModule): AstNodeDescription[] {
+        const importedRef = subModule.reference.ref;
+        if (!importedRef) {
+            return [];
+        }
+
+        const importName = subModule.alias ?? this.nameProvider.getName(importedRef);
+        if (!importName) {
+            return [];
+        }
+
+        const defaultImportRef = this.descriptions.createDescription(importedRef, importName);
+        if (!ast.isFunctionDeclaration(importedRef)) {
+            return [defaultImportRef];
+        }
+
+        const uri = this.findURIForImport(importEntry);
+        if (!uri) {
+            return [defaultImportRef];
+        }
+
+        const nodes = this.indexManager
+            .allElements(ast.IdentifiableReference.$type, new Set([uri]))
+            .toArray()
+            .map(description => this.resolveDescriptionNode(description))
+            .filter((node): node is AstNode => node !== undefined);
+
+        const matchingOverloads = nodes.filter((node): node is ast.FunctionDeclaration =>
+            ast.isFunctionDeclaration(node) &&
+            node.name === importedRef.name
+        );
+
+        if (matchingOverloads.length === 0) {
+            return [defaultImportRef];
+        }
+
+        return matchingOverloads.map(overload => this.descriptions.createDescription(overload, importName));
     }
 
     /**
@@ -298,14 +352,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                     }
                     else {
                         for (const subModule of importEntry.modules) {
-                            if (subModule.reference.ref) {
-                                if (subModule.alias) {
-                                    importedModules.push(this.descriptions.createDescription(subModule.reference.ref, subModule.alias));
-                                }
-                                else {
-                                    importedModules.push(this.descriptions.createDescription(subModule.reference.ref, this.nameProvider.getName(subModule.reference.ref)));
-                                }
-                            }
+                            importedModules.push(...this.getNamedImportRefsFromModule(importEntry, subModule));
                         }
                     }
                     scopes.push(stream(importedModules));

@@ -220,28 +220,27 @@ export class IRGenerator {
     private getType(node: AstNode): TypeDescription {
         const type = this.typeProvider.getType(node);
 
-        if (isGenericType(type)) {
-            const substitutions = this.getCurrentSubstitutions();
-            if (substitutions.size > 0) {
-                const resolvedType = this.typeUtils.substituteGenerics(type, substitutions);
-                const unresolvedGenerics = this.getUnresolvedGenerics(resolvedType);
-                if (unresolvedGenerics.length > 0) {
-                    throw new Error(
-                        `Unresolved generic type parameters in ${node.$type}: ${unresolvedGenerics.join(', ')}. ` +
-                        `Available substitutions: ${Array.from(substitutions.keys()).join(', ') || 'none'}`
-                    );
-                }
-                return resolvedType;
-            }
-            const unresolvedGenerics = this.getUnresolvedGenerics(type);
-            if (unresolvedGenerics.length > 0) {
-                throw new Error(
-                    `Found generic type parameters but no substitution context: ${unresolvedGenerics.join(', ')} in ${node.$type}`
-                );
-            }
+        const unresolvedInType = this.getUnresolvedGenerics(type);
+        if (unresolvedInType.length === 0) {
+            return type;
         }
 
-        return type;
+        const substitutions = this.getCurrentSubstitutions();
+        if (substitutions.size > 0) {
+            const resolvedType = this.typeUtils.substituteGenerics(type, substitutions);
+            const unresolvedGenerics = this.getUnresolvedGenerics(resolvedType);
+            if (unresolvedGenerics.length > 0) {
+                throw new Error(
+                    `Unresolved generic type parameters in ${node.$type}: ${unresolvedGenerics.join(', ')}. ` +
+                    `Available substitutions: ${Array.from(substitutions.keys()).join(', ') || 'none'}`
+                );
+            }
+            return resolvedType;
+        }
+
+        throw new Error(
+            `Found generic type parameters but no substitution context: ${unresolvedInType.join(', ')} in ${node.$type}`
+        );
     }
 
     private getUnresolvedGenerics(type: TypeDescription): string[] {
@@ -357,9 +356,24 @@ export class IRGenerator {
     }
 
     /**
+     * Get a human-readable source location string for an AST node (for error messages).
+     */
+    private getSourceLocation(node?: AstNode): string {
+        if (!node) return '<unknown location>';
+        const cst = node.$cstNode;
+        if (cst) {
+            const range = cst.range;
+            const doc = AstUtils.getDocument(node);
+            const uri = doc?.uri?.path ?? '<unknown file>';
+            return `${uri}:${range.start.line + 1}:${range.start.character + 1} (${node.$type})`;
+        }
+        return `<${node.$type}>`;
+    }
+
+    /**
      * Extract NumericType string from an IRType (for arithmetic/comparison)
      */
-    private extractNumericType(irType: IRType): NumericType {
+    private extractNumericType(irType: IRType, contextNode?: AstNode): NumericType {
         if (irType.tag === 'scalar') {
             const s = irType.scalar;
             if (s === 'bool') {
@@ -367,15 +381,15 @@ export class IRGenerator {
             }
             return s as NumericType;
         }
-        throw new Error(`Cannot extract NumericType from ${serializeIRType(irType)}`);
+        throw new Error(`Cannot extract NumericType from ${serializeIRType(irType)} at ${this.getSourceLocation(contextNode)}`);
     }
 
     /**
      * Extract CmpType from an IRType (numeric or 'ptr')
      */
-    private extractCmpType(irType: IRType): CmpType {
+    private extractCmpType(irType: IRType, contextNode?: AstNode): CmpType {
         if (irType.tag === 'ptr') return 'ptr';
-        return this.extractNumericType(irType);
+        return this.extractNumericType(irType, contextNode);
     }
 
     /**
@@ -1734,7 +1748,7 @@ export class IRGenerator {
             const startResult = this.visitExpression(node.start, undefined);
             const endResult = this.visitExpression(node.end, undefined);
 
-            const numType = this.extractNumericType(startResult.type);
+            const numType = this.extractNumericType(startResult.type, node);
 
             const stepReg = this.tmp();
             f.constInt(stepReg, 1, numType as IntType);
@@ -1967,7 +1981,7 @@ export class IRGenerator {
         const temp = this.tmp();
         const value = this.parseIntegerLiteral(node.value);
         const irType = this.getNodeIRType(node);
-        const intType = this.extractNumericType(irType) as IntType;
+        const intType = this.extractNumericType(irType, node) as IntType;
         this.func().constInt(temp, value, intType);
         return { register: temp, type: irType };
     }
@@ -2029,6 +2043,11 @@ export class IRGenerator {
 
         // Standard binary: evaluate both sides
         const left = this.visitExpression(node.left, undefined);
+
+        if(left.type.tag === "void") {
+            this.visitExpression(node.left, undefined);
+        }
+
         const right = this.visitExpression(node.right, undefined);
 
         // Check for operator overload on the left operand
@@ -2050,27 +2069,27 @@ export class IRGenerator {
                 this.func().strConcat(temp, left.register, right.register, right.type);
                 return { register: temp, type: ptrType('string') };
             }
-            const numType = this.extractNumericType(left.type);
+            const numType = this.extractNumericType(left.type, node);
             this.func().add(temp, left.register, right.register, numType);
             return { register: temp, type: left.type };
         }
         if (op === '-') {
-            const numType = this.extractNumericType(left.type);
+            const numType = this.extractNumericType(left.type, node);
             this.func().sub(temp, left.register, right.register, numType);
             return { register: temp, type: left.type };
         }
         if (op === '*') {
-            const numType = this.extractNumericType(left.type);
+            const numType = this.extractNumericType(left.type, node);
             this.func().mul(temp, left.register, right.register, numType);
             return { register: temp, type: left.type };
         }
         if (op === '/') {
-            const numType = this.extractNumericType(left.type);
+            const numType = this.extractNumericType(left.type, node);
             this.func().div(temp, left.register, right.register, numType);
             return { register: temp, type: left.type };
         }
         if (op === '%') {
-            const numType = this.extractNumericType(left.type);
+            const numType = this.extractNumericType(left.type, node);
             this.func().mod(temp, left.register, right.register, numType);
             return { register: temp, type: left.type };
         }
@@ -2101,22 +2120,22 @@ export class IRGenerator {
         // Comparison
         const boolType = scalarType('bool');
         if (op === '<') {
-            const cmpType = this.extractNumericType(left.type);
+            const cmpType = this.extractNumericType(left.type, node);
             this.func().cmpLt(temp, left.register, right.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '>') {
-            const cmpType = this.extractNumericType(left.type);
+            const cmpType = this.extractNumericType(left.type, node);
             this.func().cmpGt(temp, left.register, right.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '<=') {
-            const cmpType = this.extractNumericType(left.type);
+            const cmpType = this.extractNumericType(left.type, node);
             this.func().cmpLe(temp, left.register, right.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '>=') {
-            const cmpType = this.extractNumericType(left.type);
+            const cmpType = this.extractNumericType(left.type, node);
             this.func().cmpGe(temp, left.register, right.register, cmpType);
             return { register: temp, type: boolType };
         }
@@ -2124,7 +2143,7 @@ export class IRGenerator {
             if (this.isStringIRType(left.type)) {
                 this.func().cmpEqStr(temp, left.register, right.register);
             } else {
-                const cmpType = this.extractCmpType(left.type);
+                const cmpType = this.extractCmpType(left.type, node);
                 this.func().cmpEq(temp, left.register, right.register, cmpType);
             }
             return { register: temp, type: boolType };
@@ -2133,7 +2152,7 @@ export class IRGenerator {
             if (this.isStringIRType(left.type)) {
                 this.func().cmpNeStr(temp, left.register, right.register);
             } else {
-                const cmpType = this.extractCmpType(left.type);
+                const cmpType = this.extractCmpType(left.type, node);
                 this.func().cmpNe(temp, left.register, right.register, cmpType);
             }
             return { register: temp, type: boolType };
@@ -2242,7 +2261,7 @@ export class IRGenerator {
         }
 
         const temp = this.tmp();
-        const numType = this.extractNumericType(lhsResult.type);
+        const numType = this.extractNumericType(lhsResult.type, node);
 
         switch (baseOp) {
             case '+':
@@ -2366,7 +2385,7 @@ export class IRGenerator {
 
         switch (node.op) {
             case '-': {
-                const numType = this.extractNumericType(operand.type);
+                const numType = this.extractNumericType(operand.type, node);
                 f.neg(temp, operand.register, numType);
                 return { register: temp, type: operand.type };
             }
@@ -2385,7 +2404,7 @@ export class IRGenerator {
             }
             case '++': {
                 // Prefix increment
-                const numType = this.extractNumericType(operand.type);
+                const numType = this.extractNumericType(operand.type, node);
                 const oneReg = this.tmp();
                 f.constInt(oneReg, 1, numType as IntType);
                 f.add(temp, operand.register, oneReg, numType);
@@ -2394,7 +2413,7 @@ export class IRGenerator {
             }
             case '--': {
                 // Prefix decrement
-                const numType = this.extractNumericType(operand.type);
+                const numType = this.extractNumericType(operand.type, node);
                 const oneReg = this.tmp();
                 f.constInt(oneReg, 1, numType as IntType);
                 f.sub(temp, operand.register, oneReg, numType);
@@ -2434,7 +2453,7 @@ export class IRGenerator {
 
         f.mov(temp, operand.register, operand.type);
 
-        const numType = this.extractNumericType(operand.type);
+        const numType = this.extractNumericType(operand.type, node);
         const oneReg = this.tmp();
         f.constInt(oneReg, 1, numType as IntType);
 
@@ -3539,7 +3558,7 @@ export class IRGenerator {
             if (this.isStringIRType(subject.type)) {
                 f.cmpEqStr(cmpReg, subject.register, litResult.register);
             } else {
-                const cmpType = this.extractCmpType(subject.type);
+                const cmpType = this.extractCmpType(subject.type, pattern as unknown as AstNode);
                 f.cmpEq(cmpReg, subject.register, litResult.register, cmpType);
             }
             f.br(cmpReg, matchLabel, failLabel);
@@ -3636,7 +3655,7 @@ export class IRGenerator {
                             if (this.isStringIRType(fieldType)) {
                                 f.cmpEqStr(cmpReg, fieldReg, litResult.register);
                             } else {
-                                const cmpType = this.extractCmpType(fieldType);
+                                const cmpType = this.extractCmpType(fieldType, nestedPattern as unknown as AstNode);
                                 f.cmpEq(cmpReg, fieldReg, litResult.register, cmpType);
                             }
                             const continueLabel = this.generateLabel('nested_ok');

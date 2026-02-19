@@ -1,5 +1,7 @@
 from level1.numbers import l1Numbers
+from level1.strings import l1Strings
 
 fn l1() {
     l1Numbers()
+    l1Strings()
 }

@@ -7,6 +7,9 @@
     "references": [
         {
             "path": "../language/tsconfig.src.json"
+        },
+        {
+            "path": "../compiler/tsconfig.json"
         }
     ],
     "include": [

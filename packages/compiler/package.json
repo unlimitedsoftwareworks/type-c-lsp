@@ -21,7 +21,7 @@
     },
     "scripts": {
         "clean": "shx rm -fr *.tsbuildinfo out",
-        "build": "echo 'No build step'",
+        "build": "tsc -b tsconfig.json",
         "build:clean": "npm run clean && npm run build"
     },
     "dependencies": {

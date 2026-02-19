@@ -70,7 +70,7 @@ fn test4(runner: TestUnit) {
 
 
 
-fn main() {
+fn l1Strings() {
     let test_1 = new TestUnit("test 1", "Basic Sanity", test1)
     let test_2 = new TestUnit("test 2", "Strings", test2)
     let test_3 = new TestUnit("test 3", "Basic class", test3)

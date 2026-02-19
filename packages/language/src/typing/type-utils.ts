@@ -140,6 +140,34 @@ export class TypeCTypeUtils {
     }
 
     /**
+     * Resolves chained reference aliases until a non-reference type is reached.
+     *
+     * This is stricter than resolveIfReference() and is used in places where
+     * wrapper inspection (e.g. Nullable) must see through alias chains.
+     */
+    private resolveReferenceChain(type: TypeDescription): TypeDescription {
+        let current = type;
+        const seenDeclarations = new Set<ast.TypeDeclaration>();
+        const MAX_REFERENCE_RESOLUTION_DEPTH = 64;
+
+        for (let i = 0; i < MAX_REFERENCE_RESOLUTION_DEPTH && isReferenceType(current); i++) {
+            const declaration = current.declaration;
+            if (seenDeclarations.has(declaration)) {
+                break;
+            }
+            seenDeclarations.add(declaration);
+
+            const resolved = this.typeProvider().resolveReference(current);
+            if (resolved === current) {
+                break;
+            }
+            current = resolved;
+        }
+
+        return current;
+    }
+
+    /**
      * Resolves a type if it's a generic type with a constraint, otherwise returns the type as-is.
      * This is a convenience helper for constraint-based member access and operator resolution.
      *
@@ -1047,10 +1075,16 @@ export class TypeCTypeUtils {
         );
     }
 
-    isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
-        // All interface methods must be implemented by the class
+    isClassAssignableToInterface(
+        from: ClassTypeDescription,
+        to: InterfaceTypeDescription,
+        allowSelfTypeParameterSubstitution: boolean = false,
+        selfTypeHint?: TypeDescription
+    ): TypeCheckResult {
+        // All interface methods (including inherited ones) must be implemented by the class.
+        const requiredMethods = this.collectAllInterfaceMethods(to);
         const nonShadowedImplMethods = this.collectImplMethods(from);
-        for (const method of to.methods) {
+        for (const method of requiredMethods) {
             // Collect all available methods (class methods + non-shadowed impl methods)
             const classMethods = [...from.methods, ...nonShadowedImplMethods];
             // Find all class methods with matching names (to handle overloads)
@@ -1066,7 +1100,18 @@ export class TypeCTypeUtils {
 
             for (const classMethod of candidateMethods) {
                 // Check type compatibility (allowing covariant return types)
-                const result = this.isMethodImplementationCompatible(classMethod, method);
+                let result = this.isMethodImplementationCompatible(classMethod, method);
+                if (!result.success && allowSelfTypeParameterSubstitution) {
+                    // Allow "self-like" interface parameters (e.g. ComparableObject) to be
+                    // implemented with the concrete class type (e.g. Point).
+                    result = this.isMethodImplementationCompatibleWithSelfType(
+                        classMethod,
+                        method,
+                        from,
+                        to,
+                        selfTypeHint
+                    );
+                }
                 if (result.success) {
                     // CRITICAL: Interface methods are always public, so check if the class method is local
                     // Local methods cannot implement interface methods
@@ -1092,6 +1137,140 @@ export class TypeCTypeUtils {
         return success();
     }
 
+    private hasSameNodeIdentity(
+        a: { readonly node?: AstNode },
+        b: { readonly node?: AstNode }
+    ): boolean {
+        return a.node !== undefined && b.node !== undefined && a.node === b.node;
+    }
+
+    private isSameInterfaceIdentity(
+        a: InterfaceTypeDescription,
+        b: InterfaceTypeDescription
+    ): boolean {
+        return a === b || this.hasSameNodeIdentity(a, b);
+    }
+
+    private isSameOrSuperInterfaceType(
+        target: InterfaceTypeDescription,
+        candidate: InterfaceTypeDescription,
+        visited: Set<InterfaceTypeDescription> = new Set()
+    ): boolean {
+        if (this.isSameInterfaceIdentity(target, candidate)) {
+            return true;
+        }
+
+        if (visited.has(target)) {
+            return false;
+        }
+        visited.add(target);
+
+        for (const superType of target.superTypes) {
+            const resolvedSuper = this.resolveIfReference(superType);
+            const superInterface = this.asInterfaceType(resolvedSuper);
+            if (superInterface && this.isSameOrSuperInterfaceType(superInterface, candidate, visited)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private isMethodImplementationCompatibleWithSelfType(
+        implementation: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
+        interfaceMethod: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
+        classType: ClassTypeDescription,
+        interfaceType: InterfaceTypeDescription,
+        selfTypeHint?: TypeDescription
+    ): TypeCheckResult {
+        return this.isMethodImplementationCompatibleCore(
+            implementation,
+            interfaceMethod,
+            (implParamType, ifaceParamType) => {
+                // Interface implementation remains invariant in parameter types,
+                // with one extra rule for "self-like" interface parameters.
+                const exactMatch = this.areTypesEqual(implParamType, ifaceParamType);
+                if (exactMatch.success) {
+                    return exactMatch;
+                }
+
+                if (this.isClassSelfTypeForInterfaceType(implParamType, ifaceParamType, classType, interfaceType, selfTypeHint)) {
+                    return success();
+                }
+
+                return exactMatch;
+            }
+        );
+    }
+
+    private isClassSelfTypeForInterfaceType(
+        implType: TypeDescription,
+        ifaceType: TypeDescription,
+        classType: ClassTypeDescription,
+        interfaceType: InterfaceTypeDescription,
+        selfTypeHint?: TypeDescription
+    ): boolean {
+        const resolvedImplType = this.resolveReferenceChain(implType);
+        const resolvedIfaceType = this.resolveReferenceChain(ifaceType);
+
+        // Allow the self-type rule through nullable wrappers:
+        // ComparableObject? can be implemented by Point? for the implementing class.
+        if (isNullableType(resolvedImplType) || isNullableType(resolvedIfaceType)) {
+            if (isNullableType(resolvedImplType) && isNullableType(resolvedIfaceType)) {
+                return this.isClassSelfTypeForInterfaceType(
+                    resolvedImplType.baseType,
+                    resolvedIfaceType.baseType,
+                    classType,
+                    interfaceType,
+                    selfTypeHint
+                );
+            }
+            return false;
+        }
+
+        if (!isClassType(resolvedImplType)) {
+            return false;
+        }
+
+        let isSameClass = false;
+        if (selfTypeHint && isReferenceType(selfTypeHint)) {
+            if (isReferenceType(implType)) {
+                isSameClass = this.areReferenceTypesEqual(implType, selfTypeHint).success;
+                // Alias-to-class fallback for non-generic self-hints:
+                // e.g. impl uses AliasPoint? while the hint is Point.
+                if (!isSameClass && selfTypeHint.genericArgs.length === 0 && implType.genericArgs.length === 0) {
+                    const resolvedSelfTypeHint = this.resolveReferenceChain(selfTypeHint);
+                    if (isClassType(resolvedSelfTypeHint)) {
+                        isSameClass =
+                            resolvedImplType === resolvedSelfTypeHint ||
+                            this.hasSameNodeIdentity(resolvedImplType, resolvedSelfTypeHint);
+                    }
+                }
+            } else if (selfTypeHint.genericArgs.length === 0) {
+                isSameClass =
+                    resolvedImplType === classType ||
+                    this.hasSameNodeIdentity(resolvedImplType, classType);
+            }
+        } else {
+            isSameClass =
+                resolvedImplType === classType ||
+                this.hasSameNodeIdentity(resolvedImplType, classType);
+        }
+
+        if (!isSameClass) {
+            return false;
+        }
+
+        const ifaceFromParam = this.asInterfaceType(resolvedIfaceType);
+        if (!ifaceFromParam) {
+            return false;
+        }
+
+        // Self-type parameters are valid when the interface parameter type is the
+        // target interface itself or one of its supertypes.
+        return this.isSameOrSuperInterfaceType(interfaceType, ifaceFromParam);
+    }
+
     /**
      * Checks if a class method implementation is compatible with an interface method.
      *
@@ -1108,6 +1287,18 @@ export class TypeCTypeUtils {
         implementation: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
         interfaceMethod: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] }
     ): TypeCheckResult {
+        return this.isMethodImplementationCompatibleCore(
+            implementation,
+            interfaceMethod,
+            (implParamType, ifaceParamType) => this.areTypesEqual(implParamType, ifaceParamType)
+        );
+    }
+
+    private isMethodImplementationCompatibleCore(
+        implementation: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
+        interfaceMethod: { readonly parameters: readonly { name: string; type: TypeDescription; isMut: boolean }[]; returnType: TypeDescription; genericParameters?: readonly { name: string }[] },
+        paramTypeCheck: (implementationType: TypeDescription, interfaceType: TypeDescription) => TypeCheckResult
+    ): TypeCheckResult {
         // Check parameter count
         if (implementation.parameters.length !== interfaceMethod.parameters.length) {
             return failure(`Parameter count mismatch: ${implementation.parameters.length} vs ${interfaceMethod.parameters.length}`);
@@ -1119,9 +1310,9 @@ export class TypeCTypeUtils {
             const ifaceParam = interfaceMethod.parameters[i];
 
             // Check parameter type
-            const typeResult = this.areTypesEqual(implParam.type, ifaceParam.type);
+            const typeResult = paramTypeCheck(implParam.type, ifaceParam.type);
             if (!typeResult.success) {
-                return failure(`Parameter ${i + 1} type mismatch: ${typeResult.message}`);
+                return failure(`Parameter ${i + 1} type mismatch${typeResult.message ? `: ${typeResult.message}` : ''}`);
             }
             
             // Check parameter mutability (contravariant)
@@ -1214,17 +1405,28 @@ export class TypeCTypeUtils {
      * @param iface The interface to collect methods from
      * @returns Array of all methods (direct + inherited)
      */
-    collectAllInterfaceMethods(iface: InterfaceTypeDescription): MethodType[] {
+    collectAllInterfaceMethods(
+        iface: InterfaceTypeDescription,
+        visited: Set<InterfaceTypeDescription> = new Set()
+    ): MethodType[] {
+        // Defensive guard for recursive/cyclic interface graphs.
+        for (const seen of visited) {
+            if (this.isSameInterfaceIdentity(seen, iface)) {
+                return [];
+            }
+        }
+        visited.add(iface);
+
         const allMethods: MethodType[] = [...iface.methods];
         
         // Recursively collect methods from supertypes
         for (const superType of iface.superTypes) {
-            const resolvedSuper = this.resolveIfReference(superType);
+            const resolvedSuper = this.resolveReferenceChain(superType);
             const superInterface = this.asInterfaceType(resolvedSuper);
             
             if (superInterface) {
                 // Recursively get all methods from the supertype
-                const superMethods = this.collectAllInterfaceMethods(superInterface);
+                const superMethods = this.collectAllInterfaceMethods(superInterface, visited);
                 allMethods.push(...superMethods);
             }
         }
@@ -1563,11 +1765,19 @@ export class TypeCTypeUtils {
             const resolvedFrom = this.typeProvider().resolveReference(from);
             const resolvedTo = this.typeProvider().resolveReference(to);
 
-            // If both resolved to non-reference types, check them directly
-            // This handles class-to-interface compatibility (covariant returns)
-            if (!isReferenceType(resolvedFrom) && !isReferenceType(resolvedTo)) {
-                const result = this.isAssignable(resolvedFrom, resolvedTo);
-                return result;
+            // If either side resolved, try assignability on resolved types first.
+            // This is required for cases where one side resolves to a class/interface
+            // while the other remains a reference wrapper.
+            if (resolvedFrom !== from || resolvedTo !== to) {
+                const resolvedResult = this.isAssignable(resolvedFrom, resolvedTo);
+                if (resolvedResult.success) {
+                    return resolvedResult;
+                }
+                // If one side is no longer a reference, declaration-identity comparison
+                // below is not meaningful, so return the resolved-type failure directly.
+                if (!isReferenceType(resolvedFrom) || !isReferenceType(resolvedTo)) {
+                    return resolvedResult;
+                }
             }
 
             // If still reference types after resolution, they must reference the same declaration
@@ -4145,14 +4355,13 @@ export class TypeCTypeUtils {
             return success();
         }
 
-        // Resolve reference types in both the concrete type and constraint
-        const resolvedType = this.resolveIfReference(concreteType);
+        // Resolve the constraint shape for union/join dispatch.
         const resolvedConstraint = this.resolveIfReference(constraint);
 
         // Handle union constraints: T: A | B means type must satisfy at least one
         if (isUnionType(resolvedConstraint)) {
             for (const constraintMember of resolvedConstraint.types) {
-                const result = this.isAssignable(resolvedType, constraintMember);
+                const result = this.isConstraintAssignable(concreteType, constraintMember);
                 if (result.success) {
                     return success();
                 }
@@ -4166,7 +4375,7 @@ export class TypeCTypeUtils {
         // Handle join constraints: T: A & B means type must satisfy all
         if (isJoinType(resolvedConstraint)) {
             for (const constraintMember of resolvedConstraint.types) {
-                const result = this.isAssignable(resolvedType, constraintMember);
+                const result = this.isConstraintAssignable(concreteType, constraintMember);
                 if (!result.success) {
                     return failure(
                         `Type '${concreteType.toString()}' does not satisfy constraint '${constraint.toString()}'. ` +
@@ -4178,7 +4387,7 @@ export class TypeCTypeUtils {
         }
 
         // For other constraint types (interface, class, etc.), use standard assignability
-        const result = this.isAssignable(resolvedType, resolvedConstraint);
+        const result = this.isConstraintAssignable(concreteType, resolvedConstraint);
         if (!result.success) {
             return failure(
                 `Type '${concreteType.toString()}' does not satisfy constraint '${constraint.toString()}'.`
@@ -4186,6 +4395,25 @@ export class TypeCTypeUtils {
         }
 
         return success();
+    }
+
+    /**
+     * Assignability check used by generic constraints.
+     *
+     * Generic constraints are where "self-like" interface parameters are intended
+     * to be accepted (e.g. Point.eq(Point) satisfying ComparableObject.eq(ComparableObject)).
+     * This keeps general class-to-interface assignability strict.
+     */
+    private isConstraintAssignable(from: TypeDescription, to: TypeDescription): TypeCheckResult {
+        const resolvedFrom = this.resolveIfReference(from);
+        const resolvedTo = this.resolveIfReference(to);
+        const toInterface = this.asInterfaceType(resolvedTo);
+
+        if (isClassType(resolvedFrom) && toInterface) {
+            return this.isClassAssignableToInterface(resolvedFrom, toInterface, true, from);
+        }
+
+        return this.isAssignable(from, to);
     }
 
     /**
@@ -4238,5 +4466,3 @@ export class TypeCTypeUtils {
         return true;
     }
 }
-
-

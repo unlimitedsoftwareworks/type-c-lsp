@@ -1,0 +1,42 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+type RankedComparable = interface ComparableObject {
+    fn rank() -> u32
+}
+
+fn assert_ranked_same<T: RankedComparable>(a: T, b: T) -> bool {
+    return a.eq(b) && a.rank() == b.rank()
+}
+
+type RankedPoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: RankedPoint) -> bool {
+        return this.x == other.x
+    }
+
+    fn rank() -> u32 {
+        return this.x
+    }
+
+    fn toString() -> string {
+        return "RankedPoint"
+    }
+}
+
+fn run() -> bool {
+    let a = new RankedPoint(5)
+    let b = new RankedPoint(5)
+
+    let ok0 = assert_ranked_same<RankedPoint>(a, b)
+    let ok1 = assert_ranked_same(a, b)
+
+    return ok0 && ok1
+}

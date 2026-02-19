@@ -1,0 +1,95 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_same<T: ComparableObject>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+type Point = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: Point) -> bool {
+        return this.x == other.x
+    }
+
+    fn toString() -> string {
+        return "Point"
+    }
+}
+
+type OtherPoint = class {
+    let y: u32
+
+    fn init(y: u32) {
+        this.y = y
+    }
+
+    fn eq(other: OtherPoint) -> bool {
+        return this.y == other.y
+    }
+
+    fn toString() -> string {
+        return "OtherPoint"
+    }
+}
+
+type Pair<T> = class {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+
+    // Invalid self-type shape: hard-codes u32 instead of preserving T.
+    fn eq(other: Pair<u32>) -> bool {
+        return true
+    }
+
+    fn toString() -> string {
+        return "Pair"
+    }
+}
+
+fn takesComparable(value: ComparableObject) -> bool {
+    return true
+}
+
+fn stress_generic_ok() -> bool {
+    // This should still pass: self-type rule is valid for generic constraints.
+    let p1 = new Point(1)
+    let p2 = new Point(1)
+    return assert_same(p1, p2)
+}
+
+fn stress_generic_bad() {
+    let a = new Pair<string>("a")
+    let b = new Pair<string>("b")
+
+    /// @Error: does not satisfy constraint
+    assert_same<Pair<string>>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_same(a, b)
+}
+
+fn stress_non_generic_bad() {
+    let p = new Point(1)
+    let q = new OtherPoint(1)
+
+    // Self-type-only implementations should not be assignable to interface variables directly.
+    /// @Error: signature mismatch
+    let a: ComparableObject = p
+    /// @Error: signature mismatch
+    let b: ComparableObject = q
+
+    // Same rule should apply to direct interface-typed parameter passing.
+    /// @Error: signature mismatch
+    takesComparable(p)
+    /// @Error: signature mismatch
+    takesComparable(q)
+}

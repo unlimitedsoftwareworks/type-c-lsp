@@ -1,0 +1,177 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_same<T: ComparableObject>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+// -----------------------------------------------------------------------------
+// 1) Interface inheritance + self-type for inherited method
+// -----------------------------------------------------------------------------
+
+type RankedComparable = interface ComparableObject {
+    fn rank() -> u32
+}
+
+fn assert_ranked_same<T: RankedComparable>(a: T, b: T) -> bool {
+    return a.eq(b) && a.rank() == b.rank()
+}
+
+type RankedPoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: RankedPoint) -> bool {
+        return this.x == other.x
+    }
+
+    fn rank() -> u32 {
+        return this.x
+    }
+
+    fn toString() -> string {
+        return "RankedPoint"
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 2) Wrappers: nullable self-type fallback + array exact-match
+// -----------------------------------------------------------------------------
+
+type WrappedComparable = interface {
+    fn eq_optional(other: WrappedComparable?) -> bool
+    fn eq_list(other: WrappedComparable[]) -> bool
+}
+
+fn assert_wrapped<T: WrappedComparable>(a: T, b: T) -> bool {
+    return a.eq_optional(b) && a.eq_list([b])
+}
+
+type WrappedPoint = class {
+    let value: u32
+
+    fn init(value: u32) {
+        this.value = value
+    }
+
+    fn eq_optional(other: WrappedPoint?) -> bool {
+        if other == null {
+            return false
+        }
+        let o = other as WrappedPoint
+        return this.value == o.value
+    }
+
+    fn eq_list(other: WrappedComparable[]) -> bool {
+        return true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3) Multiple generic parameters
+// -----------------------------------------------------------------------------
+
+type PairComparable = interface {
+    fn eq(other: PairComparable) -> bool
+}
+
+fn assert_pair_same<T: PairComparable>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+type BiPair<A, B> = class {
+    let left: A
+    let right: B
+
+    fn init(left: A, right: B) {
+        this.left = left
+        this.right = right
+    }
+
+    fn eq(other: BiPair<A, B>) -> bool {
+        return true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4) Overload/default interaction
+// -----------------------------------------------------------------------------
+
+type OverloadedPoint = class {
+    let value: u32
+
+    fn init(value: u32) {
+        this.value = value
+    }
+
+    fn eq(other: OverloadedPoint) -> bool {
+        return this.value == other.value
+    }
+
+    fn eq(other: OverloadedPoint, strict: bool, tolerance: u32 = 0u32) -> bool {
+        return strict
+    }
+
+    fn toString() -> string {
+        return "OverloadedPoint"
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 5) Alias/reference identity for class aliases
+// -----------------------------------------------------------------------------
+
+type AliasPoint = class {
+    let v: u32
+
+    fn init(v: u32) {
+        this.v = v
+    }
+
+    fn eq(other: AliasPoint) -> bool {
+        return this.v == other.v
+    }
+
+    fn toString() -> string {
+        return "AliasPoint"
+    }
+}
+
+type AliasPointRef = AliasPoint
+
+fn eq_alias(a: AliasPointRef, b: AliasPointRef) -> bool {
+    return a.eq(b)
+}
+
+fn run() -> bool {
+    let rp1 = new RankedPoint(10)
+    let rp2 = new RankedPoint(10)
+
+    let wp1 = new WrappedPoint(2)
+    let wp2 = new WrappedPoint(2)
+
+    let bp1 = new BiPair<u32, string>(1, "x")
+    let bp2 = new BiPair<u32, string>(1, "y")
+
+    let op1 = new OverloadedPoint(7)
+    let op2 = new OverloadedPoint(7)
+
+    let ap1: AliasPointRef = new AliasPoint(4)
+    let ap2: AliasPointRef = new AliasPoint(4)
+
+    let ok0 = assert_same(rp1, rp2)
+    let ok1 = assert_ranked_same(rp1, rp2)
+    let ok2 = assert_wrapped(wp1, wp2)
+    let ok3 = assert_pair_same(bp1, bp2)
+    let ok4 = op1.eq(op2)
+    let ok5 = op1.eq(op2, true)
+    let ok6 = op1.eq(op2, false, 2u32)
+    let ok7 = eq_alias(ap1, ap2)
+
+    return ok0 && ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7
+}

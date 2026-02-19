@@ -1,0 +1,53 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+type RankedComparable = interface ComparableObject {
+    fn rank() -> u32
+}
+
+fn assert_ranked_same<T: RankedComparable>(a: T, b: T) -> bool {
+    return a.eq(b) && a.rank() == b.rank()
+}
+
+type BadRankedPoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    // Wrong shape for inherited ComparableObject.eq requirement.
+    fn eq(other: string) -> bool {
+        return false
+    }
+
+    fn rank() -> u32 {
+        return this.x
+    }
+
+    fn toString() -> string {
+        return "BadRankedPoint"
+    }
+}
+
+fn takes_ranked(value: RankedComparable) -> bool {
+    return true
+}
+
+fn run_bad() {
+    let a = new BadRankedPoint(5)
+    let b = new BadRankedPoint(5)
+
+    /// @Error: does not satisfy constraint
+    assert_ranked_same<BadRankedPoint>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_ranked_same(a, b)
+
+    /// @Error: signature mismatch
+    let r: RankedComparable = a
+
+    /// @Error: signature mismatch
+    takes_ranked(a)
+}

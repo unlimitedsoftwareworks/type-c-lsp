@@ -1,0 +1,109 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_same<T: ComparableObject>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+fn assert_triple<T: ComparableObject>(a: T, b: T, c: T) -> bool {
+    return a.eq(b) && b.eq(c)
+}
+
+type Point = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: Point) -> bool {
+        return this.x == other.x
+    }
+
+    fn toString() -> string {
+        return "Point"
+    }
+}
+
+type Pair<T> = class {
+    let left: T
+
+    fn init(left: T) {
+        this.left = left
+    }
+
+    fn eq(other: Pair<T>) -> bool {
+        return true
+    }
+
+    fn toString() -> string {
+        return "Pair"
+    }
+}
+
+type NullableComparableObject = interface {
+    fn eq_optional(other: NullableComparableObject?) -> bool
+}
+
+fn assert_optional<T: NullableComparableObject>(a: T, b: T) -> bool {
+    return a.eq_optional(b)
+}
+
+type MaybePoint = class {
+    let value: u32
+
+    fn init(value: u32) {
+        this.value = value
+    }
+
+    fn eq_optional(other: MaybePoint?) -> bool {
+        if other == null {
+            return false
+        }
+        let o = other as! MaybePoint
+        return this.value == o.value
+    }
+}
+
+// Control class with exact interface signature for non-generic interface usage.
+type StrictComparable = class {
+    let value: u32
+
+    fn init(value: u32) {
+        this.value = value
+    }
+
+    fn eq(other: ComparableObject) -> bool {
+        return true
+    }
+
+    fn toString() -> string {
+        return "StrictComparable"
+    }
+}
+
+fn run() -> bool {
+    let p1 = new Point(1)
+    let p2 = new Point(1)
+    let p3 = new Point(1)
+
+    let pair1 = new Pair<u32>(1)
+    let pair2 = new Pair<u32>(1)
+
+    let m1 = new MaybePoint(2)
+    let m2 = new MaybePoint(2)
+
+    let ok0 = assert_same<Point>(p1, p2)
+    let ok1 = assert_same(p1, p2)
+    let ok2 = assert_triple(p1, p2, p3)
+    let ok3 = assert_same(pair1, pair2)
+    let ok4 = assert_optional(m1, m2)
+
+    let a: ComparableObject = new StrictComparable(1)
+    let b: ComparableObject = new StrictComparable(2)
+    let ok5 = a.eq(b)
+
+    return ok0 && ok1 && ok2 && ok3 && ok4 && ok5
+}

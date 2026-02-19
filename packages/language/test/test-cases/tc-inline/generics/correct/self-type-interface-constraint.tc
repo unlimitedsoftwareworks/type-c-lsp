@@ -1,0 +1,101 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_obj_eq<T: ComparableObject>(actual: T, expected: T) -> bool {
+    return actual.eq(expected)
+}
+
+type Point = class {
+    let x: u32
+    let y: u32
+
+    fn init(x: u32, y: u32) {
+        this.x = x
+        this.y = y
+    }
+
+    fn eq(other: Point) -> bool {
+        return this.x == other.x && this.y == other.y
+    }
+
+    fn toString() -> string {
+        return "Point"
+    }
+}
+
+fn test() -> bool {
+    let p1 = new Point(1, 2)
+    let p2 = new Point(1, 2)
+
+    return assert_obj_eq<Point>(p1, p2) && assert_obj_eq(p1, p2)
+}
+
+type NullableComparableObject = interface {
+    fn eq_optional(other: NullableComparableObject?) -> bool
+}
+
+fn assert_obj_eq_optional<T: NullableComparableObject>(actual: T, expected: T) -> bool {
+    return actual.eq_optional(expected)
+}
+
+type NullablePoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq_optional(other: NullablePoint?) -> bool {
+        if other == null {
+            return false
+        }
+        let value = other as! NullablePoint
+        return this.x == value.x
+    }
+}
+
+fn test_nullable() -> bool {
+    let p1 = new NullablePoint(1)
+    let p2 = new NullablePoint(1)
+
+    return assert_obj_eq_optional<NullablePoint>(p1, p2) && assert_obj_eq_optional(p1, p2)
+}
+
+type AliasNullableComparable = interface {
+    fn eq_optional_alias(other: AliasNullableComparableMaybe) -> bool
+}
+
+type AliasNullableComparableAlias = AliasNullableComparable
+type AliasNullableComparableMaybe = AliasNullableComparableAlias?
+
+fn assert_obj_eq_optional_alias<T: AliasNullableComparable>(actual: T, expected: T) -> bool {
+    return actual.eq_optional_alias(expected)
+}
+
+type AliasNullablePoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq_optional_alias(other: AliasNullablePointMaybeAlias) -> bool {
+        if other == null {
+            return false
+        }
+        let value = other as! AliasNullablePoint
+        return this.x == value.x
+    }
+}
+
+type AliasNullablePointAlias = AliasNullablePoint
+type AliasNullablePointMaybeAlias = AliasNullablePointAlias?
+
+fn test_alias_nullable() -> bool {
+    let p1 = new AliasNullablePoint(1)
+    let p2 = new AliasNullablePoint(1)
+
+    return assert_obj_eq_optional_alias<AliasNullablePoint>(p1, p2) && assert_obj_eq_optional_alias(p1, p2)
+}

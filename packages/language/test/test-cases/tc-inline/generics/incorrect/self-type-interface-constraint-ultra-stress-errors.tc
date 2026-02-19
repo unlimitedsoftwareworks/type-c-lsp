@@ -1,0 +1,221 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_same<T: ComparableObject>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+// -----------------------------------------------------------------------------
+// 1) Wrapper mismatch: array self-type is not valid for interface array parameter
+// -----------------------------------------------------------------------------
+
+type WrappedComparable = interface {
+    fn eq_list(other: WrappedComparable[]) -> bool
+}
+
+fn assert_wrapped<T: WrappedComparable>(a: T, b: T) -> bool {
+    return a.eq_list([b])
+}
+
+type BadWrappedPoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq_list(other: BadWrappedPoint[]) -> bool {
+        return true
+    }
+}
+
+fn bad_wrapped() {
+    let a = new BadWrappedPoint(1)
+    let b = new BadWrappedPoint(2)
+
+    /// @Error: does not satisfy constraint
+    assert_wrapped<BadWrappedPoint>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_wrapped(a, b)
+}
+
+// -----------------------------------------------------------------------------
+// 2) Inherited interface requirement still rejects wrong parameter type
+// -----------------------------------------------------------------------------
+
+type RankedComparable = interface ComparableObject {
+    fn rank() -> u32
+}
+
+fn assert_ranked_same<T: RankedComparable>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+type BadRankedPoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: BadRankedPoint) -> bool {
+        return this.x == other.x
+    }
+
+    fn rank() -> string {
+        return "rank"
+    }
+
+    fn toString() -> string {
+        return "BadRankedPoint"
+    }
+}
+
+fn bad_inheritance() {
+    let a = new BadRankedPoint(1)
+    let b = new BadRankedPoint(1)
+
+    /// @Error: does not satisfy constraint
+    assert_ranked_same<BadRankedPoint>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_ranked_same(a, b)
+}
+
+// -----------------------------------------------------------------------------
+// 3) Multi-generic mismatch
+// -----------------------------------------------------------------------------
+
+type PairComparable = interface {
+    fn eq(other: PairComparable) -> bool
+}
+
+fn assert_pair_same<T: PairComparable>(a: T, b: T) -> bool {
+    return a.eq(b)
+}
+
+type BadBiPair<A, B> = class {
+    let left: A
+    let right: B
+
+    fn init(left: A, right: B) {
+        this.left = left
+        this.right = right
+    }
+
+    fn eq(other: BadBiPair<A, u32>) -> bool {
+        return true
+    }
+}
+
+fn bad_multi_generic() {
+    let a = new BadBiPair<u32, string>(1, "x")
+    let b = new BadBiPair<u32, string>(1, "y")
+
+    /// @Error: does not satisfy constraint
+    assert_pair_same<BadBiPair<u32, string>>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_pair_same(a, b)
+}
+
+// -----------------------------------------------------------------------------
+// 4) Overload/default shape does not replace required signature
+// -----------------------------------------------------------------------------
+
+type BadOverPoint = class {
+    let v: u32
+
+    fn init(v: u32) {
+        this.v = v
+    }
+
+    // Missing eq(other: BadOverPoint) overload entirely.
+    fn eq(other: BadOverPoint, strict: bool = true) -> bool {
+        return strict
+    }
+
+    fn toString() -> string {
+        return "BadOverPoint"
+    }
+}
+
+fn bad_overload_default() {
+    let a = new BadOverPoint(1)
+    let b = new BadOverPoint(1)
+
+    /// @Error: does not satisfy constraint
+    assert_same<BadOverPoint>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_same(a, b)
+}
+
+// -----------------------------------------------------------------------------
+// 5) Alias resolves to different interface identity
+// -----------------------------------------------------------------------------
+
+type DifferentComparable = interface {
+    fn eq(other: DifferentComparable) -> bool
+}
+
+type DifferentAlias = DifferentComparable
+
+type BadAliasPoint = class {
+    let v: u32
+
+    fn init(v: u32) {
+        this.v = v
+    }
+
+    fn eq(other: DifferentAlias) -> bool {
+        return true
+    }
+
+    fn toString() -> string {
+        return "BadAliasPoint"
+    }
+}
+
+fn bad_alias_identity() {
+    let a = new BadAliasPoint(1)
+    let b = new BadAliasPoint(1)
+
+    /// @Error: does not satisfy constraint
+    assert_same<BadAliasPoint>(a, b)
+    /// @Error: does not satisfy constraint
+    assert_same(a, b)
+}
+
+// -----------------------------------------------------------------------------
+// 6) Direct interface use remains unsafe for self-only implementations
+// -----------------------------------------------------------------------------
+
+type Point = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    fn eq(other: Point) -> bool {
+        return this.x == other.x
+    }
+
+    fn toString() -> string {
+        return "Point"
+    }
+}
+
+fn takesComparable(value: ComparableObject) -> bool {
+    return true
+}
+
+fn bad_non_generic_usage() {
+    let p = new Point(1)
+
+    /// @Error: signature mismatch
+    let x: ComparableObject = p
+
+    /// @Error: signature mismatch
+    takesComparable(p)
+}

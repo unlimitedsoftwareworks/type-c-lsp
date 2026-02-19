@@ -1,0 +1,117 @@
+type ComparableObject = interface {
+    fn eq(other: ComparableObject) -> bool
+    fn toString() -> string
+}
+
+fn assert_obj_eq<T: ComparableObject>(actual: T, expected: T) -> bool {
+    return actual.eq(expected)
+}
+
+type BadPoint = class {
+    let x: u32
+    let y: u32
+
+    fn init(x: u32, y: u32) {
+        this.x = x
+        this.y = y
+    }
+
+    // Invalid implementation: parameter is unrelated to ComparableObject/self-type rule.
+    fn eq(other: u32) -> bool {
+        return this.x == other
+    }
+
+    fn toString() -> string {
+        return "BadPoint"
+    }
+}
+
+fn test() {
+    let p1 = new BadPoint(1, 2)
+    let p2 = new BadPoint(1, 2)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_obj_eq<BadPoint>(p1, p2)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_obj_eq(p1, p2)
+}
+
+type ComparableObjectNonNullable = interface {
+    fn eq(other: ComparableObjectNonNullable) -> bool
+}
+
+fn assert_obj_eq_non_nullable<T: ComparableObjectNonNullable>(actual: T, expected: T) -> bool {
+    return actual.eq(expected)
+}
+
+type HalfNullablePoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    // Invalid for self-type matching: implementation is nullable while
+    // interface parameter is non-nullable.
+    fn eq(other: HalfNullablePoint?) -> bool {
+        if other == null {
+            return false
+        }
+        let value = other as! HalfNullablePoint
+        return this.x == value.x
+    }
+}
+
+fn test_nullable_asymmetry() {
+    let p1 = new HalfNullablePoint(1)
+    let p2 = new HalfNullablePoint(1)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_obj_eq_non_nullable<HalfNullablePoint>(p1, p2)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_obj_eq_non_nullable(p1, p2)
+}
+
+type AliasComparableNonNullable = interface {
+    fn eq(other: AliasComparableNonNullableRef) -> bool
+}
+
+type AliasComparableNonNullableRef = AliasComparableNonNullable
+
+fn assert_alias_non_nullable<T: AliasComparableNonNullable>(actual: T, expected: T) -> bool {
+    return actual.eq(expected)
+}
+
+type AliasHalfNullablePoint = class {
+    let x: u32
+
+    fn init(x: u32) {
+        this.x = x
+    }
+
+    // Invalid for self-type matching: alias-wrapped nullable implementation
+    // while interface parameter remains non-nullable.
+    fn eq(other: AliasHalfNullablePointMaybeAlias) -> bool {
+        if other == null {
+            return false
+        }
+        let value = other as! AliasHalfNullablePoint
+        return this.x == value.x
+    }
+}
+
+type AliasHalfNullablePointAlias = AliasHalfNullablePoint
+type AliasHalfNullablePointMaybeAlias = AliasHalfNullablePointAlias?
+
+fn test_alias_nullable_asymmetry() {
+    let p1 = new AliasHalfNullablePoint(1)
+    let p2 = new AliasHalfNullablePoint(1)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_alias_non_nullable<AliasHalfNullablePoint>(p1, p2)
+
+    /// @Error(TCE120): does not satisfy constraint
+    assert_alias_non_nullable(p1, p2)
+}

@@ -1,0 +1,14 @@
+// Test: Error when classes have no common methods.
+
+type Dog = class {
+    fn bark() -> void {}
+}
+
+type Fish = class {
+    fn swim() -> void {}
+}
+
+fn test() {
+    /// @Error: Cannot find LUB for distinct classes
+    let animals = [new Dog(), new Fish()]
+}

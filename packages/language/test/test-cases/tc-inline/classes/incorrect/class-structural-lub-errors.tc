@@ -1,0 +1,51 @@
+// Test: Structural LUB error cases for classes.
+
+// --- Same method name but incompatible parameter types ---
+
+type Printer = class {
+    fn print(x: string) -> void {}
+}
+
+type Logger = class {
+    fn print(x: u32) -> void {}
+}
+
+fn testIncompatibleParams() {
+    // print() exists in both but parameters differ: string vs u32
+    // No common methods survive -> error
+    /// @Error: Cannot find LUB for distinct classes
+    let outputs = [new Printer(), new Logger()]
+}
+
+// --- Same method name but different parameter counts ---
+
+type Sender = class {
+    fn send(msg: string) -> void {}
+}
+
+type Broadcaster = class {
+    fn send(msg: string, channel: u32) -> void {}
+}
+
+fn testDifferentParamCounts() {
+    // send() has different arity: 1 param vs 2 params
+    // No common methods survive -> error
+    /// @Error: Cannot find LUB for distinct classes
+    let senders = [new Sender(), new Broadcaster()]
+}
+
+// --- Same method name but incompatible return types ---
+
+type StringProducer = class {
+    fn produce() -> string = "hello"
+}
+
+type NumberProducer = class {
+    fn produce() -> u32 = 42
+}
+
+fn testIncompatibleReturnTypes() {
+    // produce() returns string vs u32 - no LUB for these primitives
+    /// @Error: Cannot find LUB for distinct classes
+    let producers = [new StringProducer(), new NumberProducer()]
+}

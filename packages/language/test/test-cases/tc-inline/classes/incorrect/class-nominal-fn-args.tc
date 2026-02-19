@@ -1,0 +1,37 @@
+// Test: Nominal class typing must be enforced in function call arguments.
+// Regression test for BUG-001.
+
+type Celsius = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+type Fahrenheit = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+fn expectCelsius(t: Celsius) -> void {}
+fn expectFahrenheit(t: Fahrenheit) -> void {}
+
+fn test() {
+    let f = new Fahrenheit(212.0)
+    let c = new Celsius(37.0)
+
+    // Nominally distinct classes — must produce type errors
+    /// @Error(TCE021): Function call argument 1 type mismatch
+    expectCelsius(f)
+
+    /// @Error(TCE021): Function call argument 1 type mismatch
+    expectFahrenheit(c)
+}

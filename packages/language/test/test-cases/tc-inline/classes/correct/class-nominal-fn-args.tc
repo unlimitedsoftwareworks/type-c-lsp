@@ -1,0 +1,34 @@
+// Test: Passing the correct class type to a function parameter must NOT produce an error.
+// Positive counterpart to incorrect/class-nominal-fn-args.tc (BUG-001 regression).
+
+type Celsius = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+type Fahrenheit = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+fn expectCelsius(t: Celsius) -> void {}
+fn expectFahrenheit(t: Fahrenheit) -> void {}
+
+fn test() {
+    let c = new Celsius(37.0)
+    let f = new Fahrenheit(212.0)
+
+    // Passing the correct class type — no error expected
+    expectCelsius(c)
+    expectFahrenheit(f)
+}

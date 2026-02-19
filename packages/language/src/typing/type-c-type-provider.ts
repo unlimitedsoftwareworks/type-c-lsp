@@ -4014,6 +4014,20 @@ export class TypeCTypeProvider {
             return this.inferExpression(v.expr);
         });
 
+        // Try contextual typing: if expected type is an array, check if all
+        // elements are assignable to the expected element type
+        const expectedType = this.getExpectedType(node);
+        if (expectedType && isArrayType(expectedType)) {
+            const expectedElementType = expectedType.elementType;
+            const allAssignable = elementTypes.every(elemType =>
+                !isErrorType(elemType) &&
+                this.typeUtils.isAssignable(elemType, expectedElementType).success
+            );
+            if (allAssignable) {
+                return expectedType;
+            }
+        }
+
         const commonType = this.typeUtils.getCommonType(elementTypes);
 
         // If getCommonType returns an error, return it directly instead of wrapping in array

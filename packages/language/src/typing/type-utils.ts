@@ -346,6 +346,17 @@ export class TypeCTypeUtils {
                 }
                 return this.areStructTypesEqual(a, b);
 
+            case TypeKind.Class: {
+                if (!isClassType(a) || !isClassType(b)) {
+                    return failure('Expected class types');
+                }
+                // Classes use nominal typing - must be the exact same declaration
+                if (a === b || (a.node && b.node && a.node === b.node)) {
+                    return success();
+                }
+                return failure(`Class types differ: ${a.toString()} vs ${b.toString()}`);
+            }
+
             case TypeKind.Function:
                 if (!isFunctionType(a) || !isFunctionType(b)) {
                     return failure('Expected types');
@@ -994,52 +1005,52 @@ export class TypeCTypeUtils {
         return success();
     }
 
+    /**
+     * Collects all effective methods from a class's impl blocks, applying generic
+     * substitutions and filtering out methods shadowed by class override methods.
+     */
+    private collectImplMethods(cls: ClassTypeDescription): MethodType[] {
+        const implMethods = cls.implementations.map(implRef => {
+            let implSubstitutions: Map<string, TypeDescription> | undefined;
+            if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
+                implSubstitutions = new Map<string, TypeDescription>();
+                implRef.declaration.genericParameters.forEach((param, i) => {
+                    if (i < implRef.genericArgs.length) {
+                        implSubstitutions!.set(param.name, implRef.genericArgs[i]);
+                    }
+                });
+            }
+            const impl = this.typeProvider().resolveReference(implRef);
+            if (isImplementationType(impl)) {
+                if (implSubstitutions && implSubstitutions.size > 0) {
+                    return impl.methods.map(m => ({
+                        ...m,
+                        parameters: m.parameters.map(p => ({
+                            name: p.name,
+                            type: this.substituteGenerics(p.type, implSubstitutions!),
+                            isMut: p.isMut,
+                            hasDefault: p.hasDefault
+                        })),
+                        returnType: this.substituteGenerics(m.returnType, implSubstitutions!)
+                    }));
+                }
+                return impl.methods;
+            }
+            return [];
+        }).flat();
+
+        // Filter out impl methods that are shadowed by class override methods
+        return implMethods.filter(implMethod =>
+            !cls.methods.some(classMethod =>
+                classMethod.isOverride && this.methodSignaturesMatch(classMethod, implMethod)
+            )
+        );
+    }
+
     isClassAssignableToInterface(from: ClassTypeDescription, to: InterfaceTypeDescription): TypeCheckResult {
         // All interface methods must be implemented by the class
+        const nonShadowedImplMethods = this.collectImplMethods(from);
         for (const method of to.methods) {
-            // Collect impl methods with generic substitutions applied
-            const implMethods = from.implementations.map(implRef => {
-                // Build substitutions from the impl reference (e.g., Default3DImpl<vec3>)
-                let implSubstitutions: Map<string, TypeDescription> | undefined;
-                if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
-                    implSubstitutions = new Map<string, TypeDescription>();
-                    implRef.declaration.genericParameters.forEach((param, i) => {
-                        if (i < implRef.genericArgs.length) {
-                            implSubstitutions!.set(param.name, implRef.genericArgs[i]);
-                        }
-                    });
-                }
-                
-                // Resolve the impl type
-                const impl = this.typeProvider().resolveReference(implRef);
-                if(isImplementationType(impl)) {
-                    // Apply generic substitutions to each method
-                    if (implSubstitutions && implSubstitutions.size > 0) {
-                        return impl.methods.map(m => ({
-                            ...m,
-                            parameters: m.parameters.map(p => ({
-                                name: p.name,
-                                type: this.substituteGenerics(p.type, implSubstitutions!),
-                                isMut: p.isMut,
-                                hasDefault: p.hasDefault
-                            })),
-                            returnType: this.substituteGenerics(m.returnType, implSubstitutions!)
-                        }));
-                    }
-                    return impl.methods;
-                }
-                return []
-            }).flat();
-            
-            // Filter out impl methods that are shadowed by override methods
-            const nonShadowedImplMethods = implMethods.filter(implMethod => {
-                // Check if any class override method shadows this impl method
-                return !from.methods.some(classMethod =>
-                    classMethod.isOverride &&
-                    this.methodSignaturesMatch(classMethod, implMethod)
-                );
-            });
-            
             // Collect all available methods (class methods + non-shadowed impl methods)
             const classMethods = [...from.methods, ...nonShadowedImplMethods];
             // Find all class methods with matching names (to handle overloads)
@@ -1650,6 +1661,12 @@ export class TypeCTypeUtils {
         if (isNullableType(resolvedFrom) && isNullableType(resolvedTo)) {
             // T? to U? - check if T can be cast to U
             return this.canCastTypes(resolvedFrom.baseType, resolvedTo.baseType);
+        }
+
+        // Class to class - always allow casting between classes for runtime type checks
+        // At runtime, a variable of one class type could hold an instance of another class
+        if (isClassType(resolvedFrom) && isClassType(resolvedTo)) {
+            return success();
         }
 
         // Class to interface - check if class implements interface (allowed for safe cast)
@@ -3799,6 +3816,121 @@ export class TypeCTypeUtils {
     }
 
     /**
+     * Collects all effective public instance methods from a class,
+     * including impl methods with generic substitutions applied.
+     * Excludes static, local, and init methods.
+     */
+    private getEffectiveClassMethods(cls: ClassTypeDescription): MethodType[] {
+        const nonShadowedImplMethods = this.collectImplMethods(cls);
+        const allMethods = [...cls.methods, ...nonShadowedImplMethods];
+        return allMethods.filter(m => !m.isStatic && !m.isLocal && !m.names.includes('init'));
+    }
+
+    /**
+     * Computes the LUB of multiple class types by finding common methods
+     * and synthesizing an anonymous interface type.
+     * Follows the same pattern as getLUBForInterfaces.
+     */
+    private getLUBForClasses(classTypes: ClassTypeDescription[]): TypeDescription {
+        if (classTypes.length === 0) {
+            return this.typeFactory.createErrorType('Cannot compute LUB: no class types provided', undefined);
+        }
+        if (classTypes.length === 1) {
+            return classTypes[0];
+        }
+
+        // Step 1: Collect effective methods per class
+        const effectiveMethodSets = classTypes.map(cls => this.getEffectiveClassMethods(cls));
+
+        // Step 2: Find common method names (intersection)
+        const methodNameSets = effectiveMethodSets.map(methods => {
+            const names = new Set<string>();
+            for (const method of methods) {
+                for (const name of method.names) {
+                    names.add(name);
+                }
+            }
+            return names;
+        });
+
+        const commonMethodNames = new Set<string>();
+        for (const methodName of methodNameSets[0]) {
+            if (methodNameSets.every(set => set.has(methodName))) {
+                commonMethodNames.add(methodName);
+            }
+        }
+
+        if (commonMethodNames.size === 0) {
+            return this.typeFactory.createErrorType(
+                `Cannot find LUB for distinct classes: no common methods found among ${classTypes.map(t => t.toString()).join(', ')}`,
+                undefined,
+                classTypes[0].node
+            );
+        }
+
+        // Step 3: For each common method, verify compatibility and compute LUB return type
+        const commonMethods: MethodType[] = [];
+        const skippedMethods: string[] = [];
+
+        for (const methodName of commonMethodNames) {
+            const methodsWithName = effectiveMethodSets.map(methods =>
+                methods.find(m => m.names.includes(methodName))!
+            );
+
+            const firstMethod = methodsWithName[0];
+
+            // Check parameter count and types match exactly
+            const allParamsMatch = methodsWithName.every(method => {
+                if (method.parameters.length !== firstMethod.parameters.length) {
+                    return false;
+                }
+                return method.parameters.every((param, i) =>
+                    this.areTypesEqual(param.type, firstMethod.parameters[i].type).success
+                );
+            });
+
+            if (!allParamsMatch) {
+                skippedMethods.push(`${methodName} (incompatible parameters)`);
+                continue;
+            }
+
+            // Compute LUB of return types
+            const returnTypes = methodsWithName.map(m => m.returnType);
+            const returnLUB = this.getCommonType(returnTypes);
+
+            if (isErrorType(returnLUB)) {
+                skippedMethods.push(`${methodName} (incompatible return types)`);
+                continue;
+            }
+
+            commonMethods.push({
+                names: [methodName],
+                parameters: firstMethod.parameters,
+                returnType: returnLUB,
+                genericParameters: firstMethod.genericParameters,
+                isStatic: false,
+                isOverride: false,
+                isLocal: false,
+                node: firstMethod.node
+            });
+        }
+
+        if (commonMethods.length === 0) {
+            const skippedInfo = skippedMethods.length > 0
+                ? `. Skipped: ${skippedMethods.join(', ')}`
+                : `: no common methods found among ${classTypes.map(t => t.toString()).join(', ')}`;
+            return this.typeFactory.createErrorType(
+                `Cannot find LUB for distinct classes${skippedInfo}`,
+                undefined,
+                classTypes[0].node
+            );
+        }
+
+        // Step 4: Create anonymous interface type
+        return this.typeFactory.createInterfaceType(commonMethods, [], classTypes[0].node);
+    }
+
+    /**
      * Computes the Least Upper Bound (LUB) of multiple types using structural subtyping.
      *
      * This is the core LUB algorithm that dispatches to category-specific handlers:
@@ -3850,13 +3982,55 @@ export class TypeCTypeUtils {
                 case 'string-enum':
                     return this.combineStringEnums(categoryTypes as StringEnumTypeDescription[]);
                     
-                case 'class':
-                    // Classes are name-based, no structural LUB possible
-                    return this.typeFactory.createErrorType(
-                        `Cannot find LUB for different classes: ${categoryTypes.map(t => t.toString()).join(', ')}`,
-                        'Classes use name-based identity, not structural typing',
-                        types[0].node
+                case 'class': {
+                    // Classes are nominal, but may share common interfaces
+                    const classTypes = categoryTypes as ClassTypeDescription[];
+
+                    // Collect candidate interfaces from superTypes and implementations of the FIRST class
+                    // Store both the original ref (for named output like "Animal") and resolved interface
+                    const firstClassCandidates: { ref: TypeDescription; resolved: InterfaceTypeDescription }[] = [];
+                    const firstCls = classTypes[0];
+                    for (const sup of firstCls.superTypes) {
+                        const resolved = this.resolveIfReference(sup);
+                        if (isInterfaceType(resolved)) {
+                            firstClassCandidates.push({ ref: sup, resolved });
+                        }
+                    }
+                    for (const implRef of firstCls.implementations) {
+                        const resolvedImpl = this.resolveIfReference(implRef);
+                        if (isImplementationType(resolvedImpl)) {
+                            for (const targetType of resolvedImpl.targetTypes) {
+                                const resolvedTarget = this.resolveIfReference(targetType);
+                                if (isInterfaceType(resolvedTarget)) {
+                                    firstClassCandidates.push({ ref: targetType, resolved: resolvedTarget });
+                                }
+                            }
+                        }
+                    }
+
+                    // Find interfaces that ALL classes implement (structural check)
+                    const commonCandidates = firstClassCandidates.filter(({ resolved: iface }) =>
+                        classTypes.every(cls => this.isClassAssignableToInterface(cls, iface).success)
                     );
+
+                    if (commonCandidates.length === 1) {
+                        // Return the original ref form (e.g., ReferenceType("Animal")) for clean naming
+                        return isReferenceType(commonCandidates[0].ref)
+                            ? commonCandidates[0].ref
+                            : commonCandidates[0].resolved;
+                    }
+                    if (commonCandidates.length > 1) {
+                        // Multiple common interfaces — return a join (intersection) type
+                        const joinTypes = commonCandidates.map(c =>
+                            isReferenceType(c.ref) ? c.ref : c.resolved
+                        );
+                        return this.typeFactory.createJoinType(joinTypes, types[0].node);
+                    }
+
+                    // No common declared interfaces — try structural discovery
+                    // Find common methods across all classes and synthesize an interface
+                    return this.getLUBForClasses(classTypes);
+                }
                     
                 case 'variant':
                     // Already handled by existing variant logic in getCommonType

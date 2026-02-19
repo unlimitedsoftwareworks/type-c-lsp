@@ -1,0 +1,19 @@
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Cat = class Animal {
+    fn speak() -> string = "meow"
+}
+
+type Dog = class Animal {
+    fn speak() -> string = "woof"
+}
+
+fn test() {
+    /// @Error(TCE006): Variable 'a' type mismatch
+    let a: Cat = new Dog()
+
+    /// @Error(TCE006): Variable 'b' type mismatch
+    let b: Dog = new Cat()
+}

@@ -55,7 +55,7 @@ fn test3(runner: TestUnit) {
 
 fn test4(runner: TestUnit) {
     let arr: u32[] = [1, 2, 3, 4, 5, 1]
-    let sum_everything_but_1 = 0
+    let sum_everything_but_1 = 0u32
     foreach i, value in arr {
         // check if the value is 1, then we skip it and resume the loop
         if value == 1 {

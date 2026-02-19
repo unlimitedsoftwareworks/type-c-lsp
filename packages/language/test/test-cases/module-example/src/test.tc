@@ -1,30 +1,30 @@
-type TestUnit = class {
-    fn assert_eq<T>(a: T, b: T) {
-        return b
+type Animal = interface {
+    fn makeNoise() -> void
+}
+
+type Cat = class {
+    fn makeNoise() {
+
     }
 }
 
-fn genericFn<T>(x: T, y: T) -> T {
-    return x
-}
-fn genericFn2<T>(x: T, y: T) -> void {
-}
+type Dog = class {
+    fn makeNoise() {
 
-fn test1(runner: TestUnit) {
-    let a = runner.assert_eq<u8>(1u8, 1u8) // u8
-    let b = runner.assert_eq(1, 1) // i32
-    let c = runner.assert_eq<u8>(1, 1) // u8
-    let d = runner.assert_eq<u8>(1u8, 1) // u8
-    let e = runner.assert_eq(1u8, 1) // Error: TCE120 Cannot infer common type: found u8, i32
-    let f = runner.assert_eq(1u8, 1u8) // u8
-
-    let g = genericFn<u8>(1u8, 1u8) // u8
-    let h = genericFn(1, 1) // i32
-    let i = genericFn<u8>(1, 1) // u8
-    let j = genericFn<u8>(1u8, 1) // u8
-    let k = genericFn(1u8, 1) // Error: TCE120 Cannot infer common type: found u8, i32type-c(TCE120)
-    genericFn2(1u8, 1) // Ok
-    let l = genericFn(1u8, 1u8) // u8
+    }
 }
 
+fn main() {
+    let a1: Animal = new Dog() // Ok
+    let a2: Animal = new Cat() // Ok
 
+    let a3: Cat = new Dog() // Error: Variable 'a3' type mismatch: Class types differ
+
+    let animals1 = [
+        new Dog(), new Cat() // LUB discovers common method makeNoise() -> interface { fn makeNoise() -> void }
+    ]
+
+    let animals2: Animal[] = [
+        new Dog(), new Cat() // Contextual typing checks assignability to Animal
+    ]
+}

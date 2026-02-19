@@ -1,0 +1,19 @@
+// Test: Structural discovery of common interface from class methods.
+// When classes share methods but have no declared common interface,
+// the compiler should synthesize a common interface type.
+
+type Dog = class {
+    fn makeNoise() -> string = "woof"
+    fn fetch() -> void {}
+}
+
+type Cat = class {
+    fn makeNoise() -> string = "meow"
+    fn purr() -> void {}
+}
+
+fn test() {
+    // Both Dog and Cat have makeNoise() -> string
+    // LUB = interface { fn makeNoise() -> string }
+    let animals = [new Dog(), new Cat()]
+}

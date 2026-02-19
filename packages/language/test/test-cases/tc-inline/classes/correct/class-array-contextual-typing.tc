@@ -1,0 +1,19 @@
+// Test: Contextual array typing with declared interface.
+// When expected type is Animal[], each element is checked for assignability.
+
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Dog = class {
+    fn speak() -> string = "woof"
+}
+
+type Cat = class {
+    fn speak() -> string = "meow"
+}
+
+fn test() {
+    // Contextual typing: expected Animal[], each element is assignable to Animal
+    let animals: Animal[] = [new Dog(), new Cat()]
+}

@@ -1,0 +1,54 @@
+// Test: Advanced nominal typing enforcement for classes.
+
+// Structurally identical classes (same fields and methods)
+type Celsius = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+type Fahrenheit = class {
+    let value: f64
+
+    fn init(v: f64) {
+        this.value = v
+    }
+
+    fn get() -> f64 = this.value
+}
+
+// --- Structurally identical but nominally different (variable assignment) ---
+
+fn testStructurallyIdentical() {
+    /// @Error(TCE006): Variable 'temp' type mismatch
+    let temp: Celsius = new Fahrenheit(100.0)
+
+    /// @Error(TCE006): Variable 'temp2' type mismatch
+    let temp2: Fahrenheit = new Celsius(37.0)
+}
+
+// --- Function return type mismatch ---
+
+fn returnCelsius() -> Celsius {
+    /// @Error: Return type mismatch
+    return new Fahrenheit(100.0)
+}
+
+fn returnFahrenheit() -> Fahrenheit {
+    /// @Error: Return type mismatch
+    return new Celsius(37.0)
+}
+
+// --- Array of same class type ---
+
+fn testSameClassArray() {
+    let units: Celsius[] = [new Celsius(100.0), new Celsius(0.0)]
+
+    // Cannot put Fahrenheit in a Celsius array
+    /// @Error(TCE006): Variable 'mixed' type mismatch
+    let mixed: Celsius[] = [new Fahrenheit(212.0)]
+}

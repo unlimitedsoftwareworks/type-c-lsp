@@ -1,0 +1,20 @@
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Cat = class Animal {
+    fn speak() -> string = "meow"
+}
+
+type Dog = class Animal {
+    fn speak() -> string = "woof"
+}
+
+fn test() {
+    // Array with classes sharing a common interface should infer Animal[]
+    let animals = [new Dog(), new Cat()]
+
+    // Explicit interface type annotation should work
+    let a1: Animal = new Dog()
+    let a2: Animal = new Cat()
+}

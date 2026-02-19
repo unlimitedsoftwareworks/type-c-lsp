@@ -1,0 +1,64 @@
+// Test: Advanced structural LUB scenarios for classes without declared common interface.
+
+// --- 3+ classes: LUB should be intersection of ALL common methods ---
+
+type Dog = class {
+    fn makeNoise() -> string = "woof"
+    fn move() -> string = "run"
+    fn fetch() -> void {}
+}
+
+type Cat = class {
+    fn makeNoise() -> string = "meow"
+    fn move() -> string = "sneak"
+    fn purr() -> void {}
+}
+
+type Parrot = class {
+    fn makeNoise() -> string = "squawk"
+    fn move() -> string = "fly"
+    fn mimic() -> void {}
+}
+
+fn testThreeClassLUB() {
+    // All three share makeNoise() -> string AND move() -> string
+    // LUB = interface { fn makeNoise() -> string; fn move() -> string }
+    let animals = [new Dog(), new Cat(), new Parrot()]
+}
+
+// --- Multiple common methods with parameters ---
+
+type Circle = class {
+    fn area() -> f64 = 3.14
+    fn scale(factor: f64) -> f64 = 3.14
+    fn describe() -> string = "circle"
+}
+
+type Square = class {
+    fn area() -> f64 = 4.0
+    fn scale(factor: f64) -> f64 = 4.0
+    fn describe() -> string = "square"
+    fn diagonal() -> f64 = 1.41
+}
+
+fn testMultipleCommonMethods() {
+    // Common: area() -> f64, scale(f64) -> f64, describe() -> string
+    let shapes = [new Circle(), new Square()]
+}
+
+// --- Two classes with exactly the same methods ---
+
+type Logger = class {
+    fn log(msg: string) -> void {}
+    fn flush() -> void {}
+}
+
+type Printer = class {
+    fn log(msg: string) -> void {}
+    fn flush() -> void {}
+}
+
+fn testIdenticalMethods() {
+    // Both have log(string) -> void and flush() -> void
+    let outputs = [new Logger(), new Printer()]
+}

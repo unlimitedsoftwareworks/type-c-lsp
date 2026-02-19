@@ -3199,17 +3199,23 @@ export class IRGenerator {
         const shapeId = this.getOrDeclareStructShape(variantTd);
         f.structAlloc(temp, shapeId);
 
-        // Set tag (field #0)
+        // Set tag via field name ID
         const tagReg = this.tmp();
         const tagValue = this.getVariantConstructorTag(constructorRef);
         f.constInt(tagReg, tagValue, 'u8');
-        f.structSet(temp, 0, tagReg, scalarType('u8'));
+        f.structSet(temp, this.getOrCreateFieldNameId('$tag'), tagReg, scalarType('u8'));
 
-        // Set constructor arguments (fields #1..N)
-        if (node.args) {
+        // Set constructor arguments via field name IDs
+        if (node.args && isVariantConstructorType(variantTd)) {
+            const vcTd = variantTd as VariantConstructorTypeDescription;
+            const constructor = vcTd.baseVariant.constructors.find(c => c.name === vcTd.constructorName);
+            if (!constructor) {
+                throw new Error(`Variant constructor '${vcTd.constructorName}' not found in variant type`);
+            }
             for (let i = 0; i < node.args.length; i++) {
                 const argResult = this.visitExpression(node.args[i], undefined);
-                f.structSet(temp, i + 1, argResult.register, argResult.type);
+                const nameId = this.getOrCreateFieldNameId(constructor.parameters[i].name);
+                f.structSet(temp, nameId, argResult.register, argResult.type);
             }
         }
 
@@ -3549,7 +3555,7 @@ export class IRGenerator {
             if (isVariantConstructorType(patternTd)) {
                 // Read tag from subject
                 const tagReg = this.tmp();
-                f.structGet(tagReg, subject.register, 0, scalarType('u8'));
+                f.structGet(tagReg, subject.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
 
                 // Compare with expected tag
                 const expectedTag = this.getVariantConstructorTagFromType(patternTd);
@@ -3603,11 +3609,16 @@ export class IRGenerator {
             // bind constructor fields to pattern variables recursively
             const patternTd = this.getType(pattern.type);
             if (isVariantConstructorType(patternTd) && pattern.params) {
+                const vcConstructor = patternTd.baseVariant.constructors.find(c => c.name === patternTd.constructorName);
+                if (!vcConstructor) {
+                    throw new Error(`Variant constructor '${patternTd.constructorName}' not found in variant type`);
+                }
                 for (let i = 0; i < pattern.params.length; i++) {
                     const nestedPattern = pattern.params[i];
                     const fieldType = this.getVariantFieldType(patternTd, i);
                     const fieldReg = this.tmp();
-                    f.structGet(fieldReg, subject.register, i + 1, fieldType);
+                    const nameId = this.getOrCreateFieldNameId(vcConstructor.parameters[i].name);
+                    f.structGet(fieldReg, subject.register, nameId, fieldType);
 
                     const fieldSubject: ExpressionResult = { register: fieldReg, type: fieldType };
 
@@ -3638,7 +3649,7 @@ export class IRGenerator {
                             const nestedTd = this.getType(nestedPattern.type);
                             if (isVariantConstructorType(nestedTd)) {
                                 const tagReg = this.tmp();
-                                f.structGet(tagReg, fieldReg, 0, scalarType('u8'));
+                                f.structGet(tagReg, fieldReg, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
                                 const expectedTag = this.getVariantConstructorTagFromType(nestedTd);
                                 const expectedTagReg = this.tmp();
                                 f.constInt(expectedTagReg, expectedTag, 'u8');
@@ -3658,7 +3669,10 @@ export class IRGenerator {
                 }
             }
         } else if (ast.isTypePattern(pattern) && pattern.params) {
-            // TypePattern without specific type instance — bind params
+            // NOTE: This branch is currently unreachable for variant patterns.
+            // All variant patterns with params parse as TypeInstancePattern (handled above).
+            // TypePattern without TypeInstancePattern only occurs if grammar evolves to allow
+            // bare destructuring without a type reference. Kept as defensive fallback.
             for (let i = 0; i < pattern.params.length; i++) {
                 const nestedPattern = pattern.params[i];
                 // Extract field from subject struct (offset +1 for variant tag)
@@ -3830,12 +3844,25 @@ export class IRGenerator {
         const expr = this.visitExpression(node.left, undefined);
         const temp = this.tmp();
 
-        // Resolve the target type to determine the class ID
+        // Resolve the target type
         const targetTd = this.getType(node.destType);
         const resolvedTarget = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
+
+        if (isVariantConstructorType(resolvedTarget)) {
+            // Variant constructor: check tag field
+            const vcTd = resolvedTarget as VariantConstructorTypeDescription;
+            const tagReg = this.tmp();
+            f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
+            const expectedTag = this.getVariantConstructorTagFromType(vcTd);
+            const expectedTagReg = this.tmp();
+            f.constInt(expectedTagReg, expectedTag, 'u8');
+            f.cmpEq(temp, tagReg, expectedTagReg, 'u8');
+            return { register: temp, type: scalarType('bool') };
+        }
+
+        // Class: use interface_is_class
         let classId = 0;
         if (isClassType(resolvedTarget)) {
-            // Use a hash of the class name as a simple class identifier
             const classDesc = resolvedTarget as ClassTypeDescription;
             const classNode = classDesc.node;
             const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
@@ -3899,8 +3926,35 @@ export class IRGenerator {
                 this.func().mov(temp, expr.register, targetType);
             }
         } else {
-            // Pointer cast: just mov (the VM tracks types)
-            this.func().mov(temp, expr.register, targetType);
+            // Pointer cast: check for variant safe cast (as?)
+            const targetTd = this.getType(node.destType);
+            const resolvedTargetTd = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
+
+            if (node.castType === 'as?' && isVariantConstructorType(resolvedTargetTd)) {
+                // Safe cast to variant constructor: check tag, return null on mismatch
+                const f = this.func();
+                const vcTd = resolvedTargetTd as VariantConstructorTypeDescription;
+                const tagReg = this.tmp();
+                f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
+                const expectedTag = this.getVariantConstructorTagFromType(vcTd);
+                const expectedTagReg = this.tmp();
+                f.constInt(expectedTagReg, expectedTag, 'u8');
+                const cmpReg = this.tmp();
+                f.cmpEq(cmpReg, tagReg, expectedTagReg, 'u8');
+                const okLabel = this.generateLabel('safe_cast_ok');
+                const nullLabel = this.generateLabel('safe_cast_null');
+                const endLabel = this.generateLabel('safe_cast_end');
+                f.br(cmpReg, okLabel, nullLabel);
+                f.label(okLabel);
+                f.mov(temp, expr.register, targetType);
+                f.jmp(endLabel);
+                f.label(nullLabel);
+                f.constNull(temp);
+                f.label(endLabel);
+            } else {
+                // Regular pointer cast: just mov
+                this.func().mov(temp, expr.register, targetType);
+            }
         }
 
         return { register: temp, type: targetType };
@@ -4157,7 +4211,28 @@ export class IRGenerator {
             this.program.declareStruct(shape);
             return id;
         }
-        // For variants, create struct shape with tag + fields
+        if (isVariantConstructorType(td)) {
+            const vcTd = td as VariantConstructorTypeDescription;
+            const constructor = vcTd.baseVariant.constructors.find(c => c.name === vcTd.constructorName);
+            const fields: { globalFieldId: number; type: IRType; name: string }[] = [
+                { globalFieldId: this.getOrCreateFieldNameId('$tag'), type: scalarType('u8'), name: '$tag' }
+            ];
+            if (constructor?.parameters) {
+                for (let i = 0; i < constructor.parameters.length; i++) {
+                    const param = constructor.parameters[i];
+                    const fieldType = this.substituteVariantFieldType(vcTd, i);
+                    fields.push({
+                        globalFieldId: this.getOrCreateFieldNameId(param.name),
+                        type: this.convertTypeDescriptionToIR(fieldType),
+                        name: param.name
+                    });
+                }
+            }
+            this.program.declareStruct({ id, fields });
+            return id;
+        }
+        // Fallback: declare empty shape
+        this.program.declareStruct({ id, fields: [] });
         return id;
     }
 
@@ -4175,7 +4250,13 @@ export class IRGenerator {
         }
         if (isVariantConstructorType(td)) {
             const vcTd = td as VariantConstructorTypeDescription;
-            return `vc_${vcTd.constructorName}_${vcTd.baseVariant.constructors.length}`;
+            const constructor = vcTd.baseVariant.constructors.find(c => c.name === vcTd.constructorName);
+            const fields = constructor?.parameters
+                ?.map((p, i) => `${p.name}:${serializeIRType(this.convertTypeDescriptionToIR(
+                    this.substituteVariantFieldType(vcTd, i)
+                ))}`)
+                .join(',') ?? '';
+            return `vc_${vcTd.constructorName}{$tag:u8,${fields}}`;
         }
         if (isVariantType(td)) {
             const vTd = td as { constructors: readonly { name: string }[] };
@@ -4185,7 +4266,7 @@ export class IRGenerator {
     }
 
     private getStructFieldIndex(td: TypeDescription, fieldName: string): number {
-        if (isStructType(td)) {
+        if (isStructType(td) || isVariantConstructorType(td)) {
             return this.getOrCreateFieldNameId(fieldName);
         }
         return 0;
@@ -4233,13 +4314,27 @@ export class IRGenerator {
     }
 
     private getVariantFieldType(td: VariantConstructorTypeDescription, fieldIndex: number): IRType {
-        const constructorName = td.constructorName;
-        const baseVariant = td.baseVariant;
-        const constructor = baseVariant.constructors.find(c => c.name === constructorName);
-        if (constructor && constructor.parameters && fieldIndex < constructor.parameters.length) {
-            return this.convertTypeDescriptionToIR(constructor.parameters[fieldIndex].type);
+        return this.convertTypeDescriptionToIR(this.substituteVariantFieldType(td, fieldIndex));
+    }
+
+    /**
+     * Get the substituted type for a variant constructor field.
+     * Applies generic substitution from the constructor's genericArgs.
+     */
+    private substituteVariantFieldType(td: VariantConstructorTypeDescription, fieldIndex: number): TypeDescription {
+        const constructor = td.baseVariant.constructors.find(c => c.name === td.constructorName);
+        if (!constructor?.parameters || fieldIndex >= constructor.parameters.length) {
+            return { kind: TypeKind.Void } as TypeDescription;
         }
-        return voidType();
+        const rawType = constructor.parameters[fieldIndex].type;
+        if (!td.genericArgs || td.genericArgs.length === 0) return rawType;
+        const variantDecl = td.variantDeclaration;
+        if (!variantDecl?.genericParameters || variantDecl.genericParameters.length === 0) return rawType;
+        const subs = new Map<string, TypeDescription>();
+        for (let i = 0; i < variantDecl.genericParameters.length && i < td.genericArgs.length; i++) {
+            subs.set(variantDecl.genericParameters[i].name, td.genericArgs[i]);
+        }
+        return this.typeUtils.substituteGenerics(rawType, subs);
     }
 
     private intTypeSize(t: IntType): number {

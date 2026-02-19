@@ -366,9 +366,21 @@ export class TypeCTypeProvider {
                 if (argIndex !== undefined && argIndex >= 0 && argIndex < fnType.parameters.length) {
                     let expectedParamType = fnType.parameters[argIndex].type;
 
+                    // If the FunctionCall has explicit generic args, apply substitutions
+                    // to parameter types. This handles method calls like runner.assert_eq<u8>(1, 1)
+                    // where genericArgs are on the FunctionCall node (not the callee expression).
+                    const genericParams = fnType.genericParameters || [];
+                    if (genericParams.length > 0 && parent.genericArgs && parent.genericArgs.length > 0
+                        && parent.genericArgs.length === genericParams.length) {
+                        const explicitSubs = new Map<string, TypeDescription>();
+                        for (let i = 0; i < genericParams.length; i++) {
+                            explicitSubs.set(genericParams[i].name, this.getType(parent.genericArgs[i]));
+                        }
+                        return this.typeUtils.substituteGenerics(expectedParamType, explicitSubs);
+                    }
+
                     // If the function has generic parameters and we're inferring an expression that needs context,
                     // perform iterative partial generic inference from other arguments
-                    const genericParams = fnType.genericParameters || [];
                     const needsContext = ast.isExpression(node) && this.expressionNeedsContextualTyping(node);
 
                     if (genericParams.length > 0 && needsContext) {
@@ -3429,6 +3441,65 @@ export class TypeCTypeProvider {
                     parameterTypes,
                     argumentTypes
                 );
+
+                // Two-pass inference for unsuffixed numeric literals:
+                // If any inferred generic is an error (e.g., getCommonType failed for [u8, i32]),
+                // check if some arguments are unsuffixed literals that could adapt.
+                // Use the non-error type directly for those literals.
+                const hasErrorSubstitution = Array.from(substitutions.values()).some(t => isErrorType(t));
+                if (hasErrorSubstitution) {
+                    // Identify which arguments are unsuffixed numeric literals
+                    const isUnsuffixedLiteral = (arg: ast.Expression): boolean => {
+                        if (ast.isIntegerLiteral(arg)) {
+                            return !arg.value.match(/([iu])(8|16|32|64)$/);
+                        }
+                        if (ast.isFloatingPointLiteral(arg)) {
+                            return !ast.isFloatLiteral(arg); // FloatLiteral has 'f' suffix
+                        }
+                        return false;
+                    };
+
+                    // Collect non-literal (suffixed/concrete) types per generic parameter
+                    const concreteTypes = new Map<string, TypeDescription>();
+                    for (let i = 0; i < Math.min(args.length, parameterTypes.length); i++) {
+                        if (!isUnsuffixedLiteral(args[i])) {
+                            const paramType = parameterTypes[i];
+                            if (isGenericType(paramType) && genericParamNames.includes(paramType.name)) {
+                                if (!concreteTypes.has(paramType.name)) {
+                                    concreteTypes.set(paramType.name, argumentTypes[i]);
+                                }
+                            }
+                        }
+                    }
+
+                    // Replace unsuffixed literal types with the concrete type from other args
+                    if (concreteTypes.size > 0) {
+                        let needsReInference = false;
+                        const newArgumentTypes = [...argumentTypes];
+                        for (let i = 0; i < Math.min(args.length, parameterTypes.length); i++) {
+                            if (isUnsuffixedLiteral(args[i])) {
+                                const paramType = parameterTypes[i];
+                                if (isGenericType(paramType) && concreteTypes.has(paramType.name)) {
+                                    const contextType = concreteTypes.get(paramType.name)!;
+                                    if ((this.isIntegerType(contextType) || this.isFloatType(contextType))
+                                        && !isErrorType(contextType)) {
+                                        // Use the concrete type directly for the unsuffixed literal
+                                        newArgumentTypes[i] = contextType;
+                                        needsReInference = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (needsReInference) {
+                            substitutions = this.inferGenericsFromArguments(
+                                genericParamNames,
+                                parameterTypes,
+                                newArgumentTypes
+                            );
+                        }
+                    }
+                }
                 
                 // Validate that inferred types satisfy constraints
                 for (let i = 0; i < genericParams.length; i++) {

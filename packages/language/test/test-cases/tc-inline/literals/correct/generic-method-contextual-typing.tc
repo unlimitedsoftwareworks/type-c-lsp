@@ -1,0 +1,66 @@
+type TestRunner = class {
+    fn assert_eq<T>(actual: T, expected: T) -> T {
+        return actual
+    }
+}
+
+fn genericFn<T>(x: T, y: T) -> T {
+    return x
+}
+
+fn genericFn2<T>(x: T, y: T) {}
+
+fn multiGeneric<T, U>(a: T, b: U, c: T) -> T {
+    return a
+}
+
+fn threeArgs<T>(a: T, b: T, c: T) -> T {
+    return a
+}
+
+fn test() {
+    let runner = new TestRunner()
+
+    // === Explicit generic args on method calls (original bug) ===
+    runner.assert_eq<u8>(1, 1)
+    runner.assert_eq<u8>(1u8, 1)
+    runner.assert_eq<u32>(1, 2)
+    runner.assert_eq<i64>(1, 2)
+    runner.assert_eq<u8>(1u8, 1u8)
+
+    // === Explicit generic args on standalone functions ===
+    genericFn<u8>(1, 1)
+    genericFn<u8>(1u8, 1)
+    genericFn<u8>(1u8, 1u8)
+
+    // === Inferred generics (no explicit type args) ===
+    runner.assert_eq(1, 1)
+    runner.assert_eq(1u8, 1u8)
+    genericFn(1, 1)
+    genericFn(1u8, 1u8)
+
+    // === Mixed suffixed/unsuffixed with inferred generics ===
+    // Suffixed arg first
+    let a = genericFn(1u8, 1)
+    let b = runner.assert_eq(1u8, 1)
+    let c = genericFn2(1u8, 1)
+    // Unsuffixed arg first (reversed order)
+    let d = genericFn(1, 1u8)
+    let e = runner.assert_eq(1, 1u8)
+    let f = genericFn2(1, 1u8)
+
+    // === Float literals with explicit generics ===
+    genericFn<f32>(1.0, 2.0)
+    runner.assert_eq<f32>(1.0, 2.0)
+
+    // === Multiple generic parameters ===
+    // T=u8 from suffixed literal, U=i32 from default
+    let g = multiGeneric<u8, i32>(1, 2, 3)
+    // T inferred as u8 from suffixed, unsuffixed c adapts
+    let h = multiGeneric(1u8, 2, 3)
+
+    // === Three args, one suffixed ===
+    let i = threeArgs(1u8, 2, 3)
+    let j = threeArgs(1, 2u8, 3)
+    let k = threeArgs(1, 2, 3u8)
+}

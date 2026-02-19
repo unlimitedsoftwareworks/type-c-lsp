@@ -650,8 +650,13 @@ export function selectInstructions(
                 emit(makeAD(Op.STRUCT_ALLOC_I, r(regMap, inst.dest), pool.add32(structIndex)));
                 break;
             }
+            // GET_PTR sets the destination register's bit in the frame's pointer bitmap
+            // (regs_ptr_bm) so the GC scans it as a root. Without it, a pointer loaded
+            // into a register would be invisible to root scanning.
+            // SET writes into the object — the object's own ptrbm (from shape metadata)
+            // already tells the GC which fields to trace, so no per-instruction variant needed.
             case 'struct_get':
-                emit(makeABC(Op.STRUCT_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
+                emit(makeABC(isPointer(inst.resultType) ? Op.STRUCT_GET_PTR_I : Op.STRUCT_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
                 break;
             case 'struct_set':
                 emit(makeABC(Op.STRUCT_SET_I, r(regMap, inst.value), r(regMap, inst.struct), inst.fieldId));
@@ -664,7 +669,7 @@ export function selectInstructions(
                 break;
             }
             case 'class_get':
-                emit(makeABC(Op.CLASS_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
+                emit(makeABC(isPointer(inst.resultType) ? Op.CLASS_GET_PTR_I : Op.CLASS_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
                 break;
             case 'class_set':
                 emit(makeABC(Op.CLASS_SET_I, r(regMap, inst.value), r(regMap, inst.class), inst.fieldId));
@@ -686,7 +691,7 @@ export function selectInstructions(
                 emit(makeABC(Op.ARRAY_ALLOC, r(regMap, inst.dest), r(regMap, inst.size), isPointer(inst.elementType) ? 1 : 0));
                 break;
             case 'array_get':
-                emit(makeABC(Op.ARRAY_GET_R, r(regMap, inst.dest), r(regMap, inst.array), r(regMap, inst.index)));
+                emit(makeABC(isPointer(inst.elementType) ? Op.ARRAY_GET_PTR_R : Op.ARRAY_GET_R, r(regMap, inst.dest), r(regMap, inst.array), r(regMap, inst.index)));
                 break;
             case 'array_set':
                 emit(makeABC(Op.ARRAY_SET_RR, r(regMap, inst.array), r(regMap, inst.index), r(regMap, inst.value)));

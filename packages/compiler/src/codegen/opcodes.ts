@@ -211,6 +211,13 @@ export enum Op {
 
     // --- Dynamic Function Call ---
     FN_CALL_R,      // call function from register-held func index (dispatch frame->next)
+
+    // --- Pointer-aware GET (sets GC pointer bitmap on load) ---
+    // Currently emitted: STRUCT_GET_PTR_I, CLASS_GET_PTR_I, ARRAY_GET_PTR_R
+    // Reserved for future addressing mode optimizations: _R/_K for struct/class, _I/_K for array
+    STRUCT_GET_PTR_R, STRUCT_GET_PTR_K, STRUCT_GET_PTR_I,
+    CLASS_GET_PTR_R, CLASS_GET_PTR_K, CLASS_GET_PTR_I,
+    ARRAY_GET_PTR_R, ARRAY_GET_PTR_I, ARRAY_GET_PTR_K,
 }
 
 // === Instruction Encoding ===

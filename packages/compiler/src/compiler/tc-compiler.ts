@@ -1712,9 +1712,11 @@ export class IRGenerator {
 
             const loopStart = this.generateLabel('foreach_start');
             const loopBody = this.generateLabel('foreach_body');
+            const loopUpdate = this.generateLabel('foreach_update');
             const loopEnd = this.generateLabel('foreach_end');
 
-            this.pushLoop(loopEnd, loopStart);
+            // continue should execute the update step before re-checking the condition
+            this.pushLoop(loopEnd, loopUpdate);
 
             f.label(loopStart);
             const cmpReg = this.tmp();
@@ -1738,6 +1740,7 @@ export class IRGenerator {
             this.visitBlockStatement(node.body);
 
             // Increment index
+            f.label(loopUpdate);
             f.add(idxReg, idxReg, stepReg, 'u64');
             f.jmp(loopStart);
 
@@ -1759,9 +1762,11 @@ export class IRGenerator {
 
             const loopStart = this.generateLabel('forrange_start');
             const loopBody = this.generateLabel('forrange_body');
+            const loopUpdate = this.generateLabel('forrange_update');
             const loopEnd = this.generateLabel('forrange_end');
 
-            this.pushLoop(loopEnd, loopStart);
+            // continue should execute the update step before re-checking the condition
+            this.pushLoop(loopEnd, loopUpdate);
 
             f.label(loopStart);
             const cmpReg = this.tmp();
@@ -1771,6 +1776,7 @@ export class IRGenerator {
             f.label(loopBody);
             this.visitBlockStatement(node.body);
 
+            f.label(loopUpdate);
             f.add(iterReg, iterReg, stepReg, numType);
             f.jmp(loopStart);
 

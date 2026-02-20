@@ -17,6 +17,7 @@ import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
 import { isAssignmentOperator } from './operator-utils.js';
 import {
+    ArrayTypeDescription,
     FunctionTypeDescription,
     GenericTypeDescription,
     getMinArity,
@@ -570,8 +571,8 @@ export class TypeCTypeProvider {
         if (parent && ast.isArrayElementExpression(parent)) {
             const arrayExpr = parent.$container;
             if (ast.isArrayConstructionExpression(arrayExpr)) {
-                const expectedArrayType = this.getExpectedType(arrayExpr);
-                if (expectedArrayType && isArrayType(expectedArrayType)) {
+                const expectedArrayType = this.getExpectedArrayContextType(arrayExpr);
+                if (expectedArrayType) {
                     return expectedArrayType.elementType;
                 }
             }
@@ -829,6 +830,24 @@ export class TypeCTypeProvider {
 
         // No expected type found
         return undefined;
+    }
+
+    /**
+     * Returns the expected array type for an expression context.
+     * Supports both direct arrays (`T[]`) and nullable arrays (`T[]?`).
+     */
+    private getExpectedArrayContextType(node: AstNode): ArrayTypeDescription | undefined {
+        const expectedType = this.getExpectedType(node);
+        if (!expectedType) {
+            return undefined;
+        }
+
+        let resolvedExpectedType = this.typeUtils.resolveIfReference(expectedType);
+        if (isNullableType(resolvedExpectedType)) {
+            resolvedExpectedType = this.typeUtils.resolveIfReference(resolvedExpectedType.baseType);
+        }
+
+        return isArrayType(resolvedExpectedType) ? resolvedExpectedType : undefined;
     }
 
     /**
@@ -3998,9 +4017,9 @@ export class TypeCTypeProvider {
     private inferArrayConstruction(node: ast.ArrayConstructionExpression): TypeDescription {
         if (!node.values || node.values.length === 0) {
             // Empty array - try to get type from context
-            const expectedType = this.getExpectedType(node);
+            const expectedType = this.getExpectedArrayContextType(node);
 
-            if (expectedType && isArrayType(expectedType)) {
+            if (expectedType) {
                 // Use the expected element type
                 return expectedType;
             }
@@ -4039,8 +4058,8 @@ export class TypeCTypeProvider {
 
         // Try contextual typing: if expected type is an array, check if all
         // elements are assignable to the expected element type
-        const expectedType = this.getExpectedType(node);
-        if (expectedType && isArrayType(expectedType)) {
+        const expectedType = this.getExpectedArrayContextType(node);
+        if (expectedType) {
             const expectedElementType = expectedType.elementType;
             const allAssignable = elementTypes.every(elemType =>
                 !isErrorType(elemType) &&

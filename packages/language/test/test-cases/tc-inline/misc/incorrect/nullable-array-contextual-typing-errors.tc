@@ -1,0 +1,4 @@
+fn main() {
+    /// @Error(TCE120): Cannot infer common type
+    let bad: u32[]? = [1, 2, "3"]
+}

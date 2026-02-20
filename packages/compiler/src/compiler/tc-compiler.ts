@@ -731,11 +731,12 @@ export class IRGenerator {
 
         const typedDesc = resolved as ClassTypeDescription | InterfaceTypeDescription;
         const methods = typedDesc.methods;
+        const operatorAliases = this.getOperatorAliases(operator);
 
         // Collect matching methods
         const candidates = methods
-            .map((m, idx) => ({ method: m, index: idx }))
-            .filter(({ method }) => method.names.includes(operator));
+            .map((m) => ({ method: m }))
+            .filter(({ method }) => method.names.some(name => operatorAliases.includes(name)));
 
         if (candidates.length === 0) return undefined;
 
@@ -754,11 +755,12 @@ export class IRGenerator {
             if (subs.size > 0) {
                 returnType = this.typeUtils.substituteGenerics(returnType, subs);
             }
-            return { methodId: argFiltered[0].index, returnType };
+            const selectedMethodName = argFiltered[0].method.names[0] ?? operator;
+            return { methodId: this.getOrCreateMethodNameId(selectedMethodName), returnType };
         }
 
         // Multiple candidates: try exact match first, then assignable
-        for (const { method, index } of argFiltered) {
+        for (const { method } of argFiltered) {
             if (method.parameters.every(
                 (param, i) => this.typeUtils.areTypesEqual(rhsTypes[i], param.type).success
             )) {
@@ -767,11 +769,12 @@ export class IRGenerator {
                 if (subs.size > 0) {
                     returnType = this.typeUtils.substituteGenerics(returnType, subs);
                 }
-                return { methodId: index, returnType };
+                const selectedMethodName = method.names[0] ?? operator;
+                return { methodId: this.getOrCreateMethodNameId(selectedMethodName), returnType };
             }
         }
 
-        for (const { method, index } of argFiltered) {
+        for (const { method } of argFiltered) {
             if (method.parameters.every(
                 (param, i) => this.typeUtils.isAssignable(rhsTypes[i], param.type).success
             )) {
@@ -780,11 +783,73 @@ export class IRGenerator {
                 if (subs.size > 0) {
                     returnType = this.typeUtils.substituteGenerics(returnType, subs);
                 }
-                return { methodId: index, returnType };
+                const selectedMethodName = method.names[0] ?? operator;
+                return { methodId: this.getOrCreateMethodNameId(selectedMethodName), returnType };
             }
         }
 
         return undefined;
+    }
+
+    private getOperatorAliases(operator: string): readonly string[] {
+        switch (operator) {
+            case '+':
+                return ['+', '__add__', 'add', '__pos__', 'pos'];
+            case '-':
+                return ['-', '__sub__', 'sub', '__neg__', 'neg'];
+            case '*':
+                return ['*', '__mul__', 'mul'];
+            case '/':
+                return ['/', '__div__', 'div'];
+            case '%':
+                return ['%', '__mod__', 'mod'];
+            case '==':
+                return ['==', '__eq__', 'eq'];
+            case '!=':
+                return ['!=', '__neq__', '__ne__', 'neq', 'ne'];
+            case '<':
+                return ['<', '__lt__', 'lt'];
+            case '<=':
+                return ['<=', '__le__', 'le'];
+            case '>':
+                return ['>', '__gt__', 'gt'];
+            case '>=':
+                return ['>=', '__ge__', 'ge'];
+            case '<<':
+                return ['<<', '__shl__', 'shl'];
+            case '>>':
+                return ['>>', '__shr__', 'shr'];
+            case '&':
+                return ['&', '__band__', 'band'];
+            case '|':
+                return ['|', '__bor__', 'bor'];
+            case '^':
+                return ['^', '__bxor__', 'bxor'];
+            case '&&':
+                return ['&&', '__and__', 'and'];
+            case '||':
+                return ['||', '__or__', 'or'];
+            case '!':
+                return ['!', '__not__', 'not'];
+            case '~':
+                return ['~', '__bnot__', 'bnot'];
+            case '++':
+                return ['++', '__inc__', 'inc'];
+            case '--':
+                return ['--', '__dec__', 'dec'];
+            case '[]':
+                return ['[]', '__index__'];
+            case '[]=':
+                return ['[]=', '__index_set__'];
+            case '[-]':
+                return ['[-]', '__reverse_index__'];
+            case '[-]=':
+                return ['[-]=', '__reverse_index_set__'];
+            case '()':
+                return ['()', '__call__'];
+            default:
+                return [operator];
+        }
     }
 
     /**
@@ -2698,6 +2763,8 @@ export class IRGenerator {
 
                 // Check for []= operator overload
                 const objTd = this.getType(lhs.expr);
+                const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+                const baseObjTd = isNullableType(resolvedObjTd) ? resolvedObjTd.baseType : resolvedObjTd;
                 const allArgTds = [...indexTds, valueTd]; // Approximate: pass index types + value type
                 const overload = this.resolveOperatorMethod(objTd, '[]=', allArgTds);
                 if (overload) {
@@ -2709,6 +2776,11 @@ export class IRGenerator {
                         allArgRegs, allArgIRTypes
                     );
                 } else {
+                    if (!isArrayType(baseObjTd)) {
+                        throw new Error(
+                            `Index assignment lowering failed for non-array type '${baseObjTd.toString()}': no '[]=' overload found`
+                        );
+                    }
                     // Primitive array set
                     f.arraySet(array.register, indexResults[0].register, value.register, value.type);
                 }
@@ -3410,6 +3482,8 @@ export class IRGenerator {
 
         // Check for [] operator overload
         const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const baseObjTd = isNullableType(resolvedObjTd) ? resolvedObjTd.baseType : resolvedObjTd;
         if (node.indexes && node.indexes.length > 0) {
             const indexResults = node.indexes.map(idx => this.visitExpression(idx, undefined));
             const indexTds = node.indexes.map(idx => this.getType(idx));
@@ -3422,6 +3496,11 @@ export class IRGenerator {
                 );
             }
 
+            if (!isArrayType(baseObjTd)) {
+                throw new Error(
+                    `Index access lowering failed for non-array type '${baseObjTd.toString()}': no '[]' overload found`
+                );
+            }
             // Primitive array access
             const index = indexResults[0];
             const elemType = this.getNodeIRType(node);
@@ -4401,6 +4480,8 @@ export class IRGenerator {
 
         // Check for []= operator overload
         const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const baseObjTd = isNullableType(resolvedObjTd) ? resolvedObjTd.baseType : resolvedObjTd;
         if (node.indexes && node.indexes.length > 0) {
             const indexResults = node.indexes.map(idx => this.visitExpression(idx, undefined));
             const indexTds = node.indexes.map(idx => this.getType(idx));
@@ -4416,6 +4497,11 @@ export class IRGenerator {
                 );
             }
 
+            if (!isArrayType(baseObjTd)) {
+                throw new Error(
+                    `Index assignment lowering failed for non-array type '${baseObjTd.toString()}': no '[]=' overload found`
+                );
+            }
             // Primitive array set
             f.arraySet(obj.register, indexResults[0].register, value.register, value.type);
         }
@@ -4432,6 +4518,8 @@ export class IRGenerator {
 
         // Check for [-] operator overload
         const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const baseObjTd = isNullableType(resolvedObjTd) ? resolvedObjTd.baseType : resolvedObjTd;
         const indexTd = this.getType(node.index);
         const overload = this.resolveOperatorMethod(objTd, '[-]', [indexTd]);
         if (overload) {
@@ -4441,6 +4529,11 @@ export class IRGenerator {
             );
         }
 
+        if (!isArrayType(baseObjTd)) {
+            throw new Error(
+                `Reverse index access lowering failed for non-array type '${baseObjTd.toString()}': no '[-]' overload found`
+            );
+        }
         // Primitive: compute arr[arr.length - index]
         // Grammar parses arr[-1] as index=1, so length-1 = last element
         const temp = this.tmp();
@@ -4465,6 +4558,8 @@ export class IRGenerator {
 
         // Check for [-]= operator overload
         const objTd = this.getType(node.expr);
+        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        const baseObjTd = isNullableType(resolvedObjTd) ? resolvedObjTd.baseType : resolvedObjTd;
         const indexTd = this.getType(node.index);
         const valueTd = this.getType(node.value);
         const overload = this.resolveOperatorMethod(objTd, '[-]=', [indexTd, valueTd]);
@@ -4475,6 +4570,11 @@ export class IRGenerator {
             );
         }
 
+        if (!isArrayType(baseObjTd)) {
+            throw new Error(
+                `Reverse index assignment lowering failed for non-array type '${baseObjTd.toString()}': no '[-]=' overload found`
+            );
+        }
         // Primitive: arr[arr.length - index] = value
         // Grammar parses arr[-1] as index=1, so length-1 = last element
         const lenReg = this.tmp();

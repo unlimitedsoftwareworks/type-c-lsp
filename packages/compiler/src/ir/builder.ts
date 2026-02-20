@@ -499,6 +499,11 @@ export class IRFunction {
         return this;
     }
 
+    coroAllocFrom(dest: VReg, closure: VReg): this {
+        this.instructions.push({ kind: 'coro_alloc_from', dest, closure });
+        return this;
+    }
+
     coroState(dest: VReg, coro: VReg): this {
         this.instructions.push({ kind: 'coro_state', dest, coro });
         return this;

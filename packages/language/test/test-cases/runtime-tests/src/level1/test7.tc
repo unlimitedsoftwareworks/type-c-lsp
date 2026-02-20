@@ -1,0 +1,25 @@
+from std.unit.test import TestUnit, UnitSet
+
+type ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionAlpha = class {
+    fn init() {}
+}
+
+type ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta = class {
+    fn init() {}
+}
+
+fn test_case_1(rn: TestUnit) {
+    let alpha = new ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionAlpha()
+    let beta = new ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta()
+
+    rn.assert_eq<bool>(alpha is ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionAlpha, true)
+    rn.assert_eq<bool>(alpha is ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta, false)
+    rn.assert_eq<bool>(beta is ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta, true)
+    rn.assert_eq<bool>(beta is ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionAlpha, false)
+}
+
+fn test7() -> u32 {
+    let test_1 = new TestUnit("test 1", "Runtime class is checks use full class IDs", test_case_1)
+    let set = new UnitSet("STD Test 7", "Class type-check runtime regression tests", [test_1])
+    return set.run()
+}

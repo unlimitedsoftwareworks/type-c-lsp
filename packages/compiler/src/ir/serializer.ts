@@ -167,7 +167,7 @@ function serializeInstruction(inst: IRInstruction): string {
         case 'class_set':
             return `    class_set ${inst.class} #${inst.fieldId} ${inst.value}: ${serializeIRType(inst.valueType)}`;
         case 'class_get_method':
-            return `    ${inst.dest}: ptr.closure = class_get_method ${inst.class} #${inst.methodId}`;
+            return `    ${inst.dest}: u64 = class_get_method ${inst.class} #${inst.methodId}`;
 
         // --- Interface ---
         case 'interface_is_class':
@@ -215,6 +215,8 @@ function serializeInstruction(inst: IRInstruction): string {
         // --- Coroutine ---
         case 'coro_alloc':
             return `    ${inst.dest}: ptr.coroutine = coro_alloc @${inst.funcName}`;
+        case 'coro_alloc_from':
+            return `    ${inst.dest}: ptr.coroutine = coro_alloc_from ${inst.closure}`;
         case 'coro_state':
             return `    ${inst.dest}: u8 = coro_state ${inst.coro}`;
         case 'coro_call': {

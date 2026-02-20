@@ -531,6 +531,12 @@ export interface CoroAllocInstruction extends Instruction {
     readonly funcName: string;
 }
 
+export interface CoroAllocFromInstruction extends Instruction {
+    readonly kind: 'coro_alloc_from';
+    readonly dest: VReg;
+    readonly closure: VReg;
+}
+
 export interface CoroStateInstruction extends Instruction {
     readonly kind: 'coro_state';
     readonly dest: VReg;
@@ -741,6 +747,7 @@ export type IRInstruction =
     | ClosureRetInstruction
     // Coroutine
     | CoroAllocInstruction
+    | CoroAllocFromInstruction
     | CoroStateInstruction
     | CoroCallInstruction
     | CoroYieldInstruction

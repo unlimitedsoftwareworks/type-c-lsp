@@ -153,7 +153,6 @@ export class IRGenerator {
     private closureCounter = 0;
 
     private structShapeCounter = 0;
-    private classShapeCounter = 0;
 
     /** Maps field name string → unique numeric ID for graph coloring */
     private fieldNameToId = new Map<string, number>();
@@ -1216,9 +1215,10 @@ export class IRGenerator {
         }
 
         const classShapeId = `class_${className}`;
+        const classUid = this.hashClassName(className);
         this.program.declareClass({
             id: classShapeId,
-            uid: this.classShapeCounter++,
+            uid: classUid,
             fields: classFields,
             methods: classMethods,
             implementedInterfaces: classTd.implementations.map(() => 'impl') // Placeholder
@@ -4282,8 +4282,9 @@ export class IRGenerator {
     private visitCoroutineExpression(node: ast.CoroutineExpression): ExpressionResult {
         const temp = this.tmp();
         const funcExpr = this.visitExpression(node.fn, undefined);
-        // The expression should resolve to a function name for coroutine allocation
-        this.func().coroAlloc(temp, funcExpr.register);
+        // Coroutine instances are created from callable values (closures), which
+        // covers named functions, lambdas, and captured environments uniformly.
+        this.func().coroAllocFrom(temp, funcExpr.register);
         return { register: temp, type: ptrType('coroutine') };
     }
 

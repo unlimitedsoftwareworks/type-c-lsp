@@ -122,6 +122,7 @@ export type {
     ClosurePushEnvInstruction,
     ClosureRetInstruction,
     CoroAllocInstruction,
+    CoroAllocFromInstruction,
     CoroStateInstruction,
     CoroCallInstruction,
     CoroYieldInstruction,

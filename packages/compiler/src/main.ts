@@ -44,7 +44,9 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
             await fs.writeFile(outPath, binary);
             console.log(chalk.green(`Bytecode written to ${outPath} (${binary.length} bytes)`));
         } catch (e) {
-            console.log(chalk.yellow(`Codegen: ${(e as Error).message}`));
+            const message = (e as Error).message;
+            console.log(chalk.red(`Codegen failed: ${message}`));
+            throw new Error(`Codegen failed: ${message}`);
         }
     }
 };

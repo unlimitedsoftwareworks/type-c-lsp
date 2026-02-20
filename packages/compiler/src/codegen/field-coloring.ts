@@ -97,10 +97,10 @@ export function colorFieldSlots(shapes: readonly StructShape[]): FieldColoringRe
 
     const numSlots = maxSlot + 1;
 
-    if (numSlots > 255) {
+    if (numSlots > 65535) {
         throw new Error(
-            `Field coloring requires ${numSlots} slots, exceeding the u8 limit of 255. ` +
-            `This means some struct has more than 255 fields.`
+            `Field coloring requires ${numSlots} slots, exceeding the u16 limit of 65535. ` +
+            `This means there are too many unique field slots in this program.`
         );
     }
 

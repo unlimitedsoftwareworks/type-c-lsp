@@ -139,6 +139,7 @@ function compileFunction(
 function collectReachableCode(program: IRProgram): {
     readonly functions: IRFunction[];
     readonly classes: IRProgram['classShapes'];
+    readonly structs: IRProgram['structShapes'];
 } {
     const functionByName = new Map<string, IRFunction>();
     for (const fn of program.functions) {
@@ -152,6 +153,7 @@ function collectReachableCode(program: IRProgram): {
 
     const reachableFunctionNames = new Set<string>();
     const reachableClassIds = new Set<string>();
+    const reachableStructIds = new Set<string>();
     const functionQueue: string[] = [];
     const classQueue: string[] = [];
 
@@ -166,6 +168,12 @@ function collectReachableCode(program: IRProgram): {
         if (!reachableClassIds.has(id)) {
             reachableClassIds.add(id);
             classQueue.push(id);
+        }
+    };
+
+    const enqueueStruct = (id: string): void => {
+        if (!reachableStructIds.has(id)) {
+            reachableStructIds.add(id);
         }
     };
 
@@ -186,6 +194,8 @@ function collectReachableCode(program: IRProgram): {
                     enqueueFunction(inst.funcName);
                 } else if (inst.kind === 'class_alloc') {
                     enqueueClass(inst.typeId);
+                } else if (inst.kind === 'struct_alloc') {
+                    enqueueStruct(inst.typeId);
                 }
             }
         }
@@ -204,7 +214,8 @@ function collectReachableCode(program: IRProgram): {
 
     const functions = program.functions.filter(fn => reachableFunctionNames.has(fn.name));
     const classes = program.classShapes.filter(shape => reachableClassIds.has(shape.id));
-    return { functions, classes };
+    const structs = program.structShapes.filter(shape => reachableStructIds.has(shape.id));
+    return { functions, classes, structs };
 }
 
 // === Program-Level Compilation ===
@@ -255,8 +266,8 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         classIdToIndex.set(reachable.classes[i].id, i);
     }
     const structIdToIndex = new Map<string, number>();
-    for (let i = 0; i < program.structShapes.length; i++) {
-        structIdToIndex.set(program.structShapes[i].id, i);
+    for (let i = 0; i < reachable.structs.length; i++) {
+        structIdToIndex.set(reachable.structs[i].id, i);
     }
     const globalIdToIndex = new Map<string, number>();
     for (let i = 0; i < program.globals.length; i++) {
@@ -273,7 +284,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
     const globals = program.globals.map(g => ({ type: g.type }));
 
     // Map struct shapes (globalFieldId is now the colored slot number)
-    const structs = program.structShapes.map(s => ({
+    const structs = reachable.structs.map(s => ({
         fields: s.fields.map(f => ({
             slotNumber: f.globalFieldId,
             type: f.type,

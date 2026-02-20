@@ -6,8 +6,11 @@
  *
  * Register layout per function:
  *   [0 .. P-1]       Parameters (fixed by VM call protocol)
- *   [P .. P+R-1]     Reserved for return values
- *   [P+R .. 255]     General-purpose pool for locals and temporaries
+ *   [P .. G]         General-purpose pool for locals and temporaries
+ *   [H .. 255]       Reserved high registers (return ABI + scratch)
+ *
+ * Return ABI uses registers 255, 254, ... in call/ret lowering.
+ * We reserve those high registers from allocation to avoid clobbering.
  *
  * Algorithm: linear scan with live interval computation.
  * MVP: errors if more than 256 registers are needed (no spilling yet).
@@ -87,7 +90,7 @@ function getDefinedVRegs(inst: IRInstruction): VReg[] {
             return [inst.dest];
         case 'closure_alloc':
             return [inst.dest];
-        case 'coro_alloc': case 'coro_state':
+        case 'coro_alloc': case 'coro_alloc_from': case 'coro_state':
             return [inst.dest];
         case 'global_load':
             return [inst.dest];
@@ -186,6 +189,8 @@ function getUsedVRegs(inst: IRInstruction): VReg[] {
             return [inst.closure, inst.value];
         case 'coro_call':
             return [inst.coro, ...inst.args];
+        case 'coro_alloc_from':
+            return [inst.closure];
         case 'coro_reset': case 'coro_finish':
             return [inst.coro];
         case 'coro_state':
@@ -354,7 +359,8 @@ function getDefinedType(inst: IRInstruction, _vreg: VReg): IRType {
         case 'class_alloc': return { tag: 'ptr', kind: 'class' };
         case 'struct_get': return inst.resultType;
         case 'class_get': return inst.resultType;
-        case 'class_get_method': return { tag: 'ptr', kind: 'closure' };
+        // class_get_method yields a function index (scalar), not a closure pointer.
+        case 'class_get_method': return { tag: 'scalar', scalar: 'u64' };
         case 'interface_is_class': case 'interface_has_method':
             return { tag: 'scalar', scalar: 'bool' };
         case 'array_alloc': return { tag: 'ptr', kind: 'array' };
@@ -364,7 +370,9 @@ function getDefinedType(inst: IRInstruction, _vreg: VReg): IRType {
         case 'str_const': case 'str_alloc_empty': case 'str_concat': case 'str_from_bytes':
             return { tag: 'ptr', kind: 'string' };
         case 'closure_alloc': return { tag: 'ptr', kind: 'closure' };
-        case 'coro_alloc': return { tag: 'ptr', kind: 'coroutine' };
+        case 'coro_alloc':
+        case 'coro_alloc_from':
+            return { tag: 'ptr', kind: 'coroutine' };
         case 'coro_state': return { tag: 'scalar', scalar: 'u8' };
         case 'global_load': return inst.type;
         case 'widen': return { tag: 'scalar', scalar: inst.to };
@@ -389,7 +397,9 @@ export function allocateRegisters(
     const intervals = computeLiveIntervals(instructions, params);
 
     const numParams = params.length;
-    const firstGeneral = numParams + numReturns;
+    const firstGeneral = numParams;
+    const reservedHighRegs = Math.max(numReturns, 1); // always reserve r255 as scratch
+    const lastGeneral = 255 - reservedHighRegs;
 
     // Detect for_init instructions that need consecutive register groups (base, base+1, base+2)
     const consecutiveGroups = new Map<VReg, number>();
@@ -404,7 +414,7 @@ export function allocateRegisters(
 
     const regMap = new Map<VReg, number>();
     const pointerRegs = new Set<number>();
-    let maxRegUsed = firstGeneral - 1;
+    let maxRegUsed = numParams > 0 ? numParams - 1 : 0;
 
     // Pre-assign parameters to registers 0..P-1
     for (let i = 0; i < numParams; i++) {
@@ -419,9 +429,9 @@ export function allocateRegisters(
         }
     }
 
-    // Free register pool: [firstGeneral .. 255]
+    // Free register pool: [firstGeneral .. lastGeneral]
     const freeRegs: number[] = [];
-    for (let r = 255; r >= firstGeneral; r--) {
+    for (let r = lastGeneral; r >= firstGeneral; r--) {
         freeRegs.push(r);  // push in reverse so pop gives lowest first
     }
 

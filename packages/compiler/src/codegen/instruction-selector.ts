@@ -10,7 +10,7 @@ import type { IRInstruction, VReg } from '../ir/instructions.js';
 import type { NumericType, CmpType, CastKind, IRType } from '../ir/types.js';
 import { isPointer } from '../ir/types.js';
 import { Op, makeABC, makeAD, makeAJ } from './opcodes.js';
-import { ConstantPool, fitsInImmediate, fitsIn32 } from './constant-pool.js';
+import { ConstantPool, fitsInImmediate, fitsIn32, fitsInSigned32 } from './constant-pool.js';
 
 // === Output Types ===
 
@@ -35,6 +35,13 @@ function r(regMap: RegMap, vreg: VReg): number {
         throw new Error(`Unresolved virtual register: ${vreg}`);
     }
     return phys;
+}
+
+function assertFitsU16(value: number, context: string): number {
+    if (!Number.isInteger(value) || value < 0 || value > 0xFFFF) {
+        throw new Error(`${context} out of u16 range: ${value}`);
+    }
+    return value;
 }
 
 // === Arithmetic opcode selection ===
@@ -275,45 +282,84 @@ export function selectInstructions(
         return idx;
     }
 
-    function definesVReg(inst: IRInstruction, vreg: VReg): boolean {
+    function getDefinedVRegs(inst: IRInstruction): VReg[] {
+        const defs: VReg[] = [];
         if ('dest' in inst && typeof (inst as { dest?: unknown }).dest === 'string') {
-            if ((inst as { dest: VReg }).dest === vreg) return true;
+            defs.push((inst as { dest: VReg }).dest);
         }
         if ('dests' in inst && Array.isArray((inst as { dests?: unknown }).dests)) {
-            const dests = (inst as { dests: VReg[] }).dests;
-            if (dests.includes(vreg)) return true;
+            for (const d of (inst as { dests: VReg[] }).dests) {
+                defs.push(d);
+            }
         }
-        if (inst.kind === 'for_init' && inst.base === vreg) {
-            return true;
+        if (inst.kind === 'for_init') {
+            defs.push(inst.base);
         }
-        return false;
+        return defs;
     }
 
-    function usesVReg(inst: IRInstruction, vreg: VReg): boolean {
+    function getUsedVRegs(inst: IRInstruction): VReg[] {
+        const uses = new Set<VReg>();
         for (const [key, value] of Object.entries(inst as unknown as Record<string, unknown>)) {
             if (key === 'kind' || key === 'dest' || key === 'dests') continue;
-            if (inst.kind === 'for_init' && key === 'base') continue; // base is the defined vreg
+            if (inst.kind === 'for_init' && key === 'base') continue; // base is defined
 
             if (typeof value === 'string') {
-                if (value === vreg) return true;
+                uses.add(value);
                 continue;
             }
 
             if (Array.isArray(value)) {
                 for (const item of value) {
-                    if (typeof item === 'string' && item === vreg) {
-                        return true;
-                    }
-                    if (item && typeof item === 'object' && 'value' in item) {
+                    if (typeof item === 'string') {
+                        uses.add(item);
+                    } else if (item && typeof item === 'object' && 'value' in item) {
                         const pairValue = (item as { value?: unknown }).value;
-                        if (typeof pairValue === 'string' && pairValue === vreg) {
-                            return true;
+                        if (typeof pairValue === 'string') {
+                            uses.add(pairValue);
                         }
                     }
                 }
             }
         }
-        return false;
+        return [...uses];
+    }
+
+    const useSitesByVReg = new Map<VReg, number[]>();
+    const defSitesByVReg = new Map<VReg, number[]>();
+    for (let idx = 0; idx < instructions.length; idx++) {
+        const inst = instructions[idx];
+        for (const used of getUsedVRegs(inst)) {
+            const sites = useSitesByVReg.get(used);
+            if (sites) {
+                sites.push(idx);
+            } else {
+                useSitesByVReg.set(used, [idx]);
+            }
+        }
+        for (const defined of getDefinedVRegs(inst)) {
+            const sites = defSitesByVReg.get(defined);
+            if (sites) {
+                sites.push(idx);
+            } else {
+                defSitesByVReg.set(defined, [idx]);
+            }
+        }
+    }
+
+    function firstGreaterThan(values: readonly number[] | undefined, pivot: number): number | undefined {
+        if (!values || values.length === 0) return undefined;
+        let lo = 0;
+        let hi = values.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (values[mid] <= pivot) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo < values.length ? values[lo] : undefined;
     }
 
     // Check if instruction at index `i` is a comparison whose result is only used by the
@@ -329,10 +375,11 @@ export function selectInstructions(
 
         // Keep the compare result materialized when that vreg is used later
         // (e.g. logical short-circuit lowering reads it after branching).
-        for (let j = i + 2; j < instructions.length; j++) {
-            const probe = instructions[j];
-            if (usesVReg(probe, dest)) return false;
-            if (definesVReg(probe, dest)) break;
+        // Query pre-indexed use/def sites to avoid O(n²) scanning.
+        const nextUse = firstGreaterThan(useSitesByVReg.get(dest), i + 1);
+        const nextDef = firstGreaterThan(defSitesByVReg.get(dest), i + 1);
+        if (nextUse !== undefined && (nextDef === undefined || nextUse < nextDef)) {
+            return false;
         }
 
         return true;
@@ -347,7 +394,7 @@ export function selectInstructions(
                 const dest = r(regMap, inst.dest);
                 if (fitsInImmediate(inst.value)) {
                     emit(makeAD(Op.MOV_RI, dest, Number(inst.value) & 0xFFFF));
-                } else if (fitsIn32(inst.value)) {
+                } else if (fitsIn32(inst.value) || fitsInSigned32(inst.value)) {
                     const offset = pool.add32(Number(inst.value & 0xFFFFFFFFn));
                     emit(makeAD(Op.MOV_RK_32, dest, offset));
                 } else {
@@ -447,10 +494,10 @@ export function selectInstructions(
                 emit(makeABC(Op.NOT, r(regMap, inst.dest), r(regMap, inst.src), 0));
                 break;
             case 'istc':
-                emit(makeAD(Op.ISTC, r(regMap, inst.dest), r(regMap, inst.src)));
+                emit(makeABC(Op.ISTC, r(regMap, inst.dest), r(regMap, inst.src), 0));
                 break;
             case 'isfc':
-                emit(makeAD(Op.ISFC, r(regMap, inst.dest), r(regMap, inst.src)));
+                emit(makeABC(Op.ISFC, r(regMap, inst.dest), r(regMap, inst.src), 0));
                 break;
 
             // === Comparisons ===
@@ -672,12 +719,19 @@ export function selectInstructions(
                 const objReg = r(regMap, inst.object);
                 // Use a scratch register for the func index loaded from vtable.
                 // Must NOT clobber objReg (needed for self). Use dests[0] if
-                // available (gets overwritten by return value anyway), else reg 253.
+                // available (gets overwritten by return value anyway), else r255.
                 const scratchReg = inst.dests.length > 0
                     ? r(regMap, inst.dests[0])
-                    : 253;
-                // Load func_idx from vtable into scratch register
-                emit(makeABC(Op.CLASS_GET_METHOD_I, scratchReg, objReg, inst.methodId));
+                    : 255;
+                // Load func_idx from vtable into scratch register.
+                // Use immediate form for <=255 slots; otherwise load the slot into
+                // the same scratch register and use register-indexed form.
+                if (inst.methodId <= 0xFF) {
+                    emit(makeABC(Op.CLASS_GET_METHOD_I, scratchReg, objReg, inst.methodId));
+                } else {
+                    emit(makeAD(Op.MOV_RI, scratchReg, assertFitsU16(inst.methodId, `Method ID for call_method`)));
+                    emit(makeABC(Op.CLASS_GET_METHOD_R, scratchReg, objReg, scratchReg));
+                }
                 // FN_ALLOC: bare frame allocation
                 emit(makeAD(Op.FN_ALLOC, 0, 0));
                 // self = arg 0 (writes to frame->next)
@@ -751,10 +805,32 @@ export function selectInstructions(
             // SET writes into the object — the object's own ptrbm (from shape metadata)
             // already tells the GC which fields to trace, so no per-instruction variant needed.
             case 'struct_get':
-                emit(makeABC(isPointer(inst.resultType) ? Op.STRUCT_GET_PTR_I : Op.STRUCT_GET_I, r(regMap, inst.dest), r(regMap, inst.src), inst.fieldId));
+                if (inst.fieldId <= 0xFF) {
+                    emit(makeABC(
+                        isPointer(inst.resultType) ? Op.STRUCT_GET_PTR_I : Op.STRUCT_GET_I,
+                        r(regMap, inst.dest),
+                        r(regMap, inst.src),
+                        inst.fieldId
+                    ));
+                } else {
+                    const slotReg = 255;
+                    emit(makeAD(Op.MOV_RI, slotReg, assertFitsU16(inst.fieldId, 'Struct field slot for struct_get')));
+                    emit(makeABC(
+                        isPointer(inst.resultType) ? Op.STRUCT_GET_PTR_R : Op.STRUCT_GET_R,
+                        r(regMap, inst.dest),
+                        r(regMap, inst.src),
+                        slotReg
+                    ));
+                }
                 break;
             case 'struct_set':
-                emit(makeABC(Op.STRUCT_SET_I, r(regMap, inst.value), r(regMap, inst.struct), inst.fieldId));
+                if (inst.fieldId <= 0xFF) {
+                    emit(makeABC(Op.STRUCT_SET_I, r(regMap, inst.value), r(regMap, inst.struct), inst.fieldId));
+                } else {
+                    const slotReg = 255;
+                    emit(makeAD(Op.MOV_RI, slotReg, assertFitsU16(inst.fieldId, 'Struct field slot for struct_set')));
+                    emit(makeABC(Op.STRUCT_SET_R, r(regMap, inst.value), r(regMap, inst.struct), slotReg));
+                }
                 break;
 
             // === Class ===
@@ -770,16 +846,63 @@ export function selectInstructions(
                 emit(makeABC(Op.CLASS_SET_I, r(regMap, inst.value), r(regMap, inst.class), inst.fieldId));
                 break;
             case 'class_get_method':
-                emit(makeABC(Op.CLASS_GET_METHOD_I, r(regMap, inst.dest), r(regMap, inst.class), inst.methodId));
+                if (inst.methodId <= 0xFF) {
+                    emit(makeABC(Op.CLASS_GET_METHOD_I, r(regMap, inst.dest), r(regMap, inst.class), inst.methodId));
+                } else {
+                    const dest = r(regMap, inst.dest);
+                    emit(makeAD(Op.MOV_RI, dest, assertFitsU16(inst.methodId, `Method ID for class_get_method`)));
+                    emit(makeABC(Op.CLASS_GET_METHOD_R, dest, r(regMap, inst.class), dest));
+                }
                 break;
 
             // === Interface ===
-            case 'interface_is_class':
-                emit(makeABC(Op.OP_INTERFACE_IS_C_I, r(regMap, inst.interface), inst.classId, 0));
+            case 'interface_is_class': {
+                const dest = r(regMap, inst.dest);
+                const src = r(regMap, inst.interface);
+                // Materialize boolean from skip-style predicate:
+                // dest = true; predicate (skip-next-if-true); dest = false
+                // This remains correct even if the VM still writes dest directly.
+                emit(makeAD(Op.MOV_RI, dest, 1));
+                if (inst.classId <= 0xFF) {
+                    emit(makeABC(Op.OP_INTERFACE_IS_C_I, dest, src, inst.classId));
+                } else {
+                    const scratch = dest === 255 ? 254 : 255;
+                    if (!Number.isInteger(inst.classId) || inst.classId < 0 || inst.classId > 0xFFFFFFFF) {
+                        throw new Error(`Class ID out of u32 range for interface_is_class: ${inst.classId}`);
+                    }
+                    if (inst.classId <= 0xFFFF) {
+                        emit(makeAD(Op.MOV_RI, scratch, inst.classId));
+                    } else {
+                        const classIdOffset = pool.add32(inst.classId >>> 0);
+                        emit(makeAD(Op.MOV_RK_32, scratch, assertFitsU16(classIdOffset, `Class ID constant offset for interface_is_class`)));
+                    }
+                    emit(makeABC(Op.OP_INTERFACE_IS_C_R, dest, src, scratch));
+                }
+                emit(makeAD(Op.MOV_RI, dest, 0));
                 break;
-            case 'interface_has_method':
-                emit(makeABC(Op.OP_I_HAS_M_R, r(regMap, inst.interface), inst.methodId, 0));
+            }
+            case 'interface_has_method': {
+                const dest = r(regMap, inst.dest);
+                const src = r(regMap, inst.interface);
+                const scratch = dest === 255 ? 254 : 255;
+
+                // Materialize boolean from skip-style predicate:
+                // dest = true; predicate (skip-next-if-true); dest = false
+                emit(makeAD(Op.MOV_RI, dest, 1));
+
+                if (!Number.isInteger(inst.methodId) || inst.methodId < 0 || inst.methodId > 0xFFFFFFFF) {
+                    throw new Error(`Method ID out of u32 range for interface_has_method: ${inst.methodId}`);
+                }
+                if (inst.methodId <= 0xFFFF) {
+                    emit(makeAD(Op.MOV_RI, scratch, inst.methodId));
+                } else {
+                    const methodIdOffset = pool.add32(inst.methodId >>> 0);
+                    emit(makeAD(Op.MOV_RK_32, scratch, assertFitsU16(methodIdOffset, `Method ID constant offset for interface_has_method`)));
+                }
+                emit(makeABC(Op.OP_I_HAS_M_R, dest, src, scratch));
+                emit(makeAD(Op.MOV_RI, dest, 0));
                 break;
+            }
 
             // === Array ===
             case 'array_alloc':
@@ -805,7 +928,10 @@ export function selectInstructions(
             // === String ===
             case 'str_const': {
                 const strIdx = stringConstants.indexOf(inst.value);
-                const offset = pool.add32(strIdx >= 0 ? strIdx : 0);
+                if (strIdx < 0) {
+                    throw new Error(`String constant not found in pool: ${JSON.stringify(inst.value)}`);
+                }
+                const offset = pool.add32(strIdx);
                 emit(makeAD(Op.STR_ALLOC, r(regMap, inst.dest), offset));
                 break;
             }
@@ -816,8 +942,10 @@ export function selectInstructions(
                 emit(makeABC(strCatOp(inst.valueType), r(regMap, inst.dest), r(regMap, inst.str), r(regMap, inst.value)));
                 break;
             case 'str_from_bytes':
-                emit(makeABC(Op.STR_BALLOC, r(regMap, inst.dest), r(regMap, inst.array), 0));
-                break;
+                throw new Error(
+                    `Unsupported instruction 'str_from_bytes' in '${functionName}': ` +
+                    `VM opcode STR_BALLOC is not implemented yet.`
+                );
 
             // === Closure ===
             case 'closure_alloc': {
@@ -833,6 +961,14 @@ export function selectInstructions(
                 break;
             }
             case 'closure_ret':
+                for (let j = 0; j < inst.values.length; j++) {
+                    const srcReg = r(regMap, inst.values[j]);
+                    const destReg = 255 - j;
+                    if (srcReg !== destReg) {
+                        const retIsPtr = isPointer(inst.types[j]);
+                        emit(makeABC(retIsPtr ? Op.MOV_PTR_RR : Op.MOV_RR, destReg, srcReg, 0));
+                    }
+                }
                 emit(makeABC(Op.CLOSURE_BACK, 0, 0, 0));
                 break;
 
@@ -843,18 +979,39 @@ export function selectInstructions(
                 emit(makeAD(Op.CORO_ALLOC, r(regMap, inst.dest), offset));
                 break;
             }
+            case 'coro_alloc_from':
+                emit(makeABC(Op.CORO_ALLOC_FROM, r(regMap, inst.dest), r(regMap, inst.closure), 0));
+                break;
             case 'coro_state':
                 emit(makeABC(Op.CORO_STATE, r(regMap, inst.dest), r(regMap, inst.coro), 0));
                 break;
             case 'coro_call': {
+                if (inst.args.length > 0 || inst.dests.length > 0) {
+                    throw new Error(
+                        `Unsupported coroutine value passing in '${functionName}': ` +
+                        `coro_call currently supports only zero args and zero returns.`
+                    );
+                }
                 const coroReg = r(regMap, inst.coro);
                 emit(makeABC(Op.CORO_CALL, coroReg, inst.args.length, inst.dests.length));
                 break;
             }
             case 'coro_yield':
+                if (inst.values.length > 0) {
+                    throw new Error(
+                        `Unsupported coroutine yield values in '${functionName}': ` +
+                        `coro_yield currently supports zero yielded values only.`
+                    );
+                }
                 emit(makeABC(Op.CORO_YIELD, 0, 0, 0));
                 break;
             case 'coro_ret':
+                if (inst.values.length > 0) {
+                    throw new Error(
+                        `Unsupported coroutine return values in '${functionName}': ` +
+                        `coro_ret currently supports zero return values only.`
+                    );
+                }
                 emit(makeABC(Op.CORO_RETURN, 0, 0, 0));
                 break;
             case 'coro_reset':
@@ -869,14 +1026,14 @@ export function selectInstructions(
                 const dest = r(regMap, inst.dest);
                 const globalIndex = requireGlobalIndex(inst.globalId);
                 const op = isPointer(inst.type) ? Op.MOV_PTR_RG : Op.MOV_RG;
-                emit(makeAD(op, dest, pool.add32(globalIndex)));
+                emit(makeAD(op, dest, assertFitsU16(globalIndex, `Global index for '${inst.globalId}'`)));
                 break;
             }
             case 'global_store': {
                 const src = r(regMap, inst.value);
                 const globalIndex = requireGlobalIndex(inst.globalId);
                 const op = isPointer(inst.type) ? Op.MOV_PTR_GR : Op.MOV_GR;
-                emit(makeAD(op, src, pool.add32(globalIndex)));
+                emit(makeAD(op, src, assertFitsU16(globalIndex, `Global index for '${inst.globalId}'`)));
                 break;
             }
 
@@ -895,7 +1052,10 @@ export function selectInstructions(
             case 'ffi_register': {
                 // Store string pool index of the library name in the constant pool
                 const strIdx = stringConstants.indexOf(inst.libName);
-                const offset = pool.add32(strIdx >= 0 ? strIdx : 0);
+                if (strIdx < 0) {
+                    throw new Error(`FFI library string not found in pool: ${JSON.stringify(inst.libName)}`);
+                }
+                const offset = pool.add32(strIdx);
                 emit(makeAD(Op.FFI_REG, r(regMap, inst.dest), offset));
                 break;
             }

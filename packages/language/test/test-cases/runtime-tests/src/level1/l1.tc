@@ -4,6 +4,7 @@ from level1.num.test import l1NumberCasting
 from level1.basics import basics
 from level1.test5 import test5
 from level1.test7 import test7
+from level1.test_is import testIs
 
 fn l1() {
     l1Numbers()
@@ -12,4 +13,5 @@ fn l1() {
     basics()
     test5()
     test7()
+    testIs()
 }

@@ -1,0 +1,302 @@
+/**
+ * Instance-check (`is`) comprehensive tests.
+ * Every test case is hybrid: verifies both positive AND negative paths.
+ *
+ * Categories:
+ *   1. Class is Class        (compile-time, nominal)
+ *   2. Generic class is-check (compile-time, attribute-aware)
+ *   3. Class is Interface     (compile-time, structural)
+ *   4. Interface is Class     (runtime)
+ *   5. Interface is Interface (compile-time if compatible, runtime otherwise)
+ *   6. Variant constructor    (runtime tag comparison)
+ *   7. Null checks
+ *   8. Mixed / stress
+ */
+
+from std.unit.test import TestUnit, UnitSet
+
+// ---- Types ----
+
+type Box<T> = class {
+    let v: T
+}
+
+type Animal = class {
+    let age: u32
+}
+
+type Dog = class {
+    let age: u32
+    let name: u32
+}
+
+type Drawable = interface {
+    fn draw() -> void
+}
+
+type Resizable = interface {
+    fn resize(factor: f32) -> void
+}
+
+type DrawableAndResizable = interface {
+    fn draw() -> void
+    fn resize(factor: f32) -> void
+}
+
+type Circle = class {
+    let radius: f32
+    fn draw() -> void {}
+}
+
+type Widget = class {
+    let width: f32
+    let height: f32
+    fn draw() -> void {}
+    fn resize(factor: f32) -> void {
+        this.width = this.width * factor
+        this.height = this.height * factor
+    }
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Shape = variant {
+    Rect(w: f32, h: f32),
+    Circle(r: f32),
+    Point
+}
+
+// ---- 1. Class is Class ----
+
+fn tc_class_is_class(rn: TestUnit) {
+    let a = new Animal()
+    let d = new Dog()
+
+    // Positive
+    rn.assert_eq<bool>(a is Animal, true)
+    rn.assert_eq<bool>(d is Dog, true)
+    // Negative
+    rn.assert_eq<bool>(a is Dog, false)
+    rn.assert_eq<bool>(d is Animal, false)
+}
+
+// ---- 2. Generic class ----
+
+fn tc_generic_class_same(rn: TestUnit) {
+    let b1 = new Box<u32>()
+    let b2 = new Box<u32>()
+
+    // Positive
+    rn.assert_eq<bool>(b1 is Box<u32>, true)
+    rn.assert_eq<bool>(b2 is Box<u32>, true)
+    // Negative
+    rn.assert_eq<bool>(b1 is Box<i32>, false)
+    rn.assert_eq<bool>(b2 is Box<i32>, false)
+}
+
+fn tc_generic_class_cross(rn: TestUnit) {
+    let bu = new Box<u32>()
+    let bi = new Box<i32>()
+    let bf = new Box<f32>()
+    let bd = new Box<f64>()
+
+    // Positive: each matches itself
+    rn.assert_eq<bool>(bu is Box<u32>, true)
+    rn.assert_eq<bool>(bi is Box<i32>, true)
+    rn.assert_eq<bool>(bf is Box<f32>, true)
+    rn.assert_eq<bool>(bd is Box<f64>, true)
+
+    // Negative: cross-type
+    rn.assert_eq<bool>(bu is Box<i32>, false)
+    rn.assert_eq<bool>(bu is Box<f32>, false)
+    rn.assert_eq<bool>(bi is Box<u32>, false)
+    rn.assert_eq<bool>(bi is Box<f64>, false)
+    rn.assert_eq<bool>(bf is Box<f64>, false)
+    rn.assert_eq<bool>(bf is Box<u32>, false)
+    rn.assert_eq<bool>(bd is Box<f32>, false)
+    rn.assert_eq<bool>(bd is Box<i32>, false)
+}
+
+// ---- 3. Class is Interface ----
+
+fn tc_class_is_interface(rn: TestUnit) {
+    let c = new Circle()
+    let w = new Widget()
+    let a = new Animal()
+
+    // Circle: has draw(), no resize()
+    rn.assert_eq<bool>(c is Drawable, true)
+    rn.assert_eq<bool>(c is Resizable, false)
+    rn.assert_eq<bool>(c is DrawableAndResizable, false)
+
+    // Widget: has draw() + resize()
+    rn.assert_eq<bool>(w is Drawable, true)
+    rn.assert_eq<bool>(w is Resizable, true)
+    rn.assert_eq<bool>(w is DrawableAndResizable, true)
+
+    // Animal: has neither
+    rn.assert_eq<bool>(a is Drawable, false)
+    rn.assert_eq<bool>(a is Resizable, false)
+    rn.assert_eq<bool>(a is DrawableAndResizable, false)
+}
+
+// ---- 4. Interface is Class (runtime) ----
+
+fn tc_iface_is_class_helper(obj: Drawable, expectCircle: bool, expectWidget: bool) -> bool {
+    if expectCircle {
+        if !(obj is Circle) { return false }
+    } else {
+        if obj is Circle { return false }
+    }
+
+    if expectWidget {
+        if !(obj is Widget) { return false }
+    } else {
+        if obj is Widget { return false }
+    }
+
+    // Always negative for unrelated classes
+    if obj is Animal { return false }
+    if obj is Dog { return false }
+
+    return true
+}
+
+fn tc_iface_is_class(rn: TestUnit) {
+    let circle = new Circle()
+    let widget = new Widget()
+
+    // Pass Circle as Drawable → should match Circle, not Widget
+    rn.assert_eq<bool>(tc_iface_is_class_helper(circle, true, false), true)
+    // Pass Widget as Drawable → should match Widget, not Circle
+    rn.assert_eq<bool>(tc_iface_is_class_helper(widget, false, true), true)
+}
+
+// ---- 5. Interface is Interface ----
+
+fn tc_iface_is_iface_wider(rn: TestUnit) {
+    let w = new Widget()
+    // Pass as DrawableAndResizable (has draw + resize)
+    let obj: DrawableAndResizable = w
+
+    // Positive: wider satisfies narrower (compile-time true)
+    rn.assert_eq<bool>(obj is Drawable, true)
+    rn.assert_eq<bool>(obj is Resizable, true)
+    rn.assert_eq<bool>(obj is DrawableAndResizable, true)
+}
+
+fn tc_iface_is_iface_same(rn: TestUnit) {
+    let c = new Circle()
+    let obj: Drawable = c
+
+    // Positive: same interface (compile-time true)
+    rn.assert_eq<bool>(obj is Drawable, true)
+}
+
+// ---- 6. Variant constructors ----
+
+fn tc_option_variants(rn: TestUnit) {
+    let some: Option<u32> = Option.Some(42)
+    let none: Option<u32> = Option.None()
+
+    // Positive + Negative
+    rn.assert_eq<bool>(some is Option.Some<u32>, true)
+    rn.assert_eq<bool>(some is Option.None<u32>, false)
+    rn.assert_eq<bool>(none is Option.None<u32>, true)
+    rn.assert_eq<bool>(none is Option.Some<u32>, false)
+}
+
+fn tc_result_variants(rn: TestUnit) {
+    let ok: Result<u32, u32> = Result.Ok(100)
+    let err: Result<u32, u32> = Result.Err(0)
+
+    rn.assert_eq<bool>(ok is Result.Ok<u32, u32>, true)
+    rn.assert_eq<bool>(ok is Result.Err<u32, u32>, false)
+    rn.assert_eq<bool>(err is Result.Err<u32, u32>, true)
+    rn.assert_eq<bool>(err is Result.Ok<u32, u32>, false)
+}
+
+fn tc_shape_variants(rn: TestUnit) {
+    let s1: Shape = Shape.Rect(10.0, 20.0)
+    let s2: Shape = Shape.Circle(5.0)
+    let s3: Shape = Shape.Point()
+
+    // s1 = Rect
+    rn.assert_eq<bool>(s1 is Shape.Rect, true)
+    rn.assert_eq<bool>(s1 is Shape.Circle, false)
+    rn.assert_eq<bool>(s1 is Shape.Point, false)
+
+    // s2 = Circle
+    rn.assert_eq<bool>(s2 is Shape.Circle, true)
+    rn.assert_eq<bool>(s2 is Shape.Rect, false)
+    rn.assert_eq<bool>(s2 is Shape.Point, false)
+
+    // s3 = Point
+    rn.assert_eq<bool>(s3 is Shape.Point, true)
+    rn.assert_eq<bool>(s3 is Shape.Rect, false)
+    rn.assert_eq<bool>(s3 is Shape.Circle, false)
+}
+
+// ---- 7. Null checks ----
+
+fn tc_null_check(rn: TestUnit) {
+    let a = new Animal()
+    // Non-null is NOT null
+    rn.assert_eq<bool>(a is null, false)
+}
+
+// ---- 8. Mixed / stress ----
+
+fn tc_mixed_stress(rn: TestUnit) {
+    let c = new Circle()
+    let w = new Widget()
+
+    // Class-is-class
+    rn.assert_eq<bool>(c is Circle, true)
+    rn.assert_eq<bool>(w is Widget, true)
+    rn.assert_eq<bool>(c is Widget, false)
+    rn.assert_eq<bool>(w is Circle, false)
+
+    // Class-is-interface
+    rn.assert_eq<bool>(c is Drawable, true)
+    rn.assert_eq<bool>(c is Resizable, false)
+    rn.assert_eq<bool>(w is Drawable, true)
+    rn.assert_eq<bool>(w is Resizable, true)
+
+    // Generic class
+    let bu = new Box<u32>()
+    let bi = new Box<i32>()
+    rn.assert_eq<bool>(bu is Box<u32>, true)
+    rn.assert_eq<bool>(bu is Box<i32>, false)
+    rn.assert_eq<bool>(bi is Box<i32>, true)
+    rn.assert_eq<bool>(bi is Box<u32>, false)
+}
+
+// ---- Runner ----
+
+fn testIs() -> u32 {
+    let set = new UnitSet("Instance Check Tests", "Comprehensive is-expression tests", [
+        new TestUnit("class is class",           "Nominal class identity",            tc_class_is_class),
+        new TestUnit("generic same",             "Same generic instantiation",        tc_generic_class_same),
+        new TestUnit("generic cross",            "Cross-type generic mismatch",       tc_generic_class_cross),
+        new TestUnit("class is interface",       "Structural interface conformance",  tc_class_is_interface),
+        new TestUnit("iface is class",           "Runtime interface-to-class",        tc_iface_is_class),
+        new TestUnit("iface is iface (wider)",   "Wider iface satisfies narrower",    tc_iface_is_iface_wider),
+        new TestUnit("iface is iface (same)",    "Same interface identity",           tc_iface_is_iface_same),
+        new TestUnit("option variants",          "Option Some/None tag checks",       tc_option_variants),
+        new TestUnit("result variants",          "Result Ok/Err tag checks",          tc_result_variants),
+        new TestUnit("shape variants",           "3-way variant tag checks",          tc_shape_variants),
+        new TestUnit("null check",               "Non-null is not null",              tc_null_check),
+        new TestUnit("mixed stress",             "Cross-category stress test",        tc_mixed_stress)
+    ])
+
+    return set.run()
+}

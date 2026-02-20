@@ -199,6 +199,34 @@ export class IRGenerator {
         return uid;
     }
 
+    /**
+     * Resolve the class UID for a DataType AST node (used in `is` checks and match patterns).
+     * For generic classes, builds the same mangled key that generateClass uses.
+     */
+    private resolveClassUidFromDataType(dataType: ast.DataType): number {
+        if (ast.isReferenceType(dataType)) {
+            const decl = dataType.field?.ref;
+            if (decl && ast.isTypeDeclaration(decl) && ast.isClassType(decl.definition)) {
+                if (decl.genericParameters.length > 0 && dataType.genericArgs.length > 0) {
+                    // Generic class: build substitution map and use makeClassKey
+                    const substitutions = new Map<string, TypeDescription>();
+                    decl.genericParameters.forEach((param, index) => {
+                        if (index < dataType.genericArgs.length) {
+                            const argType = this.getType(dataType.genericArgs[index]);
+                            substitutions.set(param.name, argType);
+                        }
+                    });
+                    const className = this.monoMorph.mangleName(this.makeClassKey(decl, substitutions));
+                    return this.getOrCreateClassUid(className);
+                } else {
+                    // Non-generic class: use declaration name directly
+                    return this.getOrCreateClassUid(decl.name);
+                }
+            }
+        }
+        return this.getOrCreateClassUid('');
+    }
+
     /** Maps class TypeDeclaration node → IR class name (for direct method dispatch) */
     private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
     private readonly verboseIR = process.env.TYPEC_VERBOSE_IR === '1';
@@ -4056,11 +4084,7 @@ export class IRGenerator {
                 f.br(cmpReg, matchLabel, failLabel);
             } else if (isClassType(patternTd)) {
                 // Class type pattern: check if subject is an instance of this class
-                const classTdDesc = patternTd as ClassTypeDescription;
-                const classNode = classTdDesc.node;
-                const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
-                    ? (classNode.$container as ast.TypeDeclaration).name : 'unknown';
-                const classId = this.getOrCreateClassUid(className);
+                const classId = this.resolveClassUidFromDataType(pattern.type);
                 const checkReg = this.tmp();
                 f.interfaceIsClass(checkReg, subject.register, classId);
                 f.br(checkReg, matchLabel, failLabel);
@@ -4334,17 +4358,20 @@ export class IRGenerator {
         const expr = this.visitExpression(node.left, undefined);
         const temp = this.tmp();
 
-        // Resolve the target type
+        // Resolve both sides
+        const leftTd = this.getType(node.left);
+        const resolvedLeft = isReferenceType(leftTd) ? this.typeUtils.resolveIfReference(leftTd) : leftTd;
         const targetTd = this.getType(node.destType);
         const resolvedTarget = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
 
+        // Null check: <expr> is null
         if (resolvedTarget.kind === TypeKind.Null) {
             f.isNull(temp, expr.register);
             return { register: temp, type: scalarType('bool') };
         }
 
+        // Variant constructor check: <expr> is Variant.Constructor
         if (isVariantConstructorType(resolvedTarget)) {
-            // Variant constructor: check tag field
             const vcTd = resolvedTarget as VariantConstructorTypeDescription;
             const tagReg = this.tmp();
             f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
@@ -4355,17 +4382,64 @@ export class IRGenerator {
             return { register: temp, type: scalarType('bool') };
         }
 
-        // Class: use interface_is_class
-        let classId = 0;
-        if (isClassType(resolvedTarget)) {
-            const classDesc = resolvedTarget as ClassTypeDescription;
-            const classNode = classDesc.node;
-            const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
-                ? (classNode.$container as ast.TypeDeclaration).name : '';
-            classId = this.getOrCreateClassUid(className);
+        // Branch on LHS type (following the old compiler's pattern):
+        // When LHS is a class, the concrete type is fully known → everything resolves at compile time.
+        // When LHS is an interface, the concrete type is unknown → runtime checks needed.
+
+        if (isClassType(resolvedLeft)) {
+            // LHS is a class → fully resolved at compile time
+            // Use type compatibility: if the class is assignable to the target, emit true, else false.
+            const compatible = this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success;
+            f.constInt(temp, compatible ? 1 : 0, 'u8');
+            return { register: temp, type: scalarType('bool') };
         }
 
-        f.interfaceIsClass(temp, expr.register, classId);
+        if (isInterfaceType(resolvedLeft)) {
+            // LHS is an interface → runtime type is unknown
+            if (isClassType(resolvedTarget)) {
+                // Interface `is` Class → always runtime, we can't know which class is behind the interface
+                const targetClassId = this.resolveClassUidFromDataType(node.destType);
+                f.interfaceIsClass(temp, expr.register, targetClassId);
+                return { register: temp, type: scalarType('bool') };
+            }
+            if (isInterfaceType(resolvedTarget)) {
+                // Interface `is` Interface
+                // If the LHS interface already satisfies the target (is same or wider), emit true.
+                // Otherwise fall through to runtime checks — the actual object might still satisfy it.
+                if (this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success) {
+                    f.constInt(temp, 1, 'u8');
+                    return { register: temp, type: scalarType('bool') };
+                }
+                // Runtime: check all target methods exist on the object
+                const targetMethods = resolvedTarget.methods;
+                if (targetMethods.length === 0) {
+                    // Empty interface — everything satisfies it
+                    f.constInt(temp, 1, 'u8');
+                    return { register: temp, type: scalarType('bool') };
+                }
+                const failLabel = this.generateLabel('iface_fail');
+                const endLabel = this.generateLabel('iface_end');
+                for (const method of targetMethods) {
+                    for (const methodName of method.names) {
+                        const methodId = this.getOrCreateMethodNameId(methodName);
+                        const checkReg = this.tmp();
+                        f.interfaceHasMethod(checkReg, expr.register, methodId);
+                        const nextLabel = this.generateLabel('iface_next');
+                        f.br(checkReg, nextLabel, failLabel);
+                        f.label(nextLabel);
+                    }
+                }
+                f.constInt(temp, 1, 'u8');
+                f.jmp(endLabel);
+                f.label(failLabel);
+                f.constInt(temp, 0, 'u8');
+                f.label(endLabel);
+                return { register: temp, type: scalarType('bool') };
+            }
+        }
+
+        // Anything else: emit false
+        f.constInt(temp, 0, 'u8');
         return { register: temp, type: scalarType('bool') };
     }
 
@@ -4806,8 +4880,20 @@ export class IRGenerator {
         if (refType && ast.isReferenceType(refType)) {
             const classDecl = refType.field?.ref;
             if (classDecl && ast.isTypeDeclaration(classDecl)) {
-                const className = this.classNodeToIRName.get(classDecl) || classDecl.name;
-                return `class_${className}`;
+                if (classDecl.genericParameters.length > 0 && refType.genericArgs.length > 0) {
+                    // Generic class: build the same mangled key as generateClass
+                    const substitutions = new Map<string, TypeDescription>();
+                    classDecl.genericParameters.forEach((param, index) => {
+                        if (index < refType.genericArgs.length) {
+                            const argType = this.getType(refType.genericArgs[index]);
+                            substitutions.set(param.name, argType);
+                        }
+                    });
+                    const className = this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions));
+                    return `class_${className}`;
+                } else {
+                    return `class_${classDecl.name}`;
+                }
             }
         }
         // Should not happen for valid class references

@@ -381,7 +381,22 @@ export class TypeCTypeUtils {
                     return failure('Expected class types');
                 }
                 // Classes use nominal typing - must be the exact same declaration
-                if (a === b || (a.node && b.node && a.node === b.node)) {
+                if (a === b) {
+                    return success();
+                }
+                if (a.node && b.node && a.node === b.node) {
+                    // Same declaration — but for generic classes, different instantiations
+                    // (e.g. Box<u32> vs Box<i32>) have different attribute types.
+                    // Compare attributes to distinguish them.
+                    if (a.attributes.length !== b.attributes.length) {
+                        return failure(`Class types differ: ${a.toString()} vs ${b.toString()}`);
+                    }
+                    for (let i = 0; i < a.attributes.length; i++) {
+                        const attrResult = this.areTypesEqual(a.attributes[i].type, b.attributes[i].type);
+                        if (!attrResult.success) {
+                            return failure(`Class types differ: ${a.toString()} vs ${b.toString()}`);
+                        }
+                    }
                     return success();
                 }
                 return failure(`Class types differ: ${a.toString()} vs ${b.toString()}`);
@@ -858,13 +873,9 @@ export class TypeCTypeUtils {
 
         // Class/Interface subtyping
         if (isClassType(from) && isClassType(to)) {
-            // Classes are equal if they're the same object OR have the same AST node
-            // This is critical for handling partial class types during inference
-            // (stub methods with void return types vs fully inferred methods)
-            if (from === to || (from.node && to.node && from.node === to.node)) {
-                return success();
-            }
-            return failure(`Class types differ: ${from.toString()} vs ${to.toString()}`);
+            // Classes use nominal typing — delegate to areTypesEqual which handles
+            // both node identity AND attribute comparison for generic instantiations
+            return this.areTypesEqual(from, to);
         }
         
         // Handle class to reference type (which may resolve to an interface)

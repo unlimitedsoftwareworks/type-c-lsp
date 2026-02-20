@@ -175,6 +175,9 @@ export class IRGenerator {
         let id = this.methodNameToId.get(name);
         if (id === undefined) {
             id = this.methodNameIdCounter++;
+            if (id > 0xFFFF) {
+                throw new Error(`Method name ID overflow: more than 65535 distinct method names`);
+            }
             this.methodNameToId.set(name, id);
         }
         return id;

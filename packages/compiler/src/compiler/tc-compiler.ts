@@ -180,6 +180,22 @@ export class IRGenerator {
         return id;
     }
 
+    /** Maps class name string → sequential u16 UID for runtime type checks */
+    private classNameToUid = new Map<string, number>();
+    private classUidCounter = 0;
+
+    private getOrCreateClassUid(name: string): number {
+        let uid = this.classNameToUid.get(name);
+        if (uid === undefined) {
+            uid = this.classUidCounter++;
+            if (uid > 0xFFFF) {
+                throw new Error(`Class UID overflow: more than 65535 distinct class names`);
+            }
+            this.classNameToUid.set(name, uid);
+        }
+        return uid;
+    }
+
     /** Maps class TypeDeclaration node → IR class name (for direct method dispatch) */
     private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
     private readonly verboseIR = process.env.TYPEC_VERBOSE_IR === '1';
@@ -1038,6 +1054,7 @@ export class IRGenerator {
         }
         this.program.addFunction(this.globalFunc);
         this.program.entryFunction = '$G';
+        this.program.numMethodNames = this.methodNameIdCounter;
 
         return this.program;
     }
@@ -1215,7 +1232,7 @@ export class IRGenerator {
         }
 
         const classShapeId = `class_${className}`;
-        const classUid = this.hashClassName(className);
+        const classUid = this.getOrCreateClassUid(className);
         this.program.declareClass({
             id: classShapeId,
             uid: classUid,
@@ -4040,7 +4057,7 @@ export class IRGenerator {
                 const classNode = classTdDesc.node;
                 const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
                     ? (classNode.$container as ast.TypeDeclaration).name : 'unknown';
-                const classId = this.hashClassName(className);
+                const classId = this.getOrCreateClassUid(className);
                 const checkReg = this.tmp();
                 f.interfaceIsClass(checkReg, subject.register, classId);
                 f.br(checkReg, matchLabel, failLabel);
@@ -4342,20 +4359,11 @@ export class IRGenerator {
             const classNode = classDesc.node;
             const className = classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)
                 ? (classNode.$container as ast.TypeDeclaration).name : '';
-            classId = this.hashClassName(className);
+            classId = this.getOrCreateClassUid(className);
         }
 
         f.interfaceIsClass(temp, expr.register, classId);
         return { register: temp, type: scalarType('bool') };
-    }
-
-    private hashClassName(name: string): number {
-        let hash = 0;
-        for (let i = 0; i < name.length; i++) {
-            hash = ((hash << 5) - hash) + name.charCodeAt(i);
-            hash |= 0; // Convert to 32-bit int
-        }
-        return Math.abs(hash);
     }
 
     private visitTypeCastExpression(node: ast.TypeCastExpression): ExpressionResult {

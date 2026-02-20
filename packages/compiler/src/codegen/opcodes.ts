@@ -137,12 +137,12 @@ export enum Op {
     CLASS_GET_R, CLASS_GET_K, CLASS_GET_I,
     CLASS_SET_R, CLASS_SET_K, CLASS_SET_I,
 
-    OP_INTERFACE_IS_C_R,
-    OP_INTERFACE_IS_C_K,
-    OP_INTERFACE_IS_C_I,
+    CORRUPTION_IC_R,        // was OP_INTERFACE_IS_C_R (removed)
+    CORRUPTION_IC_K,        // was OP_INTERFACE_IS_C_K (removed)
+    OP_INTERFACE_IS_C_I,    // AD: A=obj, D=classUid. Skip next if cls->uid == D
 
-    OP_I_HAS_M_R,
-    OP_I_HAS_M_K,
+    CORRUPTION_IHM_R,       // was OP_I_HAS_M_R (removed)
+    OP_I_HAS_M_I,           // AD: A=obj, D=methodNameId. Skip next if bitmap bit set
 
     CLASS_GET_METHOD_R,
     CLASS_GET_METHOD_I,

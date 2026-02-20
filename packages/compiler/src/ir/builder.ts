@@ -623,6 +623,8 @@ export class IRProgram {
     numFieldSlots: number = 0;
     /** Set by method coloring pass — total number of colored method slots */
     numMethodSlots: number = 0;
+    /** Total number of unique method name IDs (for bitmap sizing) */
+    numMethodNames: number = 0;
 
     createFunction(
         name: string,

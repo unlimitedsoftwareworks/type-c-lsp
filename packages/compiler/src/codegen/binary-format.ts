@@ -8,7 +8,7 @@
  *
  * [Header]
  *   magic:          u32    (0x54564243 = "TVBC")
- *   version:        u16    (3)
+ *   version:        u16    (4)
  *   flags:          u16    (reserved)
  *   numStrings:     u16
  *   numGlobals:     u16
@@ -18,6 +18,7 @@
  *   entryFuncIndex: u16
  *   numFieldSlots:  u16
  *   numMethodSlots: u16
+ *   numMethodNames: u16
  *
  * [String Pool]
  *   For each string:
@@ -49,6 +50,10 @@
  *     For each method:
  *       methodId:       u16
  *       funcNameIndex:  u16  (index into function table)
+ *     bitmapWords:    u16  (number of u64 words in method name bitmap)
+ *     For each bitmap word:
+ *       lo:             u32  (lower 32 bits)
+ *       hi:             u32  (upper 32 bits)
  *
  * [Functions]
  *   For each function:
@@ -70,7 +75,7 @@ import type { IRType } from '../ir/types.js';
 // === Magic and Version ===
 
 export const BINARY_MAGIC = 0x54564243;  // "TVBC" in ASCII
-export const BINARY_VERSION = 3;
+export const BINARY_VERSION = 4;
 
 // === Type Tag Encoding ===
 
@@ -140,11 +145,13 @@ export interface CompiledProgram {
         uid: number;
         fields: { localFieldId: number; type: IRType }[];
         methods: { methodId: number; funcIndex: number }[];
+        methodNameBitmap: bigint[];
     }[];
     readonly functions: CompiledFunction[];
     readonly entryFuncIndex: number;
     readonly numFieldSlots: number;
     readonly numMethodSlots: number;
+    readonly numMethodNames: number;
 }
 
 // === Binary Writer ===
@@ -222,6 +229,7 @@ export function encodeBinary(program: CompiledProgram): Uint8Array {
     w.writeU16(program.entryFuncIndex);
     w.writeU16(program.numFieldSlots);
     w.writeU16(program.numMethodSlots);
+    w.writeU16(program.numMethodNames);
 
     // --- String Pool ---
     const encoder = new TextEncoder();
@@ -263,6 +271,14 @@ export function encodeBinary(program: CompiledProgram): Uint8Array {
         for (const m of c.methods) {
             w.writeU16(m.methodId);
             w.writeU16(m.funcIndex);
+        }
+        // Method name bitmap (for interface_has_method checks)
+        const bmWords = c.methodNameBitmap.length;
+        w.writeU16(bmWords);
+        for (let bi = 0; bi < bmWords; bi++) {
+            const val = c.methodNameBitmap[bi];
+            w.writeU32(Number(val & 0xFFFFFFFFn));
+            w.writeU32(Number((val >> 32n) & 0xFFFFFFFFn));
         }
     }
 

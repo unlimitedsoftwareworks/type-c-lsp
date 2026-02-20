@@ -859,47 +859,22 @@ export function selectInstructions(
             case 'interface_is_class': {
                 const dest = r(regMap, inst.dest);
                 const src = r(regMap, inst.interface);
-                // Materialize boolean from skip-style predicate:
-                // dest = true; predicate (skip-next-if-true); dest = false
-                // This remains correct even if the VM still writes dest directly.
+                // AD skip-on-true: if cls->uid == D, skip next instruction
+                // Boolean materialization: MOV_RI dest,1 / OP_INTERFACE_IS_C_I / MOV_RI dest,0
+                // If match: skip the MOV dest,0 → dest stays 1
+                // If no match: execute MOV dest,0 → dest becomes 0
                 emit(makeAD(Op.MOV_RI, dest, 1));
-                if (inst.classId <= 0xFF) {
-                    emit(makeABC(Op.OP_INTERFACE_IS_C_I, dest, src, inst.classId));
-                } else {
-                    const scratch = dest === 255 ? 254 : 255;
-                    if (!Number.isInteger(inst.classId) || inst.classId < 0 || inst.classId > 0xFFFFFFFF) {
-                        throw new Error(`Class ID out of u32 range for interface_is_class: ${inst.classId}`);
-                    }
-                    if (inst.classId <= 0xFFFF) {
-                        emit(makeAD(Op.MOV_RI, scratch, inst.classId));
-                    } else {
-                        const classIdOffset = pool.add32(inst.classId >>> 0);
-                        emit(makeAD(Op.MOV_RK_32, scratch, assertFitsU16(classIdOffset, `Class ID constant offset for interface_is_class`)));
-                    }
-                    emit(makeABC(Op.OP_INTERFACE_IS_C_R, dest, src, scratch));
-                }
+                emit(makeAD(Op.OP_INTERFACE_IS_C_I, src, assertFitsU16(inst.classId, `Class UID for interface_is_class`)));
                 emit(makeAD(Op.MOV_RI, dest, 0));
                 break;
             }
             case 'interface_has_method': {
                 const dest = r(regMap, inst.dest);
                 const src = r(regMap, inst.interface);
-                const scratch = dest === 255 ? 254 : 255;
-
-                // Materialize boolean from skip-style predicate:
-                // dest = true; predicate (skip-next-if-true); dest = false
+                // AD skip-on-true: if method nameId bit set in bitmap, skip next instruction
+                // Boolean materialization: MOV_RI dest,1 / OP_I_HAS_M_I / MOV_RI dest,0
                 emit(makeAD(Op.MOV_RI, dest, 1));
-
-                if (!Number.isInteger(inst.methodId) || inst.methodId < 0 || inst.methodId > 0xFFFFFFFF) {
-                    throw new Error(`Method ID out of u32 range for interface_has_method: ${inst.methodId}`);
-                }
-                if (inst.methodId <= 0xFFFF) {
-                    emit(makeAD(Op.MOV_RI, scratch, inst.methodId));
-                } else {
-                    const methodIdOffset = pool.add32(inst.methodId >>> 0);
-                    emit(makeAD(Op.MOV_RK_32, scratch, assertFitsU16(methodIdOffset, `Method ID constant offset for interface_has_method`)));
-                }
-                emit(makeABC(Op.OP_I_HAS_M_R, dest, src, scratch));
+                emit(makeAD(Op.OP_I_HAS_M_I, src, assertFitsU16(inst.methodId, `Method nameId for interface_has_method`)));
                 emit(makeAD(Op.MOV_RI, dest, 0));
                 break;
             }

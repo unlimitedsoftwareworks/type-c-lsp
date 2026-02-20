@@ -57,7 +57,17 @@ function applyFieldColoring(program: IRProgram): void {
 
 // === Phase 0b: Method Coloring — rewrite nameIds to colored slots ===
 
-function applyMethodColoring(program: IRProgram): void {
+function applyMethodColoring(program: IRProgram): Map<string, Set<number>> {
+    // Snapshot original nameIds per class BEFORE coloring overwrites them
+    const classOriginalNameIds = new Map<string, Set<number>>();
+    for (const shape of program.classShapes) {
+        const nameIds = new Set<number>();
+        for (const method of shape.methods) {
+            nameIds.add(method.methodId);
+        }
+        classOriginalNameIds.set(shape.id, nameIds);
+    }
+
     const coloring = colorMethodSlots(program.classShapes);
     program.numMethodSlots = coloring.numSlots;
 
@@ -82,6 +92,8 @@ function applyMethodColoring(program: IRProgram): void {
             }
         }
     }
+
+    return classOriginalNameIds;
 }
 
 // === Per-Function Compilation ===
@@ -225,7 +237,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
     applyFieldColoring(program);
 
     // Phase 0b: Method coloring (must run before per-function compilation)
-    applyMethodColoring(program);
+    const classOriginalNameIds = applyMethodColoring(program);
 
     const reachable = collectReachableCode(program);
 
@@ -291,18 +303,35 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         })),
     }));
 
-    // Map class shapes
-    const classes = reachable.classes.map(c => ({
-        uid: c.uid,
-        fields: c.fields.map(f => ({
-            localFieldId: f.localFieldId,
-            type: f.type,
-        })),
-        methods: c.methods.map(m => ({
-            methodId: m.methodId,
-            funcIndex: requireFunctionIndex(m.funcName, `class shape '${c.id}' method '${m.name}'`),
-        })),
-    }));
+    // Map class shapes (build per-class method name bitmaps from pre-coloring snapshot)
+    const numMethodNames = program.numMethodNames;
+    const bitmapWords = numMethodNames > 0 ? Math.ceil(numMethodNames / 64) : 0;
+
+    const classes = reachable.classes.map(c => {
+        const bitmap: bigint[] = new Array(bitmapWords).fill(0n);
+        const originalIds = classOriginalNameIds.get(c.id);
+        if (originalIds) {
+            for (const nameId of originalIds) {
+                const wordIdx = Math.floor(nameId / 64);
+                const bitIdx = nameId % 64;
+                if (wordIdx < bitmapWords) {
+                    bitmap[wordIdx] |= (1n << BigInt(bitIdx));
+                }
+            }
+        }
+        return {
+            uid: c.uid,
+            fields: c.fields.map(f => ({
+                localFieldId: f.localFieldId,
+                type: f.type,
+            })),
+            methods: c.methods.map(m => ({
+                methodId: m.methodId,
+                funcIndex: requireFunctionIndex(m.funcName, `class shape '${c.id}' method '${m.name}'`),
+            })),
+            methodNameBitmap: bitmap,
+        };
+    });
 
     // Find entry function index
     const entryFuncIndex = requireFunctionIndex(program.entryFunction, 'entry point');
@@ -317,6 +346,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         entryFuncIndex,
         numFieldSlots: program.numFieldSlots,
         numMethodSlots: program.numMethodSlots,
+        numMethodNames: program.numMethodNames,
     };
 
     return encodeBinary(compiled);

@@ -37,6 +37,10 @@ import {
     TypeDescription,
     TypeKind,
     isGenericType,
+    isIntegerType,
+    isFloatType,
+    isErrorType,
+    isNeverType,
     isArrayType,
     isNullableType,
     isTupleType,
@@ -243,6 +247,92 @@ export class IRGenerator {
         );
     }
 
+    private isUnsuffixedNumericLiteral(arg: ast.Expression): boolean {
+        if (ast.isIntegerLiteral(arg)) {
+            return !arg.value.match(/([iu])(8|16|32|64)$/);
+        }
+        if (ast.isFloatingPointLiteral(arg)) {
+            return !ast.isFloatLiteral(arg);
+        }
+        return false;
+    }
+
+    private resolveGenericCallTypeArgs(
+        node: ast.FunctionCall,
+        genericParams: readonly ast.GenericType[],
+        parameterTypes: readonly TypeDescription[]
+    ): TypeDescription[] | undefined {
+        if (genericParams.length === 0) return [];
+
+        if (node.genericArgs && node.genericArgs.length > 0) {
+            if (node.genericArgs.length !== genericParams.length) {
+                return undefined;
+            }
+            return node.genericArgs.map(ga => this.getType(ga));
+        }
+
+        const args = node.args || [];
+        const genericParamNames = genericParams.map(p => p.name);
+        const argumentTypes = args.map(arg => this.getType(arg));
+
+        let substitutions = this.typeProvider.inferGenericsFromArguments(
+            genericParamNames,
+            [...parameterTypes],
+            argumentTypes
+        );
+
+        const hasErrorSubstitution = Array.from(substitutions.values()).some(t => isErrorType(t));
+        if (hasErrorSubstitution) {
+            const concreteTypes = new Map<string, TypeDescription>();
+
+            for (let i = 0; i < Math.min(args.length, parameterTypes.length); i++) {
+                if (this.isUnsuffixedNumericLiteral(args[i])) continue;
+                const paramType = parameterTypes[i];
+                if (isGenericType(paramType) && genericParamNames.includes(paramType.name)) {
+                    if (!concreteTypes.has(paramType.name)) {
+                        concreteTypes.set(paramType.name, argumentTypes[i]);
+                    }
+                }
+            }
+
+            if (concreteTypes.size > 0) {
+                let needsReInference = false;
+                const newArgumentTypes = [...argumentTypes];
+
+                for (let i = 0; i < Math.min(args.length, parameterTypes.length); i++) {
+                    if (!this.isUnsuffixedNumericLiteral(args[i])) continue;
+                    const paramType = parameterTypes[i];
+                    if (isGenericType(paramType) && concreteTypes.has(paramType.name)) {
+                        const contextType = concreteTypes.get(paramType.name)!;
+                        if ((isIntegerType(contextType) || isFloatType(contextType)) && !isErrorType(contextType)) {
+                            newArgumentTypes[i] = contextType;
+                            needsReInference = true;
+                        }
+                    }
+                }
+
+                if (needsReInference) {
+                    substitutions = this.typeProvider.inferGenericsFromArguments(
+                        genericParamNames,
+                        [...parameterTypes],
+                        newArgumentTypes
+                    );
+                }
+            }
+        }
+
+        const resolvedTypeArgs: TypeDescription[] = [];
+        for (const name of genericParamNames) {
+            const inferred = substitutions.get(name);
+            if (!inferred || isErrorType(inferred) || isNeverType(inferred)) {
+                return undefined;
+            }
+            resolvedTypeArgs.push(inferred);
+        }
+
+        return resolvedTypeArgs;
+    }
+
     private getUnresolvedGenerics(type: TypeDescription): string[] {
         const generics: string[] = [];
         const traverse = (t: TypeDescription): void => {
@@ -325,6 +415,10 @@ export class IRGenerator {
                 // Tuples are only for returns - shouldn't typically hit this
                 return voidType();
             }
+            case TypeKind.Error:
+                throw new Error(
+                    `Cannot lower ErrorType to IR (${type.toString()}) at ${this.getSourceLocation(type.node)}`
+                );
             case TypeKind.Never: return voidType();
             default: return voidType();
         }
@@ -390,6 +484,203 @@ export class IRGenerator {
     private extractCmpType(irType: IRType, contextNode?: AstNode): CmpType {
         if (irType.tag === 'ptr') return 'ptr';
         return this.extractNumericType(irType, contextNode);
+    }
+
+    private coerceScalarExpression(value: ExpressionResult, targetType: IRType): ExpressionResult {
+        if (!isScalar(value.type) || !isScalar(targetType)) {
+            return value;
+        }
+
+        const srcScalar = (value.type as ScalarIRType).scalar;
+        const tgtScalar = (targetType as ScalarIRType).scalar;
+        if (srcScalar === tgtScalar) {
+            if (value.type === targetType) {
+                return value;
+            }
+            const temp = this.tmp();
+            this.func().mov(temp, value.register, targetType);
+            return { register: temp, type: targetType };
+        }
+
+        const temp = this.tmp();
+
+        if (isInteger(value.type) && isInteger(targetType)) {
+            const srcType = srcScalar as IntType;
+            const tgtType = tgtScalar as IntType;
+            const srcSize = this.intTypeSize(srcType);
+            const tgtSize = this.intTypeSize(tgtType);
+            const sameSignedness = (srcType.startsWith('i') && tgtType.startsWith('i')) ||
+                (srcType.startsWith('u') && tgtType.startsWith('u'));
+
+            if (!sameSignedness) {
+                const castKind: CastKind = srcType.startsWith('i') ? 'i_u' : 'u_i';
+                this.func().cast(temp, value.register, castKind);
+            } else if (tgtSize > srcSize) {
+                this.func().widen(temp, value.register, srcType, tgtType);
+            } else {
+                if (srcSize === 8) {
+                    this.func().narrow(temp, value.register, srcType, tgtType);
+                } else {
+                    const widenedType: IntType = srcType.startsWith('i') ? 'i64' : 'u64';
+                    const widenedReg = this.tmp();
+                    this.func().widen(widenedReg, value.register, srcType, widenedType);
+                    this.func().narrow(temp, widenedReg, widenedType, tgtType);
+                }
+            }
+
+            return { register: temp, type: targetType };
+        }
+
+        if (isInteger(value.type) && (isFloat(targetType) || isDouble(targetType))) {
+            const castKind: CastKind = isSignedInt(value.type)
+                ? (isFloat(targetType) ? 'i_f' : 'i_d')
+                : (isFloat(targetType) ? 'u_f' : 'u_d');
+            this.func().cast(temp, value.register, castKind);
+            return { register: temp, type: targetType };
+        }
+
+        if ((isFloat(value.type) || isDouble(value.type)) && isInteger(targetType)) {
+            const castKind: CastKind = isSignedInt(targetType)
+                ? (isFloat(value.type) ? 'f_i' : 'd_i')
+                : (isFloat(value.type) ? 'f_u' : 'd_u');
+            this.func().cast(temp, value.register, castKind);
+            return { register: temp, type: targetType };
+        }
+
+        if (isFloat(value.type) && isDouble(targetType)) {
+            this.func().cast(temp, value.register, 'f_d');
+            return { register: temp, type: targetType };
+        }
+
+        if (isDouble(value.type) && isFloat(targetType)) {
+            this.func().cast(temp, value.register, 'd_f');
+            return { register: temp, type: targetType };
+        }
+
+        this.func().mov(temp, value.register, targetType);
+        return { register: temp, type: targetType };
+    }
+
+    private intScalarBits(intType: IntType): 8 | 16 | 32 | 64 {
+        switch (intType) {
+            case 'i8':
+            case 'u8':
+                return 8;
+            case 'i16':
+            case 'u16':
+                return 16;
+            case 'i32':
+            case 'u32':
+                return 32;
+            case 'i64':
+            case 'u64':
+                return 64;
+        }
+    }
+
+    private intScalarFromShape(signed: boolean, bits: 8 | 16 | 32 | 64): IntType {
+        if (signed) {
+            switch (bits) {
+                case 8: return 'i8';
+                case 16: return 'i16';
+                case 32: return 'i32';
+                case 64: return 'i64';
+            }
+        }
+        switch (bits) {
+            case 8: return 'u8';
+            case 16: return 'u16';
+            case 32: return 'u32';
+            case 64: return 'u64';
+        }
+    }
+
+    private nextSignedBits(requiredBits: number): 8 | 16 | 32 | 64 | undefined {
+        if (requiredBits <= 8) return 8;
+        if (requiredBits <= 16) return 16;
+        if (requiredBits <= 32) return 32;
+        if (requiredBits <= 64) return 64;
+        return undefined;
+    }
+
+    private resolveNumericOperandTypeFromIR(left: IRType, right: IRType): IRType | undefined {
+        if (!isScalar(left) || !isScalar(right)) {
+            return undefined;
+        }
+
+        const leftScalar = left.scalar;
+        const rightScalar = right.scalar;
+
+        // Keep bool out of arithmetic promotion. Let fallbacks handle non-numeric cases.
+        if (leftScalar === 'bool' || rightScalar === 'bool') {
+            return undefined;
+        }
+
+        if (leftScalar === 'f64' || rightScalar === 'f64') {
+            return scalarType('f64');
+        }
+        if (leftScalar === 'f32' || rightScalar === 'f32') {
+            return scalarType('f32');
+        }
+
+        const leftInt = leftScalar as IntType;
+        const rightInt = rightScalar as IntType;
+        const leftSigned = leftInt.startsWith('i');
+        const rightSigned = rightInt.startsWith('i');
+        const leftBits = this.intScalarBits(leftInt);
+        const rightBits = this.intScalarBits(rightInt);
+
+        if (leftSigned === rightSigned) {
+            return scalarType(this.intScalarFromShape(leftSigned, leftBits >= rightBits ? leftBits : rightBits));
+        }
+
+        const maxSignedBits = leftSigned ? leftBits : rightBits;
+        const maxUnsignedBits = leftSigned ? rightBits : leftBits;
+        const signedBits = this.nextSignedBits(Math.max(maxSignedBits, maxUnsignedBits + 1));
+        if (!signedBits) {
+            return undefined;
+        }
+
+        return scalarType(this.intScalarFromShape(true, signedBits));
+    }
+
+    private resolveNumericOperandTypeForBinary(
+        node: ast.BinaryExpression,
+        left: ExpressionResult,
+        right: ExpressionResult
+    ): IRType {
+        const promotedFromOperands = this.resolveNumericOperandTypeFromIR(left.type, right.type);
+        if (promotedFromOperands) {
+            return promotedFromOperands;
+        }
+
+        const nodeType = this.getType(node);
+        if (nodeType.kind !== TypeKind.Error && nodeType.kind !== TypeKind.Bool) {
+            const inferredNodeType = this.convertTypeDescriptionToIR(nodeType);
+            if (isScalar(inferredNodeType) && inferredNodeType.scalar !== 'bool') {
+                return inferredNodeType;
+            }
+        }
+
+        const leftType = this.getType(node.left);
+        const rightType = this.getType(node.right);
+        const commonType = this.typeUtils.getCommonType([leftType, rightType]);
+        if (commonType.kind !== TypeKind.Error) {
+            const commonIrType = this.convertTypeDescriptionToIR(commonType);
+            if (isScalar(commonIrType)) {
+                return commonIrType;
+            }
+        }
+
+        if (isScalar(left.type)) {
+            return left.type;
+        }
+
+        if (isScalar(right.type)) {
+            return right.type;
+        }
+
+        return left.type;
     }
 
     /**
@@ -831,6 +1122,12 @@ export class IRGenerator {
         const classMethods: ClassMethodShape[] = [];
         let methodIdx = 0;
         for (const method of classTd.methods) {
+            // Generic methods are monomorphized per call site and do not have a
+            // single dispatchable target for vtable slots.
+            if (method.genericParameters.length > 0) {
+                continue;
+            }
+
             const primaryName = method.names[0] || `method_${methodIdx}`;
             classMethods.push({
                 methodId: this.getOrCreateMethodNameId(primaryName),
@@ -2075,29 +2372,44 @@ export class IRGenerator {
                 this.func().strConcat(temp, left.register, right.register, right.type);
                 return { register: temp, type: ptrType('string') };
             }
-            const numType = this.extractNumericType(left.type, node);
-            this.func().add(temp, left.register, right.register, numType);
-            return { register: temp, type: left.type };
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const numType = this.extractNumericType(operandType, node);
+            this.func().add(temp, leftValue.register, rightValue.register, numType);
+            return { register: temp, type: operandType };
         }
         if (op === '-') {
-            const numType = this.extractNumericType(left.type, node);
-            this.func().sub(temp, left.register, right.register, numType);
-            return { register: temp, type: left.type };
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const numType = this.extractNumericType(operandType, node);
+            this.func().sub(temp, leftValue.register, rightValue.register, numType);
+            return { register: temp, type: operandType };
         }
         if (op === '*') {
-            const numType = this.extractNumericType(left.type, node);
-            this.func().mul(temp, left.register, right.register, numType);
-            return { register: temp, type: left.type };
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const numType = this.extractNumericType(operandType, node);
+            this.func().mul(temp, leftValue.register, rightValue.register, numType);
+            return { register: temp, type: operandType };
         }
         if (op === '/') {
-            const numType = this.extractNumericType(left.type, node);
-            this.func().div(temp, left.register, right.register, numType);
-            return { register: temp, type: left.type };
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const numType = this.extractNumericType(operandType, node);
+            this.func().div(temp, leftValue.register, rightValue.register, numType);
+            return { register: temp, type: operandType };
         }
         if (op === '%') {
-            const numType = this.extractNumericType(left.type, node);
-            this.func().mod(temp, left.register, right.register, numType);
-            return { register: temp, type: left.type };
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const numType = this.extractNumericType(operandType, node);
+            this.func().mod(temp, leftValue.register, rightValue.register, numType);
+            return { register: temp, type: operandType };
         }
 
         // Bitwise
@@ -2126,31 +2438,46 @@ export class IRGenerator {
         // Comparison
         const boolType = scalarType('bool');
         if (op === '<') {
-            const cmpType = this.extractNumericType(left.type, node);
-            this.func().cmpLt(temp, left.register, right.register, cmpType);
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const cmpType = this.extractNumericType(operandType, node);
+            this.func().cmpLt(temp, leftValue.register, rightValue.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '>') {
-            const cmpType = this.extractNumericType(left.type, node);
-            this.func().cmpGt(temp, left.register, right.register, cmpType);
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const cmpType = this.extractNumericType(operandType, node);
+            this.func().cmpGt(temp, leftValue.register, rightValue.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '<=') {
-            const cmpType = this.extractNumericType(left.type, node);
-            this.func().cmpLe(temp, left.register, right.register, cmpType);
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const cmpType = this.extractNumericType(operandType, node);
+            this.func().cmpLe(temp, leftValue.register, rightValue.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '>=') {
-            const cmpType = this.extractNumericType(left.type, node);
-            this.func().cmpGe(temp, left.register, right.register, cmpType);
+            const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+            const leftValue = this.coerceScalarExpression(left, operandType);
+            const rightValue = this.coerceScalarExpression(right, operandType);
+            const cmpType = this.extractNumericType(operandType, node);
+            this.func().cmpGe(temp, leftValue.register, rightValue.register, cmpType);
             return { register: temp, type: boolType };
         }
         if (op === '==') {
             if (this.isStringIRType(left.type)) {
                 this.func().cmpEqStr(temp, left.register, right.register);
             } else {
-                const cmpType = this.extractCmpType(left.type, node);
-                this.func().cmpEq(temp, left.register, right.register, cmpType);
+                const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+                const leftValue = this.coerceScalarExpression(left, operandType);
+                const rightValue = this.coerceScalarExpression(right, operandType);
+                const cmpType = this.extractCmpType(operandType, node);
+                this.func().cmpEq(temp, leftValue.register, rightValue.register, cmpType);
             }
             return { register: temp, type: boolType };
         }
@@ -2158,8 +2485,11 @@ export class IRGenerator {
             if (this.isStringIRType(left.type)) {
                 this.func().cmpNeStr(temp, left.register, right.register);
             } else {
-                const cmpType = this.extractCmpType(left.type, node);
-                this.func().cmpNe(temp, left.register, right.register, cmpType);
+                const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
+                const leftValue = this.coerceScalarExpression(left, operandType);
+                const rightValue = this.coerceScalarExpression(right, operandType);
+                const cmpType = this.extractCmpType(operandType, node);
+                this.func().cmpNe(temp, leftValue.register, rightValue.register, cmpType);
             }
             return { register: temp, type: boolType };
         }
@@ -2176,17 +2506,17 @@ export class IRGenerator {
         const rhsLabel = this.generateLabel('and_rhs');
         const endLabel = this.generateLabel('and_end');
 
-        // Short circuit: if left is false, result is false
+        // Default result for short-circuit false path.
+        f.constBool(temp, false);
+        // If left is true evaluate RHS, otherwise keep false.
         f.br(left.register, rhsLabel, endLabel);
 
         f.label(rhsLabel);
         const right = this.visitExpression(node.right, undefined);
-        f.and(temp, left.register, right.register);
+        f.mov(temp, right.register, scalarType('bool'));
         f.jmp(endLabel);
 
         f.label(endLabel);
-        // In the false case, temp = left.register (false), in the true case, temp = and result
-        // For simplicity, use and instruction which handles this
         return { register: temp, type: scalarType('bool') };
     }
 
@@ -2197,12 +2527,14 @@ export class IRGenerator {
         const rhsLabel = this.generateLabel('or_rhs');
         const endLabel = this.generateLabel('or_end');
 
-        // Short circuit: if left is true, result is true
+        // Default result for short-circuit true path.
+        f.constBool(temp, true);
+        // If left is true keep true, otherwise evaluate RHS.
         f.br(left.register, endLabel, rhsLabel);
 
         f.label(rhsLabel);
         const right = this.visitExpression(node.right, undefined);
-        f.or(temp, left.register, right.register);
+        f.mov(temp, right.register, scalarType('bool'));
         f.jmp(endLabel);
 
         f.label(endLabel);
@@ -2639,7 +2971,20 @@ export class IRGenerator {
 
             if (ref && ast.isFunctionDeclaration(ref)) {
                 // Direct function call
-                const funcName = this.C(ref);
+                let funcName = this.C(ref);
+                if (ref.genericParameters && ref.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(node.expr);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    const parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+
+                    const inferredTypeArgs = this.resolveGenericCallTypeArgs(node, ref.genericParameters, parameterTypes);
+                    if (!inferredTypeArgs) {
+                        throw new Error(`Unable to resolve generic arguments for function call '${ref.name}'`);
+                    }
+                    funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
+                }
                 const retTd = this.getType(node);
                 const retType = this.convertTypeDescriptionToIR(retTd);
                 const retTypes = retType.tag === 'void' ? [] : [retType];
@@ -2781,10 +3126,17 @@ export class IRGenerator {
                     }
 
                     let funcName: string;
-                    if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0
-                        && node.genericArgs && node.genericArgs.length > 0) {
-                        // Generic method call — resolve type arguments and use monomorphized name
-                        const methodTypeArgs = node.genericArgs.map(ga => this.getType(ga));
+                    if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
+                        const memberType = this.typeProvider.getType(memberAccess);
+                        const resolvedMemberType = isReferenceType(memberType) ? this.typeUtils.resolveIfReference(memberType) : memberType;
+                        const parameterTypes = isFunctionType(resolvedMemberType)
+                            ? resolvedMemberType.parameters.map(p => p.type)
+                            : (methodHeader.header?.args || []).map(p => this.typeProvider.getType(p));
+
+                        const methodTypeArgs = this.resolveGenericCallTypeArgs(node, methodHeader.genericParameters, parameterTypes);
+                        if (!methodTypeArgs) {
+                            throw new Error(`Unable to resolve generic arguments for method call '${methodName}' on class '${className}'`);
+                        }
                         const classDecl = classNode && ast.isTypeDeclaration(classNode) ? classNode : undefined;
                         funcName = this.callableRegistry.getGenericMethodName(
                             className,
@@ -3873,6 +4225,11 @@ export class IRGenerator {
         const targetTd = this.getType(node.destType);
         const resolvedTarget = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
 
+        if (resolvedTarget.kind === TypeKind.Null) {
+            f.isNull(temp, expr.register);
+            return { register: temp, type: scalarType('bool') };
+        }
+
         if (isVariantConstructorType(resolvedTarget)) {
             // Variant constructor: check tag field
             const vcTd = resolvedTarget as VariantConstructorTypeDescription;
@@ -3922,16 +4279,30 @@ export class IRGenerator {
                 // No-op cast
                 this.func().mov(temp, expr.register, targetType);
             } else if (isInteger(expr.type) && isInteger(targetType)) {
-                // Int-to-int: widen or narrow
+                // Int-to-int:
+                // - same signedness -> widen/narrow by size
+                // - different signedness -> explicit signed/unsigned cast
                 const srcType = srcScalar as IntType;
                 const tgtType = tgtScalar as IntType;
                 const srcSize = this.intTypeSize(srcType);
                 const tgtSize = this.intTypeSize(tgtType);
+                const sameSignedness = (srcType.startsWith('i') && tgtType.startsWith('i')) ||
+                    (srcType.startsWith('u') && tgtType.startsWith('u'));
 
-                if (tgtSize > srcSize) {
+                if (!sameSignedness) {
+                    const castKind: CastKind = srcType.startsWith('i') ? 'i_u' : 'u_i';
+                    this.func().cast(temp, expr.register, castKind);
+                } else if (tgtSize > srcSize) {
                     this.func().widen(temp, expr.register, srcType, tgtType);
                 } else {
-                    this.func().narrow(temp, expr.register, srcType, tgtType);
+                    if (srcSize === 8) {
+                        this.func().narrow(temp, expr.register, srcType, tgtType);
+                    } else {
+                        const widenedType: IntType = srcType.startsWith('i') ? 'i64' : 'u64';
+                        const widenedReg = this.tmp();
+                        this.func().widen(widenedReg, expr.register, srcType, widenedType);
+                        this.func().narrow(temp, widenedReg, widenedType, tgtType);
+                    }
                 }
             } else if (isInteger(expr.type) && (isFloat(targetType) || isDouble(targetType))) {
                 const castKind: CastKind = isSignedInt(expr.type)

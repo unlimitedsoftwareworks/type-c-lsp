@@ -1,0 +1,22 @@
+fn pick<T>(left: T, right: T) -> T {
+    return left
+}
+
+fn test_numeric_mixed_arithmetic_inference() {
+    let v_u32: u32 = 3
+    let v_i8: i8 = 5
+    let v_i16: i16 = 6
+    let v_i32: i32 = 7
+    let v_i64: i64 = 8
+    let v_f64: f64 = 10.0
+
+    let a: i64 = pick(v_u32 - v_i8, -2)
+    let b: i64 = pick(v_u32 - v_i16, -3)
+    let c: i64 = pick(v_u32 - v_i32, -4)
+    let d: i64 = pick(v_u32 - v_i64, -5)
+    let e: f64 = pick(v_u32 - v_f64, -7.0)
+
+    pick(a, b)
+    pick(c, d)
+    pick(e, 0.0)
+}

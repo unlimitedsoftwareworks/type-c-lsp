@@ -1,0 +1,26 @@
+type Status = enum {
+    Ok,
+    Err,
+    Maybe
+}
+
+fn pick<T>(left: T, right: T) -> T {
+    return right
+}
+
+fn getStatus(index: u32) -> Status {
+    if index == 0 {
+        return Status.Ok
+    }
+    if index == 1 {
+        return Status.Err
+    }
+    return Status.Maybe
+}
+
+fn test_error_path() {
+    let from_fn = getStatus(0)
+
+    /// @Error: Cannot infer common type
+    pick(from_fn, 1)
+}

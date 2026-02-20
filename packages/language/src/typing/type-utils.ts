@@ -16,6 +16,7 @@ import { TypeCServices } from "../type-c-module.js";
 import { TypeCTypeProvider } from "./type-c-type-provider.js";
 import {
     ClassTypeDescription,
+    EnumTypeDescription,
     FloatTypeDescription,
     FunctionTypeDescription,
     GenericTypeDescription,
@@ -33,6 +34,7 @@ import {
     isIntegerType,
     isInterfaceType,
     isJoinType,
+    isMetaEnumType,
     isNeverType,
     isNullableType,
     isNumericType,
@@ -385,6 +387,12 @@ export class TypeCTypeUtils {
                 return failure(`Class types differ: ${a.toString()} vs ${b.toString()}`);
             }
 
+            case TypeKind.Enum:
+                if (!isEnumType(a) || !isEnumType(b)) {
+                    return failure('Expected enum types');
+                }
+                return this.areEnumTypesEqual(a, b);
+
             case TypeKind.Function:
                 if (!isFunctionType(a) || !isFunctionType(b)) {
                     return failure('Expected types');
@@ -452,6 +460,33 @@ export class TypeCTypeUtils {
                     return failure(`Constructor '${aConstructor.name}' parameter '${aParam.name}' type mismatch: ${typeResult.message}`);
                 }
             }
+        }
+
+        return success();
+    }
+
+    areEnumTypesEqual(a: EnumTypeDescription, b: EnumTypeDescription): TypeCheckResult {
+        if (a.cases.length !== b.cases.length) {
+            return failure(`Enum case count mismatch: ${a.cases.length} vs ${b.cases.length}`);
+        }
+
+        for (let i = 0; i < a.cases.length; i++) {
+            const aCase = a.cases[i];
+            const bCase = b.cases[i];
+            if (aCase.name !== bCase.name || aCase.value !== bCase.value) {
+                return failure(
+                    `Enum case mismatch at position ${i + 1}: ${aCase.name} vs ${bCase.name}`
+                );
+            }
+        }
+
+        if (a.encoding && b.encoding) {
+            const encodingMatch = this.areTypesEqual(a.encoding, b.encoding);
+            if (!encodingMatch.success) {
+                return failure(`Enum encoding mismatch: ${encodingMatch.message}`);
+            }
+        } else if (a.encoding || b.encoding) {
+            return failure('Enum encoding mismatch');
         }
 
         return success();
@@ -970,6 +1005,75 @@ export class TypeCTypeUtils {
 
         // Float to integer: not allowed implicitly
         return failure(`Cannot implicitly convert ${from.toString()} to ${to.toString()}`);
+    }
+
+    private createIntegerTypeByShape(signed: boolean, bits: 8 | 16 | 32 | 64, node?: AstNode): IntegerTypeDescription {
+        if (signed) {
+            switch (bits) {
+                case 8: return this.typeFactory.createI8Type(node);
+                case 16: return this.typeFactory.createI16Type(node);
+                case 32: return this.typeFactory.createI32Type(node);
+                case 64: return this.typeFactory.createI64Type(node);
+            }
+        }
+
+        switch (bits) {
+            case 8: return this.typeFactory.createU8Type(node);
+            case 16: return this.typeFactory.createU16Type(node);
+            case 32: return this.typeFactory.createU32Type(node);
+            case 64: return this.typeFactory.createU64Type(node);
+        }
+    }
+
+    private createFloatTypeByBits(bits: 32 | 64, node?: AstNode): FloatTypeDescription {
+        return bits === 64 ? this.typeFactory.createF64Type(node) : this.typeFactory.createF32Type(node);
+    }
+
+    private getSmallestSignedBits(requiredBits: number): 8 | 16 | 32 | 64 | undefined {
+        if (requiredBits <= 8) return 8;
+        if (requiredBits <= 16) return 16;
+        if (requiredBits <= 32) return 32;
+        if (requiredBits <= 64) return 64;
+        return undefined;
+    }
+
+    private getCommonNumericType(
+        numericTypes: readonly (IntegerTypeDescription | FloatTypeDescription)[],
+        node?: AstNode
+    ): TypeDescription | undefined {
+        if (numericTypes.length === 0) {
+            return undefined;
+        }
+
+        const floatTypes = numericTypes.filter(isFloatType);
+        if (floatTypes.length > 0) {
+            const hasF64 = floatTypes.some(t => t.bits === 64);
+            return this.createFloatTypeByBits(hasF64 ? 64 : 32, node);
+        }
+
+        const integerTypes = numericTypes.filter(isIntegerType);
+        if (integerTypes.length !== numericTypes.length) {
+            return undefined;
+        }
+
+        const signedIntegers = integerTypes.filter(t => t.signed);
+        const unsignedIntegers = integerTypes.filter(t => !t.signed);
+
+        if (signedIntegers.length === 0 || unsignedIntegers.length === 0) {
+            const allSigned = unsignedIntegers.length === 0;
+            const maxBits = integerTypes.reduce((max, t) => Math.max(max, t.bits), 8);
+            return this.createIntegerTypeByShape(allSigned, maxBits as 8 | 16 | 32 | 64, node);
+        }
+
+        const maxSignedBits = signedIntegers.reduce((max, t) => Math.max(max, t.bits), 8);
+        const maxUnsignedBits = unsignedIntegers.reduce((max, t) => Math.max(max, t.bits), 8);
+        const requiredSignedBits = Math.max(maxSignedBits, maxUnsignedBits + 1);
+        const signedBits = this.getSmallestSignedBits(requiredSignedBits);
+        if (!signedBits) {
+            return undefined;
+        }
+
+        return this.createIntegerTypeByShape(true, signedBits, node);
     }
 
     isStructAssignable(from: StructTypeDescription, to: StructTypeDescription): TypeCheckResult {
@@ -3090,10 +3194,16 @@ export class TypeCTypeUtils {
             // CRITICAL FIX: Check if types differ only in nullability
             // This allows u32? and u32 to unify to u32?
             else {
+                const normalizeForComparison = (type: TypeDescription): TypeDescription => {
+                    // Member access like Status.Err can produce enum values typed from a meta-enum context.
+                    // For common-type inference, compare against the concrete enum type.
+                    return isMetaEnumType(type) ? type.baseEnum : type;
+                };
+
                 // Unwrap any nullable types and check if base types are identical
                 const unwrappedTypes = nonNullTypes.map(t => ({
                     original: t,
-                    base: isNullableType(t) ? t.baseType : t,
+                    base: normalizeForComparison(isNullableType(t) ? t.baseType : t),
                     wasNullable: isNullableType(t)
                 }));
 
@@ -3111,6 +3221,25 @@ export class TypeCTypeUtils {
                         commonType = this.typeFactory.createNullableType(commonType, types[0].node);
                     }
                 } else {
+                    // Handle mixed numeric types (e.g. u32 and i32 -> i64, u32 and f64 -> f64)
+                    const resolvedNumericCandidates = nonNullTypes.map(t => this.resolveIfReference(t));
+                    const allNumeric = resolvedNumericCandidates.every(isNumericType);
+                    if (allNumeric) {
+                        const numericCommon = this.getCommonNumericType(
+                            resolvedNumericCandidates.filter(isNumericType),
+                            types[0].node
+                        );
+
+                        if (numericCommon) {
+                            commonType = numericCommon;
+                        } else {
+                            return this.typeFactory.createErrorType(
+                                `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
+                                undefined,
+                                types[0].node
+                            );
+                        }
+                    } else {
                     // CRITICAL: Handle string literal + string combinations FIRST
                     // String literals should widen to string when mixed with string type
                     // This enables: string ∪ "VarDecl" → string
@@ -3151,19 +3280,32 @@ export class TypeCTypeUtils {
                         if (allIdentical) {
                             commonType = firstType;
                         } else {
-                            // CRITICAL: Check if types differ only by generic constraints
-                            // This handles: T: Numeric and Numeric should unify to Numeric
-                            // Resolve any generics to their constraints for comparison
-                            const resolvedTypes = nonNullTypes.map(t => this.resolveIfGeneric(t));
-                            const firstResolved = resolvedTypes[0];
-                            const allResolvedIdentical = resolvedTypes.every(t =>
-                                this.areTypesEqual(t, firstResolved).success
+                            // Handle mixed reference/concrete forms that resolve to the same type
+                            // (e.g. Enum and enum{...} from enum member expressions).
+                            const resolvedReferenceTypes = nonNullTypes.map(
+                                t => normalizeForComparison(this.resolveIfReference(t))
                             );
-                            
-                            if (allResolvedIdentical) {
-                                // All types resolve to the same constraint - use the constraint
-                                commonType = firstResolved;
+                            const firstResolvedReferenceType = resolvedReferenceTypes[0];
+                            const allResolvedReferencesIdentical = resolvedReferenceTypes.every(t =>
+                                this.areTypesEqual(t, firstResolvedReferenceType).success
+                            );
+
+                            if (allResolvedReferencesIdentical) {
+                                commonType = firstResolvedReferenceType;
                             } else {
+                                // CRITICAL: Check if types differ only by generic constraints
+                                // This handles: T: Numeric and Numeric should unify to Numeric
+                                // Resolve any generics to their constraints for comparison
+                                const resolvedTypes = nonNullTypes.map(t => this.resolveIfGeneric(t));
+                                const firstResolved = resolvedTypes[0];
+                                const allResolvedIdentical = resolvedTypes.every(t =>
+                                    this.areTypesEqual(t, firstResolved).success
+                                );
+                                
+                                if (allResolvedIdentical) {
+                                    // All types resolve to the same constraint - use the constraint
+                                    commonType = firstResolved;
+                                } else {
                                 // Check if all are struct types (or join types that resolve to structs) - use structural subtyping
                                 const structTypes = nonNullTypes.map(t => this.asStructType(t)).filter((t): t is StructTypeDescription => t !== undefined);
                                 if (structTypes.length === nonNullTypes.length) {
@@ -3223,8 +3365,6 @@ export class TypeCTypeUtils {
                                                     return unified;
                                                 }
                                             } else {
-                                                // TODO: Implement numeric type widening (e.g., i32 + u32 → i64)
-                                                // For now, if types differ, it's an error
                                                 return this.typeFactory.createErrorType(
                                                     `Cannot infer common type: found ${types.map(t => t.toString()).join(', ')}`,
                                                     undefined,
@@ -3234,8 +3374,10 @@ export class TypeCTypeUtils {
                                         }
                                     }
                                 }
+                                }
                             }
                         }
+                    }
                     }
                 }
             }

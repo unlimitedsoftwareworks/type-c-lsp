@@ -168,15 +168,17 @@ function narrowOp(from: string, to: string): Op {
 // === Cast opcode selection ===
 
 function castOp(castKind: CastKind): Op {
+    // VM cast opcode names are source/destination-inverted for numeric float/int pairs.
+    // Map by behavior (CastKind) rather than by opcode name.
     switch (castKind) {
-        case 'i_f': return Op.CAST_I_F;
-        case 'f_i': return Op.CAST_F_I;
-        case 'u_f': return Op.CAST_U_F;
-        case 'f_u': return Op.CAST_F_U;
-        case 'i_d': return Op.CAST_I_D;
-        case 'd_i': return Op.CAST_D_I;
-        case 'u_d': return Op.CAST_U_D;
-        case 'd_u': return Op.CAST_D_U;
+        case 'i_f': return Op.CAST_F_I;
+        case 'f_i': return Op.CAST_I_F;
+        case 'u_f': return Op.CAST_F_U;
+        case 'f_u': return Op.CAST_U_F;
+        case 'i_d': return Op.CAST_D_I;
+        case 'd_i': return Op.CAST_I_D;
+        case 'u_d': return Op.CAST_D_U;
+        case 'd_u': return Op.CAST_U_D;
         case 'i_u': return Op.CAST_I_U;
         case 'u_i': return Op.CAST_U_I;
         case 'f_d': return Op.CAST_F_D;
@@ -215,7 +217,8 @@ export function selectInstructions(
     funcNameToIndex: Map<string, number> = new Map(),
     classIdToIndex: Map<string, number> = new Map(),
     structIdToIndex: Map<string, number> = new Map(),
-    globalIdToIndex: Map<string, number> = new Map()
+    globalIdToIndex: Map<string, number> = new Map(),
+    functionName = '<unknown>'
 ): SelectionResult {
     const out: VMInstruction[] = [];
     const pool = new ConstantPool();
@@ -232,6 +235,87 @@ export function selectInstructions(
         out.push({ word: makeAJ(op, a, 0), labelRef: label });
     }
 
+    function requireFuncIndex(name: string, instKind: string): number {
+        const idx = funcNameToIndex.get(name);
+        if (idx === undefined) {
+            throw new Error(
+                `Unresolved function target '${name}' while lowering '${instKind}' in '${functionName}'`
+            );
+        }
+        return idx;
+    }
+
+    function requireClassShapeIndex(id: string): number {
+        const idx = classIdToIndex.get(id);
+        if (idx === undefined) {
+            throw new Error(
+                `Unresolved class shape '${id}' while lowering in '${functionName}'`
+            );
+        }
+        return idx;
+    }
+
+    function requireStructShapeIndex(id: string): number {
+        const idx = structIdToIndex.get(id);
+        if (idx === undefined) {
+            throw new Error(
+                `Unresolved struct shape '${id}' while lowering in '${functionName}'`
+            );
+        }
+        return idx;
+    }
+
+    function requireGlobalIndex(id: string): number {
+        const idx = globalIdToIndex.get(id);
+        if (idx === undefined) {
+            throw new Error(
+                `Unresolved global '${id}' while lowering in '${functionName}'`
+            );
+        }
+        return idx;
+    }
+
+    function definesVReg(inst: IRInstruction, vreg: VReg): boolean {
+        if ('dest' in inst && typeof (inst as { dest?: unknown }).dest === 'string') {
+            if ((inst as { dest: VReg }).dest === vreg) return true;
+        }
+        if ('dests' in inst && Array.isArray((inst as { dests?: unknown }).dests)) {
+            const dests = (inst as { dests: VReg[] }).dests;
+            if (dests.includes(vreg)) return true;
+        }
+        if (inst.kind === 'for_init' && inst.base === vreg) {
+            return true;
+        }
+        return false;
+    }
+
+    function usesVReg(inst: IRInstruction, vreg: VReg): boolean {
+        for (const [key, value] of Object.entries(inst as unknown as Record<string, unknown>)) {
+            if (key === 'kind' || key === 'dest' || key === 'dests') continue;
+            if (inst.kind === 'for_init' && key === 'base') continue; // base is the defined vreg
+
+            if (typeof value === 'string') {
+                if (value === vreg) return true;
+                continue;
+            }
+
+            if (Array.isArray(value)) {
+                for (const item of value) {
+                    if (typeof item === 'string' && item === vreg) {
+                        return true;
+                    }
+                    if (item && typeof item === 'object' && 'value' in item) {
+                        const pairValue = (item as { value?: unknown }).value;
+                        if (typeof pairValue === 'string' && pairValue === vreg) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     // Check if instruction at index `i` is a comparison whose result is only used by the
     // immediately following `br` instruction (for fusion).
     function canFuseWithBranch(i: number): boolean {
@@ -240,7 +324,18 @@ export function selectInstructions(
         if (next.kind !== 'br') return false;
         const curr = instructions[i];
         if (!('dest' in curr)) return false;
-        return next.condition === (curr as { dest: VReg }).dest;
+        const dest = (curr as { dest: VReg }).dest;
+        if (next.condition !== dest) return false;
+
+        // Keep the compare result materialized when that vreg is used later
+        // (e.g. logical short-circuit lowering reads it after branching).
+        for (let j = i + 2; j < instructions.length; j++) {
+            const probe = instructions[j];
+            if (usesVReg(probe, dest)) return false;
+            if (definesVReg(probe, dest)) break;
+        }
+
+        return true;
     }
 
     for (let i = 0; i < instructions.length; i++) {
@@ -561,7 +656,7 @@ export function selectInstructions(
                     emit(makeABC(isPtr ? Op.FN_SET_REG_PTR : Op.FN_SET_REG, j, argReg, 0));
                 }
                 // FN_CALL: AD format, D = constant pool offset for func index
-                const funcIdx = funcNameToIndex.get(inst.func) ?? 0xFFFF;
+                const funcIdx = requireFuncIndex(inst.func, 'call');
                 const funcOffset = pool.add32(funcIdx);
                 emit(makeAD(Op.FN_CALL, 0, funcOffset));
                 // FN_GET_RET_R: return values are in callee's regs 255, 254, 253...
@@ -646,7 +741,7 @@ export function selectInstructions(
 
             // === Struct ===
             case 'struct_alloc': {
-                const structIndex = structIdToIndex.get(inst.typeId) ?? 0;
+                const structIndex = requireStructShapeIndex(inst.typeId);
                 emit(makeAD(Op.STRUCT_ALLOC_I, r(regMap, inst.dest), pool.add32(structIndex)));
                 break;
             }
@@ -664,7 +759,7 @@ export function selectInstructions(
 
             // === Class ===
             case 'class_alloc': {
-                const classIndex = classIdToIndex.get(inst.typeId) ?? 0;
+                const classIndex = requireClassShapeIndex(inst.typeId);
                 emit(makeAD(Op.CLASS_ALLOC, r(regMap, inst.dest), pool.add32(classIndex)));
                 break;
             }
@@ -726,7 +821,7 @@ export function selectInstructions(
 
             // === Closure ===
             case 'closure_alloc': {
-                const funcIdx = funcNameToIndex.get(inst.funcName) ?? 0xFFFF;
+                const funcIdx = requireFuncIndex(inst.funcName, 'closure_alloc');
                 const offset = pool.add32(funcIdx);
                 emit(makeAD(Op.CLOSURE_ALLOC, r(regMap, inst.dest), offset));
                 break;
@@ -743,7 +838,7 @@ export function selectInstructions(
 
             // === Coroutine ===
             case 'coro_alloc': {
-                const funcIdx = funcNameToIndex.get(inst.funcName) ?? 0xFFFF;
+                const funcIdx = requireFuncIndex(inst.funcName, 'coro_alloc');
                 const offset = pool.add32(funcIdx);
                 emit(makeAD(Op.CORO_ALLOC, r(regMap, inst.dest), offset));
                 break;
@@ -772,14 +867,14 @@ export function selectInstructions(
             // === Global Variables ===
             case 'global_load': {
                 const dest = r(regMap, inst.dest);
-                const globalIndex = globalIdToIndex.get(inst.globalId) ?? 0;
+                const globalIndex = requireGlobalIndex(inst.globalId);
                 const op = isPointer(inst.type) ? Op.MOV_PTR_RG : Op.MOV_RG;
                 emit(makeAD(op, dest, pool.add32(globalIndex)));
                 break;
             }
             case 'global_store': {
                 const src = r(regMap, inst.value);
-                const globalIndex = globalIdToIndex.get(inst.globalId) ?? 0;
+                const globalIndex = requireGlobalIndex(inst.globalId);
                 const op = isPointer(inst.type) ? Op.MOV_PTR_GR : Op.MOV_GR;
                 emit(makeAD(op, src, pool.add32(globalIndex)));
                 break;
@@ -793,7 +888,7 @@ export function selectInstructions(
                 emit(makeABC(narrowOp(inst.from, inst.to), r(regMap, inst.dest), r(regMap, inst.src), 0));
                 break;
             case 'cast':
-                emit(makeAD(castOp(inst.castKind), r(regMap, inst.dest), r(regMap, inst.src)));
+                emit(makeABC(castOp(inst.castKind), r(regMap, inst.dest), r(regMap, inst.src), 0));
                 break;
 
             // === FFI ===

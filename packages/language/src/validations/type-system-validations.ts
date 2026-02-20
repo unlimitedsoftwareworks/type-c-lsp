@@ -4004,6 +4004,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      * - Interface types (check if instance implements that interface)
      * - Variant types (check if value is any constructor of that variant)
      * - Variant constructor types (check if value is that specific constructor)
+     * - null (check if value is null)
      *
      * Examples:
      * ```tc
@@ -4042,19 +4043,25 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const isValidType = isClassType(resolvedDest) ||
                            isInterfaceType(resolvedDest) ||
                            isVariantType(resolvedDest) ||
-                           isVariantConstructorType(resolvedDest);
+                           isVariantConstructorType(resolvedDest) ||
+                           resolvedDest.kind === TypeKind.Null;
         
         if (!isValidType) {
             const errorCode = ErrorCode.TC_INSTANCE_CHECK_INVALID_RHS_TYPE;
             const typeKindName = this.getTypeKindName(resolvedDest);
             accept('error',
-                `Invalid type for 'is' operator: The 'is' operator requires a Class, Interface, Variant, or Variant Constructor type, but got ${typeKindName} '${resolvedDest.toString()}'. ` +
+                `Invalid type for 'is' operator: The 'is' operator requires a Class, Interface, Variant, Variant Constructor, or null type, but got ${typeKindName} '${resolvedDest.toString()}'. ` +
                 `Runtime type checking is only supported for these reference types.`,
                 {
                     node: node.destType,
                     code: errorCode
                 }
             );
+            return;
+        }
+
+        // `x is null` is a direct null-check and is valid regardless of cast relationship.
+        if (resolvedDest.kind === TypeKind.Null) {
             return;
         }
         

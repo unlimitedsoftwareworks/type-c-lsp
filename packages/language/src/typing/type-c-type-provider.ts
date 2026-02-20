@@ -39,6 +39,7 @@ import {
     isMetaVariantType,
     isNamespaceType,
     isNeverType,
+    isNumericType,
     isNullableType,
     isPrototypeType,
     isReferenceType,
@@ -2649,8 +2650,27 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
-        // Arithmetic operators - use left operand's type (simplified)
-        // In a full implementation, this would have proper type promotion rules
+        // Primitive fallback for '+' supports string concatenation.
+        if (node.op === '+') {
+            const leftIsString = isStringType(left) || isStringLiteralType(left) || isStringEnumType(left);
+            const rightIsString = isStringType(right) || isStringLiteralType(right) || isStringEnumType(right);
+            if (leftIsString || rightIsString) {
+                return this.typeFactory.createStringType(node);
+            }
+        }
+
+        // Arithmetic operators use common numeric type inference.
+        if (['+', '-', '*', '/', '%'].includes(node.op)) {
+            const resolvedLeft = this.typeUtils.resolveIfReference(left);
+            const resolvedRight = this.typeUtils.resolveIfReference(right);
+            if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
+                const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
+                if (!isErrorType(commonNumeric)) {
+                    return commonNumeric;
+                }
+            }
+        }
+
         return left;
     }
 
@@ -3561,9 +3581,26 @@ export class TypeCTypeProvider {
                 }
             }
 
+            // If inference produced an ErrorType substitution, fail fast and avoid
+            // registering invalid monomorphization entries.
+            if (substitutions) {
+                const firstErrorSubstitution = Array.from(substitutions.entries())
+                    .find(([, type]) => isErrorType(type));
+                if (firstErrorSubstitution) {
+                    const [genericName, candidateType] = firstErrorSubstitution;
+                    const errorType = isErrorType(candidateType) ? candidateType : undefined;
+                    return this.typeFactory.createErrorType(
+                        errorType?.message || `Cannot infer type argument for generic parameter '${genericName}'`,
+                        undefined,
+                        node
+                    );
+                }
+            }
+
             // MONOMORPHIZATION: Register method or function instantiation
             // IMPORTANT: Skip during method inference to avoid cyclic reference errors
             const isInMethodInferenceContext = this.inferringMethods.size > 0 || this.inferringImplMethods.size > 0;
+            const hasErrorTypeArgs = (types: readonly TypeDescription[]): boolean => types.some(t => isErrorType(t));
             
             // Handle method calls on generic class instances
             if (ast.isMemberAccess(node.expr) && !isInMethodInferenceContext) {
@@ -3596,7 +3633,7 @@ export class TypeCTypeProvider {
                 }
                 
                 // Register if we have a generic class instantiation
-                if (classDeclaration && classGenericArgs.length > 0) {
+                if (classDeclaration && classGenericArgs.length > 0 && !hasErrorTypeArgs(classGenericArgs)) {
                     // Register the class instantiation
                     const classKey = this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
                         classDeclaration,
@@ -3620,11 +3657,13 @@ export class TypeCTypeProvider {
                         const methodTypeArgs = (substitutions && substitutions.size > 0)
                             ? Array.from(substitutions.values())
                             : [];
-                        this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
-                            classKey,
-                            methodHeader,
-                            methodTypeArgs
-                        );
+                        if (!hasErrorTypeArgs(methodTypeArgs)) {
+                            this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
+                                classKey,
+                                methodHeader,
+                                methodTypeArgs
+                            );
+                        }
                     }
                 }
 
@@ -3643,12 +3682,14 @@ export class TypeCTypeProvider {
                     if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
                         const classKey = classDeclaration.name;
                         const methodTypeArgs = Array.from(substitutions.values());
-                        this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
-                            classKey,
-                            methodHeader,
-                            methodTypeArgs,
-                            classDeclaration
-                        );
+                        if (!hasErrorTypeArgs(methodTypeArgs)) {
+                            this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
+                                classKey,
+                                methodHeader,
+                                methodTypeArgs,
+                                classDeclaration
+                            );
+                        }
                     }
                 }
             }
@@ -3659,10 +3700,12 @@ export class TypeCTypeProvider {
                     const funcRef = node.expr.reference?.ref;
                     if (funcRef && ast.isFunctionDeclaration(funcRef) && funcRef.genericParameters && funcRef.genericParameters.length > 0) {
                         const typeArgs = Array.from(substitutions.values());
-                        this.services.typing.MonomorphizationRegistry.registerFunctionInstantiation(
-                            funcRef,
-                            typeArgs
-                        );
+                        if (!hasErrorTypeArgs(typeArgs)) {
+                            this.services.typing.MonomorphizationRegistry.registerFunctionInstantiation(
+                                funcRef,
+                                typeArgs
+                            );
+                        }
                     }
                 }
             }

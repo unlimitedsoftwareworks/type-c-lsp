@@ -1,7 +1,11 @@
 from level1.numbers import l1Numbers
 from level1.strings import l1Strings
+from level1.num.test import l1NumberCasting
+from level1.basics import basics
 
 fn l1() {
     l1Numbers()
     l1Strings()
+    l1NumberCasting()
+    basics()
 }

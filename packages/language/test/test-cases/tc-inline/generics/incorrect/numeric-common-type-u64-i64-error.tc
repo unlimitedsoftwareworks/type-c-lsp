@@ -1,0 +1,11 @@
+fn pick<T>(left: T, right: T) -> T {
+    return right
+}
+
+fn test_u64_i64_no_common_type() {
+    let v_u64: u64 = 4
+    let v_i64: i64 = 8
+
+    /// @Error: Cannot infer common type
+    pick(v_u64, v_i64)
+}

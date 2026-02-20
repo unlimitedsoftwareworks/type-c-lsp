@@ -1,0 +1,23 @@
+type Box = class {
+    let value: u32
+
+    fn init(value: u32) {
+        this.value = value
+    }
+}
+
+fn test_nullable(value: Box?) -> bool {
+    if value is null {
+        return true
+    }
+
+    return !(value is null)
+}
+
+fn test_non_nullable(value: Box) -> bool {
+    if value is null {
+        return false
+    }
+
+    return true
+}

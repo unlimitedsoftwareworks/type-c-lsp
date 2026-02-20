@@ -11,7 +11,17 @@
  */
 
 import * as ast from '../generated/ast.js';
-import { TypeDescription } from './type-c-types.js';
+import {
+    isArrayType,
+    isErrorType,
+    isFunctionType,
+    isJoinType,
+    isNullableType,
+    isReferenceType,
+    isTupleType,
+    isUnionType,
+    TypeDescription
+} from './type-c-types.js';
 
 /**
  * Represents a concrete instantiation of a generic class.
@@ -115,6 +125,11 @@ export class MonomorphizationRegistry {
             return decl.name;
         }
 
+        // Error types are invalid monomorphization keys; skip registration.
+        if (typeArgs.some(arg => this.containsErrorType(arg))) {
+            return decl.name;
+        }
+
         const key = this.makeClassKey(decl, typeArgs);
         
         if (!this.classes.has(key)) {
@@ -177,6 +192,10 @@ export class MonomorphizationRegistry {
         const declaration = classInst?.declaration ?? classDeclaration;
         if (!declaration) {
             throw new Error(`Cannot register method instantiation: class instantiation not found for key '${classKey}' and no classDeclaration provided`);
+        }
+
+        if (methodTypeArgs.some(arg => this.containsErrorType(arg))) {
+            return `${classKey}::${methodDecl.names[0]}`;
         }
 
         const key = this.makeMethodKey(classKey, methodDecl, methodTypeArgs);
@@ -242,6 +261,10 @@ export class MonomorphizationRegistry {
         // Validate that this is actually a generic function
         if (!decl.genericParameters || decl.genericParameters.length === 0) {
             // Not a generic function - no need to register
+            return decl.name;
+        }
+
+        if (typeArgs.some(arg => this.containsErrorType(arg))) {
             return decl.name;
         }
 
@@ -374,6 +397,34 @@ export class MonomorphizationRegistry {
         // For now, use toString() - it should provide consistent representation
         // Could enhance with additional normalization if needed (e.g., sorting fields in structs)
         return type.toString();
+    }
+
+    /**
+     * Detect ErrorType anywhere inside a potentially wrapped type.
+     * Generic arguments can carry nested error sentinels (e.g. Result<error, T>).
+     */
+    private containsErrorType(type: TypeDescription, visited: Set<TypeDescription> = new Set()): boolean {
+        if (visited.has(type)) return false;
+        visited.add(type);
+
+        if (isErrorType(type)) return true;
+        if (isArrayType(type)) return this.containsErrorType(type.elementType, visited);
+        if (isNullableType(type)) return this.containsErrorType(type.baseType, visited);
+        if (isUnionType(type) || isJoinType(type)) {
+            return type.types.some(t => this.containsErrorType(t, visited));
+        }
+        if (isTupleType(type)) {
+            return type.elementTypes.some(t => this.containsErrorType(t, visited));
+        }
+        if (isReferenceType(type)) {
+            return type.genericArgs.some(t => this.containsErrorType(t, visited));
+        }
+        if (isFunctionType(type)) {
+            return type.parameters.some(p => this.containsErrorType(p.type, visited))
+                || this.containsErrorType(type.returnType, visited);
+        }
+
+        return false;
     }
 
     /**

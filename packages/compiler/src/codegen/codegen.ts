@@ -113,7 +113,8 @@ function compileFunction(
         funcNameToIndex,
         classIdToIndex,
         structIdToIndex,
-        globalIdToIndex
+        globalIdToIndex,
+        fn.name
     );
 
     // Phase 4: Label resolution
@@ -135,6 +136,77 @@ function compileFunction(
     };
 }
 
+function collectReachableCode(program: IRProgram): {
+    readonly functions: IRFunction[];
+    readonly classes: IRProgram['classShapes'];
+} {
+    const functionByName = new Map<string, IRFunction>();
+    for (const fn of program.functions) {
+        functionByName.set(fn.name, fn);
+    }
+
+    const classById = new Map<string, IRProgram['classShapes'][number]>();
+    for (const shape of program.classShapes) {
+        classById.set(shape.id, shape);
+    }
+
+    const reachableFunctionNames = new Set<string>();
+    const reachableClassIds = new Set<string>();
+    const functionQueue: string[] = [];
+    const classQueue: string[] = [];
+
+    const enqueueFunction = (name: string): void => {
+        if (!reachableFunctionNames.has(name)) {
+            reachableFunctionNames.add(name);
+            functionQueue.push(name);
+        }
+    };
+
+    const enqueueClass = (id: string): void => {
+        if (!reachableClassIds.has(id)) {
+            reachableClassIds.add(id);
+            classQueue.push(id);
+        }
+    };
+
+    enqueueFunction(program.entryFunction);
+
+    while (functionQueue.length > 0 || classQueue.length > 0) {
+        while (functionQueue.length > 0) {
+            const functionName = functionQueue.pop()!;
+            const fn = functionByName.get(functionName);
+            if (!fn) {
+                continue;
+            }
+
+            for (const inst of fn.instructions) {
+                if (inst.kind === 'call') {
+                    enqueueFunction(inst.func);
+                } else if (inst.kind === 'closure_alloc' || inst.kind === 'coro_alloc') {
+                    enqueueFunction(inst.funcName);
+                } else if (inst.kind === 'class_alloc') {
+                    enqueueClass(inst.typeId);
+                }
+            }
+        }
+
+        while (classQueue.length > 0) {
+            const classId = classQueue.pop()!;
+            const shape = classById.get(classId);
+            if (!shape) {
+                continue;
+            }
+            for (const method of shape.methods) {
+                enqueueFunction(method.funcName);
+            }
+        }
+    }
+
+    const functions = program.functions.filter(fn => reachableFunctionNames.has(fn.name));
+    const classes = program.classShapes.filter(shape => reachableClassIds.has(shape.id));
+    return { functions, classes };
+}
+
 // === Program-Level Compilation ===
 
 export function generateBytecode(program: IRProgram): Uint8Array {
@@ -144,10 +216,12 @@ export function generateBytecode(program: IRProgram): Uint8Array {
     // Phase 0b: Method coloring (must run before per-function compilation)
     applyMethodColoring(program);
 
+    const reachable = collectReachableCode(program);
+
     // Build string pool early — needed by instruction selector for FFI library names
     const strings = [...program.stringConstants];
     // Collect FFI library names from ffi_register instructions
-    for (const fn of program.functions) {
+    for (const fn of reachable.functions) {
         for (const inst of fn.instructions) {
             if (inst.kind === 'ffi_register' && !strings.includes(inst.libName)) {
                 strings.push(inst.libName);
@@ -155,7 +229,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         }
     }
     // Include function names
-    for (const fn of program.functions) {
+    for (const fn of reachable.functions) {
         if (!strings.includes(fn.name)) {
             strings.push(fn.name);
         }
@@ -163,14 +237,22 @@ export function generateBytecode(program: IRProgram): Uint8Array {
 
     // Build function name → index map
     const funcNameToIndex = new Map<string, number>();
-    for (let i = 0; i < program.functions.length; i++) {
-        funcNameToIndex.set(program.functions[i].name, i);
+    for (let i = 0; i < reachable.functions.length; i++) {
+        funcNameToIndex.set(reachable.functions[i].name, i);
     }
+
+    const requireFunctionIndex = (name: string, context: string): number => {
+        const idx = funcNameToIndex.get(name);
+        if (idx === undefined) {
+            throw new Error(`Unresolved function target '${name}' while generating ${context}`);
+        }
+        return idx;
+    };
 
     // Build shape id → index maps for CLASS_ALLOC / STRUCT_ALLOC resolution
     const classIdToIndex = new Map<string, number>();
-    for (let i = 0; i < program.classShapes.length; i++) {
-        classIdToIndex.set(program.classShapes[i].id, i);
+    for (let i = 0; i < reachable.classes.length; i++) {
+        classIdToIndex.set(reachable.classes[i].id, i);
     }
     const structIdToIndex = new Map<string, number>();
     for (let i = 0; i < program.structShapes.length; i++) {
@@ -183,7 +265,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
 
     // Compile all functions (pass string pool for FFI name resolution)
     const compiledFunctions: CompiledFunction[] = [];
-    for (const fn of program.functions) {
+    for (const fn of reachable.functions) {
         compiledFunctions.push(compileFunction(fn, strings, funcNameToIndex, classIdToIndex, structIdToIndex, globalIdToIndex));
     }
 
@@ -199,7 +281,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
     }));
 
     // Map class shapes
-    const classes = program.classShapes.map(c => ({
+    const classes = reachable.classes.map(c => ({
         uid: c.uid,
         fields: c.fields.map(f => ({
             localFieldId: f.localFieldId,
@@ -207,12 +289,12 @@ export function generateBytecode(program: IRProgram): Uint8Array {
         })),
         methods: c.methods.map(m => ({
             methodId: m.methodId,
-            funcIndex: funcNameToIndex.get(m.funcName) ?? 0xFFFF,
+            funcIndex: requireFunctionIndex(m.funcName, `class shape '${c.id}' method '${m.name}'`),
         })),
     }));
 
     // Find entry function index
-    const entryFuncIndex = funcNameToIndex.get(program.entryFunction) ?? 0;
+    const entryFuncIndex = requireFunctionIndex(program.entryFunction, 'entry point');
 
     // Phase 5: Binary encoding
     const compiled: CompiledProgram = {

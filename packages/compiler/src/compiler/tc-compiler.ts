@@ -183,6 +183,7 @@ export class IRGenerator {
 
     /** Maps class TypeDeclaration node → IR class name (for direct method dispatch) */
     private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
+    private readonly verboseIR = process.env.TYPEC_VERBOSE_IR === '1';
 
     constructor(services: TypeCServices) {
         this.program = new IRProgram();
@@ -191,6 +192,18 @@ export class IRGenerator {
         this.monoMorph = services.typing.MonomorphizationRegistry;
         this.typeUtils = services.typing.TypeUtils;
         this.callableRegistry = new CallableRegistry(this.monoMorph);
+    }
+
+    private debugIR(message: string): void {
+        if (this.verboseIR) {
+            console.log(message);
+        }
+    }
+
+    private debugIRFunction(func: IRFunction): void {
+        if (this.verboseIR) {
+            console.log(serializeFunction(func));
+        }
     }
 
     // ============================================================================
@@ -1106,7 +1119,7 @@ export class IRGenerator {
             ? this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions))
             : classDecl.name;
 
-        console.log(`Generating class: ${className}`);
+        this.debugIR(`Generating class: ${className}`);
 
         // Record class name for direct dispatch at call sites
         this.classNodeToIRName.set(classDecl, className);
@@ -1208,7 +1221,7 @@ export class IRGenerator {
                 classDecl
             );
 
-            console.log(`  Generating generic method instantiation: ${funcName}`);
+            this.debugIR(`  Generating generic method instantiation: ${funcName}`);
 
             this.pushSubstitutions(substitutions);
             try {
@@ -1281,7 +1294,7 @@ export class IRGenerator {
             methodHeader
         );
 
-        console.log(`  Generating method: ${fullMethodName}`);
+        this.debugIR(`  Generating method: ${fullMethodName}`);
 
         // Build params: implicit 'this' + user params
         const params: FunctionParam[] = [
@@ -1342,7 +1355,7 @@ export class IRGenerator {
             lirFunc.ret();
         }
 
-        console.log(serializeFunction(lirFunc));
+        this.debugIRFunction(lirFunc);
 
         // Restore context
         this.context.currentFunction = prevFunction;
@@ -1423,7 +1436,7 @@ export class IRGenerator {
             lirFunc.ret();
         }
 
-        console.log(serializeFunction(lirFunc));
+        this.debugIRFunction(lirFunc);
 
         // Restore context
         this.context.currentFunction = prevFunction;
@@ -1544,7 +1557,7 @@ export class IRGenerator {
             lirFunc.ret();
         }
 
-        console.log(serializeFunction(lirFunc));
+        this.debugIRFunction(lirFunc);
 
         // Restore context
         this.context.currentFunction = prevFunction;

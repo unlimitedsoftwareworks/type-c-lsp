@@ -7,7 +7,7 @@ import * as url from 'node:url';
 import { createTypeCServices } from 'type-c-language';
 import { buildWorkspace } from './compiler/module-loader.js';
 import { IRGenerator } from './compiler/tc-compiler.js';
-import { serializeFunction } from './ir/serializer.js';
+import { serializeProgram } from './ir/serializer.js';
 import { generateBytecode } from './codegen/index.js';
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     const services = createTypeCServices(NodeFileSystem).TypeC;
@@ -27,14 +27,20 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
 
     let generator = new IRGenerator(services);
     const irProgram = generator.generate(documents);
-    console.log(serializeFunction(generator.globalFunc));
 
     // Code generation: IR → Type-V bytecode
     if (irProgram) {
         try {
-            const binary = generateBytecode(irProgram);
             const outPath = opts.output
                 ?? path.join(opts.destination ?? path.dirname(fileName), 'output.tvbc');
+            const outPathParsed = path.parse(outPath);
+            const irPath = path.join(outPathParsed.dir, `${outPathParsed.name}.ir`);
+
+            // Always emit textual IR next to the bytecode output for easy debugging/grep.
+            await fs.writeFile(irPath, serializeProgram(irProgram));
+            console.log(chalk.green(`IR written to ${irPath}`));
+
+            const binary = generateBytecode(irProgram);
             await fs.writeFile(outPath, binary);
             console.log(chalk.green(`Bytecode written to ${outPath} (${binary.length} bytes)`));
         } catch (e) {

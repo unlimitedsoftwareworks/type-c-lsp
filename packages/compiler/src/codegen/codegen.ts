@@ -319,6 +319,16 @@ export function generateBytecode(program: IRProgram): Uint8Array {
                 }
             }
         }
+        // Build field pointer bitmap: 4 × u64 (256 bits)
+        const ptrBitmap: bigint[] = [0n, 0n, 0n, 0n];
+        for (const f of c.fields) {
+            if (f.type.tag === 'ptr') {
+                const wordIdx = Math.floor(f.localFieldId / 64);
+                const bitIdx = f.localFieldId % 64;
+                ptrBitmap[wordIdx] |= (1n << BigInt(bitIdx));
+            }
+        }
+
         return {
             uid: c.uid,
             fields: c.fields.map(f => ({
@@ -330,6 +340,7 @@ export function generateBytecode(program: IRProgram): Uint8Array {
                 funcIndex: requireFunctionIndex(m.funcName, `class shape '${c.id}' method '${m.name}'`),
             })),
             methodNameBitmap: bitmap,
+            ptrBitmap,
         };
     });
 

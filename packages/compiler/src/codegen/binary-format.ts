@@ -54,6 +54,7 @@
  *     For each bitmap word:
  *       lo:             u32  (lower 32 bits)
  *       hi:             u32  (upper 32 bits)
+ *     ptrBitmap:      4 × u64  (field pointer bitmap, as 8 × u32 lo/hi pairs)
  *
  * [Functions]
  *   For each function:
@@ -146,6 +147,7 @@ export interface CompiledProgram {
         fields: { localFieldId: number; type: IRType }[];
         methods: { methodId: number; funcIndex: number }[];
         methodNameBitmap: bigint[];
+        ptrBitmap: bigint[];  // 4 × u64: field pointer bitmap (bit i set if field i is a pointer)
     }[];
     readonly functions: CompiledFunction[];
     readonly entryFuncIndex: number;
@@ -277,6 +279,12 @@ export function encodeBinary(program: CompiledProgram): Uint8Array {
         w.writeU16(bmWords);
         for (let bi = 0; bi < bmWords; bi++) {
             const val = c.methodNameBitmap[bi];
+            w.writeU32(Number(val & 0xFFFFFFFFn));
+            w.writeU32(Number((val >> 32n) & 0xFFFFFFFFn));
+        }
+        // Field pointer bitmap: 4 × u64 (256 bits, one per possible field)
+        for (let pi = 0; pi < 4; pi++) {
+            const val = c.ptrBitmap[pi];
             w.writeU32(Number(val & 0xFFFFFFFFn));
             w.writeU32(Number((val >> 32n) & 0xFFFFFFFFn));
         }

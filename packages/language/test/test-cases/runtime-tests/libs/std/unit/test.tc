@@ -1,4 +1,5 @@
 from std.io import println
+from std.term.color import green, red, cyan, bold, dim
 
 type AssertionResult = variant {
     Ok(),
@@ -63,21 +64,30 @@ type TestUnit = class {
     }
 
     fn report() {
-        let failed = false
-        let failedCount: u64 = 0
+        this.reportFailures()
+    }
 
+    fn countFailedAssertions() -> u64 {
+        let failedCount: u64 = 0
+        for let i: u64 = 0; i < this.results.length; i += 1 {
+            if this.results[i] is AssertionResult.Failed {
+                failedCount += 1
+            }
+        }
+        return failedCount
+    }
+
+    fn countPassedAssertions() -> u64 {
+        return this.results.length - this.countFailedAssertions()
+    }
+
+    fn reportFailures() {
         for let i: u64 = 0; i < this.results.length; i += 1 {
             if this.results[i] is AssertionResult.Failed {
                 let failedResult = this.results[i] as! AssertionResult.Failed
-                println("❗ Test "+this.name+", Assertion "+i+": "+" failed: "+failedResult.message)
+                println(red("   -> Assertion " + i + ": " + failedResult.message))
             }
         }
-        
-        let successCount: u64 = this.results.length - failedCount
-        if failed {
-            println("Results: "+successCount+"/"+this.results.length)
-        }
-
     }
 
     fn getState() -> UnitState {
@@ -216,40 +226,57 @@ type UnitSet = class {
     }
 
     fn report() {
-        let failed = false
-        let failedCount: u64 = 0
-        println("Summary for "+this.name+":")
+        let passedUnits: u64 = 0
+        let failedUnits: u64 = 0
+        let passedAssertions: u64 = 0
+        let failedAssertions: u64 = 0
+
+        println("")
+        println(bold(cyan(" RUN ")) + " " + bold(this.name))
+        println("")
+
         for let i: u64 = 0; i < this.units.length; i += 1 {
+            let failedForUnit = this.units[i].countFailedAssertions()
+            let passedForUnit = this.units[i].countPassedAssertions()
+            let totalForUnit = this.units[i].results.length
+
+            failedAssertions += failedForUnit
+            passedAssertions += passedForUnit
+
             if this.units[i].getState() == UnitState.Failed {
-                println("Unit "+this.units[i].name+" 🚨")
+                failedUnits += 1
+                println(red(" × " + this.units[i].name + " (" + totalForUnit + " assertions)"))
+                this.units[i].reportFailures()
+                println("")
             }
             else {
-                println("Unit "+this.units[i].name+" ✅ | " + this.units[i].results.length + " assertions")
+                passedUnits += 1
+                println(green(" ✓ " + this.units[i].name + " (" + totalForUnit + " assertions)"))
             }
-            println("-----------------------------------------------")
         }
+
+        println("")
+        let passedFiles: u64 = if failedUnits == 0 => 1 else 0
+        let failedFiles: u64 = if failedUnits == 0 => 0 else 1
+        println(dim(" Test Files ") + " " + green("" + passedFiles + " passed") + " | " + red("" + failedFiles + " failed") + dim(" (1)"))
+        println(dim("      Tests ") + " " + green("" + passedUnits + " passed") + " | " + red("" + failedUnits + " failed") + dim(" (" + this.units.length + ")"))
+        println(dim(" Assertions ") + " " + green("" + passedAssertions + " passed") + " | " + red("" + failedAssertions + " failed") + dim(" (" + (passedAssertions + failedAssertions) + ")"))
     }
 
     fn run() -> u32 {
         let failed = false
-        println("Running "+this.name+"...")
         for let i: u64 = 0; i < this.units.length; i += 1 {
             this.units[i].run()
             failed = failed || this.units[i].check()
         }
 
         this.report()
-
-        println("Details:")
-        for let i: u64 = 0; i < this.units.length; i += 1 {
-            this.units[i].report()
-        }
-    
-
         if failed {
-            println("😭 "+this.name+" has failed..")
+            println("")
+            println(bold(red(" FAIL ")) + " " + bold(this.name))
         } else {
-            println("🙌 "+this.name+" has passed")
+            println("")
+            println(bold(green(" PASS ")) + " " + bold(this.name))
         }
 
         if failed {

@@ -547,6 +547,24 @@ export class TypeCTypeProvider {
             }
         }
 
+        // Unary numeric expressions: propagate expected type to the operand.
+        // This allows contextual typing for negative literals:
+        //   assert_eq<i16>(x, -4)  // infer 4 as i16 from the call-site context
+        if (parent && ast.isUnaryExpression(parent) && parent.expr === node) {
+            if (parent.op === '-' || parent.op === '+') {
+                if (ast.isIntegerLiteral(node) || ast.isFloatingPointLiteral(node) || ast.isUnaryExpression(node)) {
+                    const unaryContainer = parent.$container;
+                    // Keep this contextual typing narrow to function-call arguments.
+                    // This fixes generic-call cases like assert_eq<i16>(x, -4) without
+                    // altering other contexts (e.g. foreach range-step validation).
+                    if (unaryContainer && ast.isFunctionCall(unaryContainer) && unaryContainer.args?.includes(parent)) {
+                        return this.getExpectedType(parent);
+                    }
+                    return undefined;
+                }
+            }
+        }
+
         // Array element in array construction: [expr1, expr2, ...]
         // If parent array has expected type T[], propagate T to elements
         if (parent && ast.isArrayElementExpression(parent)) {

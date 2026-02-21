@@ -1850,6 +1850,12 @@ export class TypeCTypeProvider {
             );
         }
 
+        // Handle enum case references (e.g., Response.Ok in match patterns)
+        if (ast.isEnumCase(declaration)) {
+            const enumType = AstUtils.getContainerOfType(declaration, ast.isEnumType);
+            return enumType ? this.getType(enumType) : this.typeFactory.createErrorType('Enum case outside enum', undefined, node);
+        }
+
         // Handle any other identifiable references that might be types
         const declType = declaration.$type || 'unknown';
         return this.typeFactory.createErrorType(

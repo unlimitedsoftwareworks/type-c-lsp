@@ -217,6 +217,9 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             if (ast.isTypeDeclaration(parent.field.ref) && ast.isVariantType(parent.field.ref.definition)) {
                 return this.createScopeForNodes(parent.field.ref.definition.constructors ?? []);
             }
+            if (ast.isTypeDeclaration(parent.field.ref) && ast.isEnumType(parent.field.ref.definition)) {
+                return this.createScopeForNodes(parent.field.ref.definition.cases ?? []);
+            }
             return this.createScopeForNodes(scopeUtils.getDeclarationsFromContainer(parent.field.ref));
         }
 

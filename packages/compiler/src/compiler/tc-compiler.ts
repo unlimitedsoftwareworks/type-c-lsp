@@ -57,6 +57,7 @@ import {
     isCoroutineType,
     isStringType,
     isStringLiteralType,
+    isEnumType,
     getMinArity
 } from 'type-c-language/types';
 import type {
@@ -4138,10 +4139,156 @@ export class IRGenerator {
                 const checkReg = this.tmp();
                 f.interfaceIsClass(checkReg, subject.register, classId);
                 f.br(checkReg, matchLabel, failLabel);
+            } else if (isEnumType(patternTd)) {
+                // Enum case pattern: compare subject u32 value with expected case index
+                const enumCaseIndex = this.resolveEnumCaseIndex(pattern.type);
+                if (enumCaseIndex >= 0) {
+                    const expectedReg = this.tmp();
+                    f.constInt(expectedReg, enumCaseIndex, 'u32');
+                    const cmpReg = this.tmp();
+                    f.cmpEq(cmpReg, subject.register, expectedReg, 'u32');
+                    f.br(cmpReg, matchLabel, failLabel);
+                } else {
+                    // Couldn't resolve case index, assume match
+                    f.jmp(matchLabel);
+                }
+            } else if (isInterfaceType(patternTd) || isJoinType(patternTd)) {
+                // Interface or join type pattern: check conformance (like an `is` check)
+                // Navigate to MatchStatement/MatchExpression to get the subject type
+                const matchNode = pattern.$container?.$container;
+                let subjectTd: TypeDescription | undefined;
+                if (matchNode && (ast.isMatchStatement(matchNode) || ast.isMatchExpression(matchNode))) {
+                    subjectTd = this.getType(matchNode.target);
+                }
+                const resolvedSubjectTd = subjectTd ? this.typeUtils.resolveIfReference(subjectTd) : undefined;
+
+                if (resolvedSubjectTd && isClassType(resolvedSubjectTd)) {
+                    // Subject is a class — compile-time assignability check
+                    const compatible = this.typeUtils.isAssignable(resolvedSubjectTd, patternTd).success;
+                    if (compatible) {
+                        f.jmp(matchLabel);
+                    } else {
+                        f.jmp(failLabel);
+                    }
+                } else if (resolvedSubjectTd && isInterfaceType(resolvedSubjectTd)) {
+                    // Subject is an interface — need runtime method checks
+                    // Collect all methods that need to be present
+                    const methodsToCheck = isJoinType(patternTd)
+                        ? patternTd.types.flatMap(t => isInterfaceType(t) ? t.methods : [])
+                        : (patternTd as any).methods ?? [];
+
+                    if (methodsToCheck.length === 0) {
+                        f.jmp(matchLabel);
+                    } else {
+                        for (const method of methodsToCheck) {
+                            for (const methodName of method.names) {
+                                const methodId = this.getOrCreateMethodNameId(methodName);
+                                const checkReg = this.tmp();
+                                f.interfaceHasMethod(checkReg, subject.register, methodId);
+                                const nextLabel = this.generateLabel('iface_pat_next');
+                                f.br(checkReg, nextLabel, failLabel);
+                                f.label(nextLabel);
+                            }
+                        }
+                        f.jmp(matchLabel);
+                    }
+                } else {
+                    // Unknown subject type — attempt runtime check via method presence
+                    f.jmp(matchLabel);
+                }
             } else {
                 // Other non-variant type patterns: assume match for now
                 f.jmp(matchLabel);
             }
+        } else if (ast.isArrayPattern(pattern)) {
+            // Array pattern: check length constraint, then check fixed element patterns
+            const numFixed = pattern.pattners?.length ?? 0;
+            const lenReg = this.tmp();
+            f.arrayLength(lenReg, subject.register);
+
+            const expectedLenReg = this.tmp();
+            f.constInt(expectedLenReg, numFixed, 'u64');
+            const cmpReg = this.tmp();
+
+            if (pattern.trailVariable) {
+                // Has ...rest: length must be >= numFixed
+                f.cmpGe(cmpReg, lenReg, expectedLenReg, 'u64');
+            } else {
+                // Exact match: length must == numFixed
+                f.cmpEq(cmpReg, lenReg, expectedLenReg, 'u64');
+            }
+            // If length check fails, jump to fail
+            const lenOkLabel = this.generateLabel('arr_pat_len_ok');
+            f.br(cmpReg, lenOkLabel, failLabel);
+            f.label(lenOkLabel);
+
+            // Check each fixed element pattern
+            const subjectTd = this.getType(pattern.$container.$container as AstNode);
+            const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+            const elementIRType = isArrayType(resolvedSubjectTd)
+                ? this.convertTypeDescriptionToIR(resolvedSubjectTd.elementType)
+                : scalarType('u64');
+
+            for (let i = 0; i < numFixed; i++) {
+                const elemPattern = pattern.pattners![i];
+                if (ast.isLiteralPattern(elemPattern)) {
+                    // Extract element and compare
+                    const idxReg = this.tmp();
+                    f.constInt(idxReg, i, 'u64');
+                    const elemReg = this.tmp();
+                    f.arrayGet(elemReg, subject.register, idxReg, elementIRType);
+                    const litResult = this.visitExpression(elemPattern as unknown as ast.Expression, undefined);
+                    const elemCmpReg = this.tmp();
+                    if (this.isStringIRType(elementIRType)) {
+                        f.cmpEqStr(elemCmpReg, elemReg, litResult.register);
+                    } else {
+                        const cmpType = this.extractCmpType(elementIRType, elemPattern as unknown as AstNode);
+                        f.cmpEq(elemCmpReg, elemReg, litResult.register, cmpType);
+                    }
+                    const nextElemLabel = this.generateLabel('arr_pat_elem_ok');
+                    f.br(elemCmpReg, nextElemLabel, failLabel);
+                    f.label(nextElemLabel);
+                }
+                // Variable/wildcard patterns always match — handled in bindings
+            }
+
+            f.jmp(matchLabel);
+        } else if (ast.isStructPattern(pattern)) {
+            // Struct pattern: check field values that are literal patterns
+            const numFields = pattern.fields?.length ?? 0;
+
+            const subjectTd = this.getType(pattern.$container.$container as AstNode);
+            const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+
+            for (let i = 0; i < numFields; i++) {
+                const field = pattern.fields[i];
+                if (ast.isLiteralPattern(field.pattern)) {
+                    // Get field type and value
+                    const fieldNameId = this.getOrCreateFieldNameId(field.name);
+                    const fieldTd = isStructType(resolvedSubjectTd)
+                        ? resolvedSubjectTd.fields.find((a: { name: string }) => a.name === field.name)
+                        : undefined;
+                    const fieldIRType = fieldTd
+                        ? this.convertTypeDescriptionToIR(fieldTd.type)
+                        : scalarType('u64');
+                    const fieldReg = this.tmp();
+                    f.structGet(fieldReg, subject.register, fieldNameId, fieldIRType);
+                    const litResult = this.visitExpression(field.pattern as unknown as ast.Expression, undefined);
+                    const cmpReg2 = this.tmp();
+                    if (this.isStringIRType(fieldIRType)) {
+                        f.cmpEqStr(cmpReg2, fieldReg, litResult.register);
+                    } else {
+                        const cmpType = this.extractCmpType(fieldIRType, field.pattern as unknown as AstNode);
+                        f.cmpEq(cmpReg2, fieldReg, litResult.register, cmpType);
+                    }
+                    const nextFieldLabel = this.generateLabel('struct_pat_field_ok');
+                    f.br(cmpReg2, nextFieldLabel, failLabel);
+                    f.label(nextFieldLabel);
+                }
+                // Variable/wildcard sub-patterns always match — handled in bindings
+            }
+
+            f.jmp(matchLabel);
         } else if (ast.isTypePattern(pattern)) {
             // Generic type pattern without type reference
             f.jmp(matchLabel);
@@ -4230,6 +4377,72 @@ export class IRGenerator {
                         this.emitPatternBindings(fieldSubject, nestedPattern, failLabel);
                     }
                 }
+            }
+        } else if (ast.isArrayPattern(pattern)) {
+            // Array pattern: bind element variables and rest/trail variable
+            const numFixed = pattern.pattners?.length ?? 0;
+
+            // Determine element type from the match subject's TypeDescription
+            const subjectTd = this.getType(pattern.$container.$container as AstNode);
+            const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+            const elementIRType = isArrayType(resolvedSubjectTd)
+                ? this.convertTypeDescriptionToIR(resolvedSubjectTd.elementType)
+                : scalarType('u64');
+
+            // Bind each fixed element pattern
+            for (let i = 0; i < numFixed; i++) {
+                const elemPattern = pattern.pattners![i];
+                if (ast.isVariablePattern(elemPattern)) {
+                    const idxReg = this.tmp();
+                    f.constInt(idxReg, i, 'u64');
+                    const elemReg = this.tmp();
+                    f.arrayGet(elemReg, subject.register, idxReg, elementIRType);
+                    const varReg = this.allocateVariable(elemPattern.name, elementIRType);
+                    f.mov(varReg, elemReg, elementIRType);
+                } else if (ast.isStructPattern(elemPattern)) {
+                    // Nested struct pattern inside array
+                    const idxReg = this.tmp();
+                    f.constInt(idxReg, i, 'u64');
+                    const elemReg = this.tmp();
+                    const elemPtrType = ptrType('struct');
+                    f.arrayGet(elemReg, subject.register, idxReg, elemPtrType);
+                    const elemSubject: ExpressionResult = { register: elemReg, type: elemPtrType };
+                    this.emitPatternBindings(elemSubject, elemPattern, failLabel);
+                }
+                // LiteralPattern/WildcardPattern: already checked in emitPatternCheck, no binding needed
+            }
+
+            // Bind trail variable (...rest) as a sub-array slice
+            if (pattern.trailVariable) {
+                const startReg = this.tmp();
+                f.constInt(startReg, numFixed, 'u64');
+                const lenReg = this.tmp();
+                f.arrayLength(lenReg, subject.register);
+                const sliceReg = this.tmp();
+                f.arraySlice(sliceReg, subject.register, startReg, lenReg);
+                const varReg = this.allocateVariable(pattern.trailVariable.name, ptrType('array'));
+                f.mov(varReg, sliceReg, ptrType('array'));
+            }
+        } else if (ast.isStructPattern(pattern)) {
+            // Struct pattern: bind field variables
+            const subjectTd = this.getType(pattern.$container.$container as AstNode);
+            const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+
+            for (const field of pattern.fields ?? []) {
+                if (ast.isVariablePattern(field.pattern)) {
+                    const fieldNameId = this.getOrCreateFieldNameId(field.name);
+                    const fieldTd = isStructType(resolvedSubjectTd)
+                        ? resolvedSubjectTd.fields.find((a: { name: string }) => a.name === field.name)
+                        : undefined;
+                    const fieldIRType = fieldTd
+                        ? this.convertTypeDescriptionToIR(fieldTd.type)
+                        : scalarType('u64');
+                    const fieldReg = this.tmp();
+                    f.structGet(fieldReg, subject.register, fieldNameId, fieldIRType);
+                    const varReg = this.allocateVariable((field.pattern as ast.VariablePattern).name, fieldIRType);
+                    f.mov(varReg, fieldReg, fieldIRType);
+                }
+                // LiteralPattern: already checked in emitPatternCheck
             }
         } else if (ast.isTypePattern(pattern) && pattern.params) {
             // NOTE: This branch is currently unreachable for variant patterns.
@@ -4970,6 +5183,23 @@ export class IRGenerator {
         const name = td.constructorName;
         const idx = baseVariant.constructors.findIndex(c => c.name === name);
         return idx >= 0 ? idx : 0;
+    }
+
+    /**
+     * Resolve the enum case index from a DataType reference (e.g., Response.Ok → 0).
+     * Navigates the ReferenceType chain to find the EnumCase AST node and returns its index.
+     */
+    private resolveEnumCaseIndex(dataType: ast.DataType): number {
+        // Navigate to the leaf ReferenceType which should have a field pointing to the EnumCase
+        if (ast.isReferenceType(dataType)) {
+            const fieldRef = dataType.field?.ref;
+            if (fieldRef && ast.isEnumCase(fieldRef)) {
+                const enumType = fieldRef.$container;
+                const idx = enumType.cases.indexOf(fieldRef);
+                return idx >= 0 ? idx : -1;
+            }
+        }
+        return -1;
     }
 
     private getVariantFieldType(td: VariantConstructorTypeDescription, fieldIndex: number): IRType {

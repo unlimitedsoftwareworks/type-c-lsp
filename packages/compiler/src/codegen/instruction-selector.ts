@@ -895,10 +895,17 @@ export function selectInstructions(
             case 'array_extend':
                 emit(makeABC(Op.ARRAY_EXTEND_R, r(regMap, inst.array), r(regMap, inst.newSize), 0));
                 break;
-            case 'array_slice':
-                emit(makeABC(Op.ARRAY_SLICE, r(regMap, inst.dest), r(regMap, inst.array), r(regMap, inst.start)));
-                // end is in base+1 register (start register + 1) per VM convention
+            case 'array_slice': {
+                const startReg = r(regMap, inst.start);
+                const endReg = r(regMap, inst.end);
+                // VM reads start from R[c] and end from R[c+1], so ensure they are consecutive
+                if (endReg !== startReg + 1) {
+                    // Emit a MOV to place end value at start+1
+                    emit(makeABC(Op.MOV_RR, startReg + 1, endReg, 0));
+                }
+                emit(makeABC(Op.ARRAY_SLICE, r(regMap, inst.dest), r(regMap, inst.array), startReg));
                 break;
+            }
 
             // === String ===
             case 'str_const': {

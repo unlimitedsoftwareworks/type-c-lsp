@@ -403,9 +403,15 @@ export function allocateRegisters(
 
     // Detect for_init instructions that need consecutive register groups (base, base+1, base+2)
     const consecutiveGroups = new Map<VReg, number>();
+    // Track array_slice pairs: start vreg -> end vreg (need start, start+1 consecutive)
+    const pairedRegs = new Map<VReg, VReg>();
     for (const inst of instructions) {
         if (inst.kind === 'for_init') {
             consecutiveGroups.set(inst.base, 3);
+        }
+        if (inst.kind === 'array_slice') {
+            consecutiveGroups.set(inst.start, 2);
+            pairedRegs.set(inst.start, inst.end);
         }
     }
 
@@ -478,19 +484,36 @@ export function allocateRegisters(
             if (found > maxRegUsed) maxRegUsed = found;
             insertActive(active, interval);
 
-            // Reserve ghost registers base+1 .. base+(groupSize-1) for the same lifetime
-            for (let g = 1; g < groupSize; g++) {
-                const ghostReg = found + g;
-                removeFromFreeRegs(freeRegs, ghostReg);
-                const ghostInterval: LiveInterval = {
-                    vreg: `${interval.vreg}__ghost_${g}` as VReg,
-                    type: { tag: 'scalar', scalar: 'i64' },
-                    start: interval.start,
-                    end: interval.end,
-                    physReg: ghostReg,
-                };
-                if (ghostReg > maxRegUsed) maxRegUsed = ghostReg;
-                insertActive(active, ghostInterval);
+            // Check if this is an array_slice paired register
+            const pairedVreg = pairedRegs.get(interval.vreg);
+            if (pairedVreg) {
+                // Map the end vreg to base+1 and mark its interval as allocated
+                const pairedReg = found + 1;
+                regMap.set(pairedVreg, pairedReg);
+                removeFromFreeRegs(freeRegs, pairedReg);
+                if (pairedReg > maxRegUsed) maxRegUsed = pairedReg;
+                // Find the end vreg's interval and mark it as assigned
+                const endInterval = intervals.find(iv => iv.vreg === pairedVreg);
+                if (endInterval) {
+                    endInterval.physReg = pairedReg;
+                    if (isPointer(endInterval.type)) pointerRegs.add(pairedReg);
+                    insertActive(active, endInterval);
+                }
+            } else {
+                // Reserve ghost registers base+1 .. base+(groupSize-1) for the same lifetime
+                for (let g = 1; g < groupSize; g++) {
+                    const ghostReg = found + g;
+                    removeFromFreeRegs(freeRegs, ghostReg);
+                    const ghostInterval: LiveInterval = {
+                        vreg: `${interval.vreg}__ghost_${g}` as VReg,
+                        type: { tag: 'scalar', scalar: 'i64' },
+                        start: interval.start,
+                        end: interval.end,
+                        physReg: ghostReg,
+                    };
+                    if (ghostReg > maxRegUsed) maxRegUsed = ghostReg;
+                    insertActive(active, ghostInterval);
+                }
             }
         } else {
             // Normal allocation path

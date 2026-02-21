@@ -3036,7 +3036,12 @@ export class IRGenerator {
         // Function reference (as value → closure_alloc)
         if (ast.isFunctionDeclaration(ref)) {
             const temp = this.tmp();
-            const funcName = this.C(ref);
+            let funcName = this.C(ref);
+            // Handle generic function references (e.g., test_case_8<u32>)
+            if (ref.genericParameters && ref.genericParameters.length > 0 && node.genericArgs && node.genericArgs.length > 0) {
+                const typeArgs = node.genericArgs.map(ga => this.getType(ga));
+                funcName = this.callableRegistry.getGenericFunctionName(ref, typeArgs);
+            }
             this.func().closureAlloc(temp, funcName);
             return { register: temp, type: ptrType('closure') };
         }

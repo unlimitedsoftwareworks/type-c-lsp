@@ -15,6 +15,7 @@ import {
     isArrayType,
     isErrorType,
     isFunctionType,
+    isGenericType,
     isJoinType,
     isNullableType,
     isReferenceType,
@@ -130,8 +131,14 @@ export class MonomorphizationRegistry {
             return decl.name;
         }
 
+        // Unresolved generic parameters (e.g. `new Array<U>()` inside a generic method)
+        // are not concrete instantiations — skip registration.
+        if (typeArgs.some(arg => this.containsGenericType(arg))) {
+            return decl.name;
+        }
+
         const key = this.makeClassKey(decl, typeArgs);
-        
+
         if (!this.classes.has(key)) {
             this.classes.set(key, {
                 declaration: decl,
@@ -139,7 +146,7 @@ export class MonomorphizationRegistry {
                 key
             });
         }
-        
+
         return key;
     }
 
@@ -191,10 +198,17 @@ export class MonomorphizationRegistry {
         const classInst = this.classes.get(classKey);
         const declaration = classInst?.declaration ?? classDeclaration;
         if (!declaration) {
-            throw new Error(`Cannot register method instantiation: class instantiation not found for key '${classKey}' and no classDeclaration provided`);
+            // Class instantiation was not registered (e.g. skipped because type args
+            // contained unresolved generics). Silently skip method registration too.
+            return `${classKey}::${methodDecl.names[0]}`;
         }
 
         if (methodTypeArgs.some(arg => this.containsErrorType(arg))) {
+            return `${classKey}::${methodDecl.names[0]}`;
+        }
+
+        // Unresolved generic parameters are not concrete — skip registration.
+        if (methodTypeArgs.some(arg => this.containsGenericType(arg))) {
             return `${classKey}::${methodDecl.names[0]}`;
         }
 
@@ -265,6 +279,11 @@ export class MonomorphizationRegistry {
         }
 
         if (typeArgs.some(arg => this.containsErrorType(arg))) {
+            return decl.name;
+        }
+
+        // Unresolved generic parameters are not concrete — skip registration.
+        if (typeArgs.some(arg => this.containsGenericType(arg))) {
             return decl.name;
         }
 
@@ -422,6 +441,35 @@ export class MonomorphizationRegistry {
         if (isFunctionType(type)) {
             return type.parameters.some(p => this.containsErrorType(p.type, visited))
                 || this.containsErrorType(type.returnType, visited);
+        }
+
+        return false;
+    }
+
+    /**
+     * Detect unresolved generic type parameters anywhere inside a type.
+     * E.g. `new Array<U>()` inside a generic method produces Array<U> which
+     * should NOT be registered as a concrete class instantiation.
+     */
+    private containsGenericType(type: TypeDescription, visited: Set<TypeDescription> = new Set()): boolean {
+        if (visited.has(type)) return false;
+        visited.add(type);
+
+        if (isGenericType(type)) return true;
+        if (isArrayType(type)) return this.containsGenericType(type.elementType, visited);
+        if (isNullableType(type)) return this.containsGenericType(type.baseType, visited);
+        if (isUnionType(type) || isJoinType(type)) {
+            return type.types.some(t => this.containsGenericType(t, visited));
+        }
+        if (isTupleType(type)) {
+            return type.elementTypes.some(t => this.containsGenericType(t, visited));
+        }
+        if (isReferenceType(type)) {
+            return type.genericArgs.some(t => this.containsGenericType(t, visited));
+        }
+        if (isFunctionType(type)) {
+            return type.parameters.some(p => this.containsGenericType(p.type, visited))
+                || this.containsGenericType(type.returnType, visited);
         }
 
         return false;

@@ -126,4 +126,6 @@ fn filter<T>(arr: T[], predicate: fn(a: T) -> bool) -> T[] {
 
 fn test15() {
     let evens: i32[] = filter([1, 2, 3, 4], fn(x: i32) = x % 2 == 0)
+    /// @Type(data): u32[]
+    let data = [1u32, 2]
 }

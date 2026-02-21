@@ -4076,7 +4076,7 @@ export class TypeCTypeProvider {
         }
 
         // Infer element types from all elements, handling spread expressions specially
-        const elementTypes = node.values.map(v => {
+        let elementTypes = node.values.map(v => {
             // Check if this is an array spread expression (...arr)
             if (ast.isArraySpreadExpression(v)) {
                 // Infer the type of the spread expression
@@ -4113,6 +4113,13 @@ export class TypeCTypeProvider {
             }
         }
 
+        // Literal glue: when there's no external contextual type, bare numeric literals
+        // (without explicit suffix) should adopt the type of explicitly-typed siblings.
+        // E.g., [1u32, 2] → the bare `2` glues to u32, so result is u32[] not i64[].
+        if (!expectedType) {
+            elementTypes = this.applyLiteralGlue(node, elementTypes);
+        }
+
         const commonType = this.typeUtils.getCommonType(elementTypes);
 
         // If getCommonType returns an error, return it directly instead of wrapping in array
@@ -4122,6 +4129,88 @@ export class TypeCTypeProvider {
         }
 
         return this.typeFactory.createArrayType(commonType, node);
+    }
+
+    /**
+     * Applies "literal glue" to array elements: bare numeric literals (no explicit suffix)
+     * adopt the type of explicitly-typed siblings in the same array literal.
+     *
+     * E.g., `[1u32, 2]` → the bare `2` glues to `u32`, producing `u32[]` instead of `i64[]`.
+     *
+     * Rules:
+     * - Only applies when there's no external contextual type annotation
+     * - Finds an "anchor" type from elements with explicit type suffixes
+     * - All anchors must agree on the same type
+     * - Bare integer literals glue to integer anchors, bare float literals glue to float anchors
+     * - Non-literal elements and suffixed literals are left unchanged
+     */
+    private applyLiteralGlue(node: ast.ArrayConstructionExpression, elementTypes: TypeDescription[]): TypeDescription[] {
+        if (!node.values || node.values.length <= 1) {
+            return elementTypes;
+        }
+
+        // Collect anchor types from explicitly-suffixed literals
+        let anchorType: TypeDescription | undefined;
+        let hasConflictingAnchors = false;
+
+        for (const v of node.values) {
+            if (ast.isArraySpreadExpression(v)) continue;
+
+            const expr = v.expr;
+            if (ast.isIntegerLiteral(expr)) {
+                const suffixMatch = expr.value.match(/([iu])(8|16|32|64)$/);
+                if (suffixMatch) {
+                    const suffixType = this.typeFactory.createIntegerTypeFromString(suffixMatch[0], expr);
+                    if (suffixType) {
+                        if (anchorType && !this.typeUtils.areTypesEqual(anchorType, suffixType).success) {
+                            hasConflictingAnchors = true;
+                            break;
+                        }
+                        anchorType = suffixType;
+                    }
+                }
+            } else if (ast.isFloatLiteral(expr)) {
+                // FloatLiteral (has 'f' suffix) → f32 is anchor
+                const f32Type = this.typeFactory.createF32Type(expr);
+                if (anchorType && !this.typeUtils.areTypesEqual(anchorType, f32Type).success) {
+                    hasConflictingAnchors = true;
+                    break;
+                }
+                anchorType = f32Type;
+            }
+        }
+
+        // If no anchor or conflicting anchors, fall back to default LUB
+        if (!anchorType || hasConflictingAnchors) {
+            return elementTypes;
+        }
+
+        // Re-infer bare literals using the anchor type as context
+        return node.values.map((v, i) => {
+            if (ast.isArraySpreadExpression(v)) return elementTypes[i];
+
+            const expr = v.expr;
+
+            // Check if this is a bare integer literal (no suffix)
+            if (ast.isIntegerLiteral(expr)) {
+                const hasSuffix = /([iu])(8|16|32|64)$/.test(expr.value);
+                if (!hasSuffix && this.isIntegerType(anchorType!)) {
+                    // Bare integer → glue to anchor type
+                    return anchorType!;
+                }
+            }
+
+            // Check if this is a bare float literal (DoubleLiteral, no 'f' suffix)
+            if (ast.isFloatingPointLiteral(expr) && !ast.isFloatLiteral(expr)) {
+                if (this.isFloatType(anchorType!)) {
+                    // Bare float → glue to anchor type
+                    return anchorType!;
+                }
+            }
+
+            // Not a bare literal or anchor type mismatch → keep original
+            return elementTypes[i];
+        });
     }
 
     private inferNamedStructConstruction(node: ast.NamedStructConstructionExpression): TypeDescription {

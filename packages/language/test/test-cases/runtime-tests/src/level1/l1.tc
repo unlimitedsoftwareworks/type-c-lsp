@@ -3,15 +3,25 @@ from level1.strings import l1Strings
 from level1.num.test import l1NumberCasting
 from level1.basics import basics
 from level1.test5 import test5
+from level1.test6 import test6
 from level1.test7 import test7
 from level1.test_is import testIs
+from level1.test8 import test8
 
 fn l1() {
-    l1Numbers()
-    l1Strings()
-    l1NumberCasting()
-    basics()
-    test5()
-    test7()
-    testIs()
+    let funcs = [
+        l1Numbers,
+        l1Strings,
+        l1NumberCasting,
+        basics,
+        test5,
+        test6,
+        test7,
+        testIs,
+        test8
+    ]
+
+    foreach f in funcs {
+        f()
+    }
 }

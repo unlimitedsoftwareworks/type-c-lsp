@@ -231,6 +231,45 @@ export class IRGenerator {
     private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
     private readonly verboseIR = process.env.TYPEC_VERBOSE_IR === '1';
 
+    /**
+     * Resolves the correct IR class name for a class type at a call site.
+     * For non-generic classes, returns the declaration name.
+     * For generic classes, finds the matching monomorphized instantiation by
+     * comparing the resolved type's attributes against registered instantiations.
+     */
+    private resolveClassIRName(
+        classDecl: ast.TypeDeclaration,
+        resolvedType: ClassTypeDescription
+    ): string {
+        // Non-generic class: use declaration name directly
+        if (!classDecl.genericParameters || classDecl.genericParameters.length === 0) {
+            return classDecl.name;
+        }
+
+        // Generic class: find the matching instantiation from the registry
+        const allInstantiations = this.monoMorph.getAllClassInstantiations();
+        const candidates = allInstantiations.filter(inst => inst.declaration === classDecl);
+
+        for (const candidate of candidates) {
+            // Build substitution map for this candidate
+            const subs = new Map<string, TypeDescription>();
+            classDecl.genericParameters.forEach((param, i) => {
+                if (i < candidate.typeArgs.length) {
+                    subs.set(param.name, candidate.typeArgs[i]);
+                }
+            });
+            // Reconstruct the class type using these substitutions and compare
+            const baseType = this.typeProvider.getType(classDecl);
+            const substituted = this.typeUtils.substituteGenerics(baseType, subs);
+            if (isClassType(substituted) && this.typeUtils.areTypesEqual(substituted, resolvedType).success) {
+                return this.monoMorph.mangleName(candidate.key);
+            }
+        }
+
+        // Fallback: use the classNodeToIRName map (last registered) or declaration name
+        return this.classNodeToIRName.get(classDecl) || classDecl.name;
+    }
+
     constructor(services: TypeCServices) {
         this.program = new IRProgram();
         this.context = this.createContext();
@@ -1227,8 +1266,13 @@ export class IRGenerator {
         classType: ast.ClassType
     ): void {
         const substitutions = this.getCurrentSubstitutions();
+        // Unmangled key (e.g. "Array<User<string>>") — used for monomorphization registry lookups
+        const classKey = substitutions.size > 0
+            ? this.makeClassKey(classDecl, substitutions)
+            : classDecl.name;
+        // Mangled name (e.g. "Array$User$string") — used for IR function names
         const className = substitutions.size > 0
-            ? this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions))
+            ? this.monoMorph.mangleName(classKey)
             : classDecl.name;
 
         this.debugIR(`Generating class: ${className}`);
@@ -1280,7 +1324,7 @@ export class IRGenerator {
         }
 
         // Generate monomorphized versions of generic methods
-        this.generateGenericMethodInstantiations(classDecl, className);
+        this.generateGenericMethodInstantiations(classDecl, className, classKey);
 
         // Generate methods from implementation blocks
         // Implementation methods are stored separately in classType.implementations
@@ -1291,18 +1335,24 @@ export class IRGenerator {
     /**
      * Generate monomorphized versions of generic methods in a class.
      * For each registered instantiation of a generic method, compiles a specialized version.
+     *
+     * @param classDecl The class declaration AST node
+     * @param className The mangled IR class name (e.g. "Array$User$string")
+     * @param registryClassKey The unmangled key used in the monomorphization registry
+     *                         (e.g. "Array<User<string>>"). If not provided, uses className.
      */
     private generateGenericMethodInstantiations(
         classDecl: ast.TypeDeclaration,
-        className: string
+        className: string,
+        registryClassKey?: string
     ): void {
-        const classKey = className;
+        const classKey = registryClassKey ?? className;
         const methodInstantiations = this.monoMorph.getMethodInstantiations(classKey);
 
         // Also check with the declaration name for non-generic classes
         // (the classKey in the registry uses the declaration name)
         let allInstantiations = methodInstantiations;
-        if (classDecl.name !== className) {
+        if (classDecl.name !== classKey) {
             const extraInstantiations = this.monoMorph.getMethodInstantiations(classDecl.name);
             allInstantiations = [...methodInstantiations, ...extraInstantiations];
         }
@@ -3247,7 +3297,7 @@ export class IRGenerator {
                     classNode = classNode.$container;
                 }
                 const className = classNode && ast.isTypeDeclaration(classNode)
-                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    ? this.resolveClassIRName(classNode, resolvedObjTd)
                     : undefined;
                 if (className) {
                     // Check if the method is generic and resolve type arguments
@@ -3769,8 +3819,8 @@ export class IRGenerator {
             }
         }
 
-        // Call init method if there are arguments (including expanded defaults)
-        if (argRegs.length > 0) {
+        // Call init method if the class has one (even with zero arguments)
+        if (initParams !== undefined) {
             // Convention: init method ID is 0
             f.callMethod([], temp, 0, argRegs, argTypes, []);
         }
@@ -4549,6 +4599,7 @@ export class IRGenerator {
         // Throw on null
         const errMsg = this.tmp();
         f.strConst(errMsg, "Null dereference");
+        this.program.addStringConstant("Null dereference");
         f.throw(errMsg);
 
         f.label(okLabel);
@@ -4739,6 +4790,7 @@ export class IRGenerator {
         const f = this.func();
         const errMsg = this.tmp();
         f.strConst(errMsg, "Unreachable code reached");
+        this.program.addStringConstant("Unreachable code reached");
         f.throw(errMsg);
         // Return void — should never actually be used
         const temp = this.tmp();

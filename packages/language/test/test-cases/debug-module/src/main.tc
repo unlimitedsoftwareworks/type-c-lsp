@@ -1,12 +1,12 @@
 from std.io import println
 
-type Addable = class {
-    let value: u32
-    fn init(value: u32 = 0u32) {
+type Addable<U || (U+U) -> U> = class {
+    let value: U
+    fn init(value: U) {
         this.value = value
     }
 
-    fn +(x: Addable) -> Addable = new Addable(this.value + x.value)
+    fn +(x: Addable) -> Addable = new Addable<U>(this.value + x.value)
 }
 
 fn main() {
@@ -24,7 +24,7 @@ fn main() {
      * }'.type-c(TCE120)
      */
     let v = new Addable(1)
-    let c3 = addObj(v, new Addable())
+    let c3 = addObj(new Addable(1), new Addable(200))
 
     println("Execution finished, sum = " + c3.value)
 }

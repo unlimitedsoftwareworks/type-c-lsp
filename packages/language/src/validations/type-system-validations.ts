@@ -3050,7 +3050,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         }
 
         // Check if the reference type requires generic arguments
-        // Similar to variant constructors, generic classes must have explicit generics in `new` expressions
+        // When no explicit generics are provided, attempt inference via the type provider
         if (ast.isReferenceType(node.instanceType)) {
             const ref = node.instanceType.field?.ref;
             if (ref && ast.isTypeDeclaration(ref)) {
@@ -3058,17 +3058,48 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 const providedGenericArgs = node.instanceType.genericArgs ?? [];
                 const providedGenericCount = providedGenericArgs.length;
 
-                // If the class is generic but no generic arguments provided, report error
                 if (expectedGenericCount > 0 && providedGenericCount === 0) {
-                    const errorCode = ErrorCode.TC_NEW_EXPRESSION_REQUIRES_GENERIC_ARGS;
-                    accept('error',
-                        `Generic class '${ref.name}' requires ${expectedGenericCount} generic argument(s) in 'new' expression. Example: new ${ref.name}<T>(...)`,
-                        {
+                    // Ask the type provider to infer generic args from constructor arguments
+                    const inferredExprType = this.typeProvider.getType(node);
+
+                    if (isErrorType(inferredExprType)) {
+                        // Inference produced an error (e.g., constraint violation)
+                        accept('error', inferredExprType.toString(), {
                             node: node.instanceType,
-                            code: errorCode
+                            code: ErrorCode.TC_NEW_EXPRESSION_REQUIRES_GENERIC_ARGS
+                        });
+                        return;
+                    }
+
+                    if (isReferenceType(inferredExprType) && inferredExprType.genericArgs.length > 0) {
+                        // Inference succeeded — resolve with inferred generics
+                        resolvedType = this.typeUtils.resolveIfReference(inferredExprType);
+
+                        // Validate operator constraints with the inferred substitutions
+                        if (ref.operatorConstraints?.length) {
+                            const genericParamNames = ref.genericParameters?.map(p => p.name) ?? [];
+                            const substitutions = new Map<string, TypeDescription>();
+                            genericParamNames.forEach((name, i) => {
+                                if (i < inferredExprType.genericArgs.length) {
+                                    substitutions.set(name, inferredExprType.genericArgs[i]);
+                                }
+                            });
+                            this.validateOperatorConstraintsForNewExpression(
+                                node, ref.operatorConstraints, substitutions, accept
+                            );
                         }
-                    );
-                    return;
+                    } else {
+                        // Inference couldn't determine types — report original error
+                        const errorCode = ErrorCode.TC_NEW_EXPRESSION_REQUIRES_GENERIC_ARGS;
+                        accept('error',
+                            `Generic class '${ref.name}' requires ${expectedGenericCount} generic argument(s) in 'new' expression. Example: new ${ref.name}<T>(...)`,
+                            {
+                                node: node.instanceType,
+                                code: errorCode
+                            }
+                        );
+                        return;
+                    }
                 }
             }
         }
@@ -4570,6 +4601,51 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
     }
 
     /**
+     * Validates operator constraints for a `new` expression with inferred generics.
+     * Similar to validateOperatorConstraintsAtCallSite but works with NewExpression nodes.
+     */
+    private validateOperatorConstraintsForNewExpression(
+        node: ast.NewExpression,
+        constraints: ast.OperatorConstraint[],
+        substitutions: Map<string, TypeDescription>,
+        accept: ValidationAcceptor
+    ): void {
+        for (const constraint of constraints) {
+            if (constraint.isBinary && constraint.leftType && constraint.rightType) {
+                let leftConcreteType = this.typeProvider.getType(constraint.leftType);
+                let rightConcreteType = this.typeProvider.getType(constraint.rightType);
+
+                leftConcreteType = this.typeUtils.substituteGenerics(leftConcreteType, substitutions);
+                rightConcreteType = this.typeUtils.substituteGenerics(rightConcreteType, substitutions);
+
+                if (!this.isBinaryOperatorValid(constraint.op, leftConcreteType, rightConcreteType)) {
+                    accept('error',
+                        `Operator constraint not satisfied: Type '${leftConcreteType.toString()}' does not support binary operator '${constraint.op}' with '${rightConcreteType.toString()}'`,
+                        {
+                            node,
+                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                        }
+                    );
+                }
+            } else if (!constraint.isBinary && constraint.operandType) {
+                let operandConcreteType = this.typeProvider.getType(constraint.operandType);
+
+                operandConcreteType = this.typeUtils.substituteGenerics(operandConcreteType, substitutions);
+
+                if (!this.isUnaryOperatorValid(constraint.op, operandConcreteType)) {
+                    accept('error',
+                        `Operator constraint not satisfied: Type '${operandConcreteType.toString()}' does not support unary operator '${constraint.op}'`,
+                        {
+                            node,
+                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
      * Checks if a binary operator is valid for the given concrete types.
      */
     private isBinaryOperatorValid(op: string, leftType: TypeDescription, rightType: TypeDescription): boolean {
@@ -4668,9 +4744,14 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         let current: AstNode | undefined = node;
         while (current) {
             if (ast.isFunctionDeclaration(current)) {
-                return current.operatorConstraints;
+                if (current.operatorConstraints && current.operatorConstraints.length > 0) {
+                    return current.operatorConstraints;
+                }
             } else if (ast.isClassMethod(current)) {
-                return current.method?.operatorConstraints;
+                const methodConstraints = current.method?.operatorConstraints;
+                if (methodConstraints && methodConstraints.length > 0) {
+                    return methodConstraints;
+                }
             } else if (ast.isTypeDeclaration(current)) {
                 return current.operatorConstraints;
             }

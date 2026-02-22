@@ -4568,6 +4568,90 @@ export class TypeCTypeProvider {
 
     private inferNewExpression(node: ast.NewExpression): TypeDescription {
         if (node.instanceType) {
+            // Attempt generic inference when the class is generic but no explicit generic args provided
+            if (ast.isReferenceType(node.instanceType)) {
+                const ref = node.instanceType.field?.ref;
+                if (ref && ast.isTypeDeclaration(ref)) {
+                    const astGenericParams = ref.genericParameters ?? [];
+                    const providedGenericArgs = node.instanceType.genericArgs ?? [];
+
+                    if (astGenericParams.length > 0 && providedGenericArgs.length === 0) {
+                        // Get the unsubstituted class type to find init methods
+                        const unsubstitutedType = this.getType(ref.definition);
+                        if (isClassType(unsubstitutedType)) {
+                            const initMethods = unsubstitutedType.methods.filter(m => m.names.includes('init'));
+                            const args = node.args || [];
+                            const argCount = args.length;
+
+                            // Filter init methods by arity
+                            const matchingArityMethods = initMethods.filter(m => {
+                                const minArity = getMinArity(m.parameters);
+                                return argCount >= minArity && argCount <= m.parameters.length;
+                            });
+
+                            if (matchingArityMethods.length > 0) {
+                                const argumentTypes = args.map(arg => this.inferExpression(arg));
+                                const genericParamNames = astGenericParams.map(p => p.name);
+
+                                // Get GenericTypeDescriptions for constraint validation
+                                const genericParamTypes = astGenericParams.map(p => this.getType(p)) as GenericTypeDescription[];
+
+                                for (const initMethod of matchingArityMethods) {
+                                    const parameterTypes = initMethod.parameters.map(p => p.type);
+
+                                    let substitutions = this.inferGenericsFromArguments(
+                                        genericParamNames,
+                                        parameterTypes,
+                                        argumentTypes
+                                    );
+
+                                    // Resolve remaining generics from operator constraints
+                                    if (ref.operatorConstraints?.length) {
+                                        this.resolveGenericsFromOperatorConstraints(
+                                            ref.operatorConstraints,
+                                            substitutions,
+                                            genericParamNames,
+                                            node
+                                        );
+                                    }
+
+                                    // If all inferred generics are `never`, inference failed — fall through
+                                    const allNever = Array.from(substitutions.values()).every(t => isNeverType(t));
+                                    if (allNever) {
+                                        break;
+                                    }
+
+                                    // Validate inferred types against generic parameter constraints
+                                    for (let i = 0; i < genericParamTypes.length; i++) {
+                                        const param = genericParamTypes[i];
+                                        const inferredType = substitutions.get(param.name);
+                                        if (inferredType && !isNeverType(inferredType)) {
+                                            const constraint = param.constraint
+                                                ? this.typeUtils.substituteGenerics(param.constraint, substitutions)
+                                                : param.constraint;
+                                            const constraintCheck = this.typeUtils.validateGenericConstraint(inferredType, constraint);
+                                            if (!constraintCheck.success) {
+                                                return this.typeFactory.createErrorType(
+                                                    constraintCheck.message || `Inferred type does not satisfy generic constraint`,
+                                                    undefined,
+                                                    node
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                    // Create a ReferenceType with the inferred generic args
+                                    const inferredGenericArgs = genericParamNames.map(
+                                        name => substitutions.get(name) ?? this.typeFactory.createNeverType()
+                                    );
+                                    return this.typeFactory.createReferenceType(ref, inferredGenericArgs, node);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             return this.getType(node.instanceType);
         }
 

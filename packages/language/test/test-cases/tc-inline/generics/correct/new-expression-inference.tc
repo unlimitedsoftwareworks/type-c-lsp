@@ -1,0 +1,79 @@
+// =============================================================================
+// Generic inference for `new` expressions
+// =============================================================================
+
+// 1. Simple single-param inference
+type Box<T> = class {
+    let value: T
+    fn init(value: T) {
+        this.value = value
+    }
+}
+
+// 2. Multi-param inference
+type Pair<A, B> = class {
+    let first: A
+    let second: B
+    fn init(first: A, second: B) {
+        this.first = first
+        this.second = second
+    }
+}
+
+// 3. Operator constraint inference
+type Addable<U || (U + U) -> U> = class {
+    let value: U
+    fn init(value: U) {
+        this.value = value
+    }
+}
+
+// 4. Class with multiple init methods
+type Point<T> = class {
+    let x: T
+    let y: T
+
+    fn init(x: T, y: T) {
+        this.x = x
+        this.y = y
+    }
+
+    fn init(value: T) {
+        this.x = value
+        this.y = value
+    }
+}
+
+fn main() {
+    // Simple single-param inference
+    /// @Type(b1): Box<u32>
+    let b1 = new Box(1u32)
+
+    /// @Type(b2): Box<string>
+    let b2 = new Box("hello")
+
+    /// @Type(b3): Box<f64>
+    let b3 = new Box(3.14)
+
+    // Multi-param inference
+    /// @Type(p1): Pair<u32, string>
+    let p1 = new Pair(1u32, "hello")
+
+    /// @Type(p2): Pair<i32, f64>
+    let p2 = new Pair(1i32, 2.0)
+
+    // Operator constraint inference
+    /// @Type(a1): Addable<u32>
+    let a1 = new Addable(1u32)
+
+    /// @Type(a2): Addable<f64>
+    let a2 = new Addable(3.14)
+
+    // Multiple init methods - 2-arg version
+    /// @Type(pt1): Point<i32>
+    let pt1 = new Point(1i32, 2i32)
+
+    // Multiple init methods - 1-arg version
+    /// @Type(pt2): Point<u32>
+    let pt2 = new Point(1u32)
+}

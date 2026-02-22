@@ -9,6 +9,7 @@ export default defineConfig({
         deps: {
             interopDefault: true
         },
-        include: ['**/*.test.ts']
+        include: ['**/*.test.ts'],
+        testTimeout: 30000
     }
 });

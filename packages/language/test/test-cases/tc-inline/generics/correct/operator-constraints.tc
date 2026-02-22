@@ -116,6 +116,21 @@ fn negateResult<T, R || -T -> R>(x: T) -> R {
 }
 
 // =============================================================================
+// 14. Concrete result type in constraint — must match actual result
+// =============================================================================
+fn addToString<U, V || (U + V) -> string>(a: U, b: V) -> string {
+    return a + b
+}
+
+fn negateToI32<T || -T -> i32>(x: T) -> i32 {
+    return -x
+}
+
+fn addI32s<T || (T + T) -> i32>(a: T, b: T) -> i32 {
+    return a + b
+}
+
+// =============================================================================
 // Main: call-site tests
 // =============================================================================
 fn main() {
@@ -205,4 +220,17 @@ fn main() {
     // --- 13. Unary constraint infers return type generic ---
     /// @Type(oc4): i32
     let oc4 = negateResult(5i32)
+
+    // --- 14. Concrete result type constraints (correctly satisfied) ---
+    // string + i32 → string, constraint says -> string: OK
+    /// @Type(oc5): string
+    let oc5 = addToString("count: ", 42i32)
+
+    // -i32 → i32, constraint says -> i32: OK
+    /// @Type(oc6): i32
+    let oc6 = negateToI32(5i32)
+
+    // i32 + i32 → i32, constraint says -> i32: OK
+    /// @Type(oc7): i32
+    let oc7 = addI32s(1i32, 2i32)
 }

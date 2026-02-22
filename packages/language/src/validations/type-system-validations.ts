@@ -19,6 +19,7 @@ import {
     isInterfaceType,
     isJoinType,
     isMetaClassType,
+    isNeverType,
     isNullableType,
     isReferenceType,
     isStructType,
@@ -4581,6 +4582,24 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                             code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
                         }
                     );
+                } else {
+                    // Operator is valid — now check that the actual result type matches the declared constraint result type.
+                    // Skip if expectedResultType is `never`: this means the result type param was inferred from the
+                    // operator constraint itself (not from explicit type args), so it matches by construction.
+                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
+                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
+                    if (!isNeverType(expectedResultType)) {
+                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, leftConcreteType, rightConcreteType, node);
+                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
+                            accept('error',
+                                `Operator constraint result type mismatch: '${leftConcreteType.toString()}' ${constraint.op} '${rightConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
+                                {
+                                    node,
+                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                                }
+                            );
+                        }
+                    }
                 }
             } else if (!constraint.isBinary && constraint.operandType) {
                 let operandConcreteType = this.typeProvider.getType(constraint.operandType);
@@ -4595,6 +4614,21 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                             code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
                         }
                     );
+                } else {
+                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
+                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
+                    if (!isNeverType(expectedResultType)) {
+                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, operandConcreteType, undefined, node);
+                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
+                            accept('error',
+                                `Operator constraint result type mismatch: ${constraint.op}'${operandConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
+                                {
+                                    node,
+                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                                }
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -4626,6 +4660,21 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                             code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
                         }
                     );
+                } else {
+                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
+                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
+                    if (!isNeverType(expectedResultType)) {
+                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, leftConcreteType, rightConcreteType, node);
+                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
+                            accept('error',
+                                `Operator constraint result type mismatch: '${leftConcreteType.toString()}' ${constraint.op} '${rightConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
+                                {
+                                    node,
+                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                                }
+                            );
+                        }
+                    }
                 }
             } else if (!constraint.isBinary && constraint.operandType) {
                 let operandConcreteType = this.typeProvider.getType(constraint.operandType);
@@ -4640,6 +4689,21 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                             code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
                         }
                     );
+                } else {
+                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
+                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
+                    if (!isNeverType(expectedResultType)) {
+                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, operandConcreteType, undefined, node);
+                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
+                            accept('error',
+                                `Operator constraint result type mismatch: ${constraint.op}'${operandConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
+                                {
+                                    node,
+                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                                }
+                            );
+                        }
+                    }
                 }
             }
         }

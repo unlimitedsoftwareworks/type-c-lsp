@@ -2978,7 +2978,7 @@ export class TypeCTypeProvider {
      * without requiring an AST expression node. Used to resolve generic return types
      * from operator constraints at call sites.
      */
-    private resolveOperatorResultType(
+    public resolveOperatorResultType(
         operator: string,
         leftType: TypeDescription,
         rightType: TypeDescription | undefined,

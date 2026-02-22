@@ -152,3 +152,45 @@ fn main() {
     /// @Error(TCE240): Operator constraint not satisfied
     let r14 = negInfer("hello")
 }
+
+// =============================================================================
+// Functions with WRONG concrete result types in constraints
+// =============================================================================
+
+// string + i32 → string, but constraint declares -> i32 (WRONG)
+fn addToI32Wrong<U, V || (U + V) -> i32>(a: U, b: V) -> i32 {
+    return a + b
+}
+
+// i32 + i32 → i32, but constraint declares -> string (WRONG)
+fn addToStringWrong<T || (T + T) -> string>(a: T, b: T) -> string {
+    return a + b
+}
+
+// -i32 → i32, but constraint declares -> string (WRONG)
+fn negToStringWrong<T || -T -> string>(x: T) -> string {
+    return -x
+}
+
+// f64 + f64 → f64, but constraint declares -> i32 (WRONG)
+fn addToI32WrongF64<U, V || (U + V) -> i32>(a: U, b: V) -> i32 {
+    return a + b
+}
+
+fn main2() {
+    // --- 15. string + i32 → string, but constraint says i32 → mismatch ---
+    /// @Error(TCE240): Operator constraint result type mismatch
+    let r15 = addToI32Wrong("hi", 1i32)
+
+    // --- 16. i32 + i32 → i32, but constraint says string → mismatch ---
+    /// @Error(TCE240): Operator constraint result type mismatch
+    let r16 = addToStringWrong(1i32, 2i32)
+
+    // --- 17. -i32 → i32, but constraint says string → mismatch ---
+    /// @Error(TCE240): Operator constraint result type mismatch
+    let r17 = negToStringWrong(5i32)
+
+    // --- 18. f64 + f64 → f64, but constraint says i32 → mismatch ---
+    /// @Error(TCE240): Operator constraint result type mismatch
+    let r18 = addToI32WrongF64(1.0, 2.0)
+}

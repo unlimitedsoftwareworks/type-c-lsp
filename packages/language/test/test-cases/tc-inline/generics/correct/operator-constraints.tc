@@ -233,4 +233,17 @@ fn main() {
     // i32 + i32 → i32, constraint says -> i32: OK
     /// @Type(oc7): i32
     let oc7 = addI32s(1i32, 2i32)
+
+    // --- 15. Explicit generic args with correct result types ---
+    // string + i32 → string, W=string: OK
+    let oc8 = addVars<string, i32, string>("count: ", 42i32)
+
+    // i32 + i32 → i32, W=i32: OK
+    let oc9 = addVars<i32, i32, i32>(1i32, 2i32)
+
+    // f64 + f64 → f64, W=f64: OK
+    let oc10 = addVars<f64, f64, f64>(1.0, 2.0)
+
+    // -i32 → i32, R=i32: OK
+    let oc11 = negateResult<i32, i32>(5i32)
 }

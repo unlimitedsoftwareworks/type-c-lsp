@@ -872,7 +872,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
         // Apply substitutions to parameter types if we have any
         if (substitutions && substitutions.size > 0) {
-            const finalSubstitutions = substitutions; // Ensure TypeScript knows it's defined
+            const finalSubstitutions = substitutions;
             paramTypes = paramTypes.map(param => ({
                 name: param.name,
                 type: this.typeUtils.substituteGenerics(param.type, finalSubstitutions),
@@ -880,8 +880,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 hasDefault: param.hasDefault
             }));
 
-            // Validate operator constraints at call site
+            // Fast path: substitutions already built — validate constraints directly
             this.validateOperatorConstraintsAtCallSite(node, finalSubstitutions, accept);
+        } else if (ast.isQualifiedReference(node.expr) && (node.expr.genericArgs?.length ?? 0) > 0) {
+            // Only invoke fallback when explicit generic args exist but substitutions weren't built
+            // (because the type provider already specialized the function type).
+            this.validateOperatorConstraintsAtCallSite(node, undefined, accept);
         }
 
         // Check argument count (accounts for default parameters)
@@ -3085,8 +3089,8 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                                     substitutions.set(name, inferredExprType.genericArgs[i]);
                                 }
                             });
-                            this.validateOperatorConstraintsForNewExpression(
-                                node, ref.operatorConstraints, substitutions, accept
+                            this.validateOperatorConstraints(
+                                ref.operatorConstraints, substitutions, node, accept
                             );
                         }
                     } else {
@@ -4541,31 +4545,66 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
 
     /**
      * Validates operator constraints at the call site of a generic function.
-     * Checks that the concrete types substituted for generic parameters actually
-     * support the required operators.
+     * Self-sufficient: builds its own substitutions from QualifiedReference.genericArgs
+     * when the caller's substitutions are unavailable (e.g., the type provider already
+     * specialized the function type from the QualifiedReference).
      */
     private validateOperatorConstraintsAtCallSite(
         node: ast.FunctionCall,
-        substitutions: Map<string, TypeDescription>,
+        substitutions: Map<string, TypeDescription> | undefined,
         accept: ValidationAcceptor
     ): void {
-        // Try to find the function declaration from the call expression
+        // Find the function declaration and its operator constraints
         let constraints: ast.OperatorConstraint[] | undefined;
+        let genericParams: ast.GenericType[] | undefined;
 
         if (ast.isQualifiedReference(node.expr)) {
             const ref = node.expr.reference?.ref;
             if (ast.isFunctionDeclaration(ref)) {
                 constraints = ref.operatorConstraints;
+                genericParams = ref.genericParameters;
             }
         } else if (ast.isMemberAccess(node.expr)) {
             const ref = node.expr.element?.ref;
             if (ast.isClassMethod(ref)) {
                 constraints = ref.method?.operatorConstraints;
+                genericParams = ref.method?.genericParameters;
             }
         }
 
         if (!constraints || constraints.length === 0) return;
 
+        // Build substitutions from QualifiedReference.genericArgs if not provided.
+        // This handles the case where the type provider already specialized the function
+        // (e.g., `addVars<string, i32, i32>("hi", 1)` — generic args are on the reference,
+        // so fnType.genericParameters is empty and the caller didn't build substitutions).
+        if ((!substitutions || substitutions.size === 0) && genericParams && genericParams.length > 0) {
+            if (ast.isQualifiedReference(node.expr)) {
+                const qualRef = node.expr;
+                if (qualRef.genericArgs?.length === genericParams.length) {
+                    substitutions = new Map<string, TypeDescription>();
+                    genericParams.forEach((param, index) => {
+                        substitutions!.set(param.name, this.typeProvider.getType(qualRef.genericArgs[index]));
+                    });
+                }
+            }
+        }
+
+        if (!substitutions || substitutions.size === 0) return;
+
+        this.validateOperatorConstraints(constraints, substitutions, node, accept);
+    }
+
+    /**
+     * Validates operator constraints against concrete substitutions.
+     * Shared implementation used by both FunctionCall and NewExpression validation.
+     */
+    private validateOperatorConstraints(
+        constraints: ast.OperatorConstraint[],
+        substitutions: Map<string, TypeDescription>,
+        node: AstNode,
+        accept: ValidationAcceptor
+    ): void {
         for (const constraint of constraints) {
             if (constraint.isBinary && constraint.leftType && constraint.rightType) {
                 let leftConcreteType = this.typeProvider.getType(constraint.leftType);
@@ -4586,81 +4625,6 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                     // Operator is valid — now check that the actual result type matches the declared constraint result type.
                     // Skip if expectedResultType is `never`: this means the result type param was inferred from the
                     // operator constraint itself (not from explicit type args), so it matches by construction.
-                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
-                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
-                    if (!isNeverType(expectedResultType)) {
-                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, leftConcreteType, rightConcreteType, node);
-                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
-                            accept('error',
-                                `Operator constraint result type mismatch: '${leftConcreteType.toString()}' ${constraint.op} '${rightConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
-                                {
-                                    node,
-                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
-                                }
-                            );
-                        }
-                    }
-                }
-            } else if (!constraint.isBinary && constraint.operandType) {
-                let operandConcreteType = this.typeProvider.getType(constraint.operandType);
-
-                operandConcreteType = this.typeUtils.substituteGenerics(operandConcreteType, substitutions);
-
-                if (!this.isUnaryOperatorValid(constraint.op, operandConcreteType)) {
-                    accept('error',
-                        `Operator constraint not satisfied: Type '${operandConcreteType.toString()}' does not support unary operator '${constraint.op}'`,
-                        {
-                            node,
-                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
-                        }
-                    );
-                } else {
-                    let expectedResultType = this.typeProvider.getType(constraint.resultType);
-                    expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
-                    if (!isNeverType(expectedResultType)) {
-                        const actualResultType = this.typeProvider.resolveOperatorResultType(constraint.op, operandConcreteType, undefined, node);
-                        if (actualResultType && !this.isTypeCompatible(actualResultType, expectedResultType).success) {
-                            accept('error',
-                                `Operator constraint result type mismatch: ${constraint.op}'${operandConcreteType.toString()}' produces '${actualResultType.toString()}', but constraint declares '${expectedResultType.toString()}'`,
-                                {
-                                    node,
-                                    code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
-                                }
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Validates operator constraints for a `new` expression with inferred generics.
-     * Similar to validateOperatorConstraintsAtCallSite but works with NewExpression nodes.
-     */
-    private validateOperatorConstraintsForNewExpression(
-        node: ast.NewExpression,
-        constraints: ast.OperatorConstraint[],
-        substitutions: Map<string, TypeDescription>,
-        accept: ValidationAcceptor
-    ): void {
-        for (const constraint of constraints) {
-            if (constraint.isBinary && constraint.leftType && constraint.rightType) {
-                let leftConcreteType = this.typeProvider.getType(constraint.leftType);
-                let rightConcreteType = this.typeProvider.getType(constraint.rightType);
-
-                leftConcreteType = this.typeUtils.substituteGenerics(leftConcreteType, substitutions);
-                rightConcreteType = this.typeUtils.substituteGenerics(rightConcreteType, substitutions);
-
-                if (!this.isBinaryOperatorValid(constraint.op, leftConcreteType, rightConcreteType)) {
-                    accept('error',
-                        `Operator constraint not satisfied: Type '${leftConcreteType.toString()}' does not support binary operator '${constraint.op}' with '${rightConcreteType.toString()}'`,
-                        {
-                            node,
-                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
-                        }
-                    );
-                } else {
                     let expectedResultType = this.typeProvider.getType(constraint.resultType);
                     expectedResultType = this.typeUtils.substituteGenerics(expectedResultType, substitutions);
                     if (!isNeverType(expectedResultType)) {

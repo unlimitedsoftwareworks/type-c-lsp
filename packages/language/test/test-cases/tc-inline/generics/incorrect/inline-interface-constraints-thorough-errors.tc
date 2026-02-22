@@ -55,6 +55,23 @@ type NoMethods = class {
     fn init() {}
 }
 
+type OnlyMul = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn *(x: OnlyMul) -> OnlyMul = new OnlyMul(this.value * x.value)
+}
+
+type WrongReturnMul = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    // Returns u32 instead of WrongReturnMul
+    fn *(x: WrongReturnMul) -> u32 = this.value * x.value
+}
+
 // ========================================================================
 // Generic functions with inline interface constraints
 // ========================================================================
@@ -74,6 +91,19 @@ fn getDesc<T: interface { fn describe() -> string }>(obj: T) -> string {
 fn addAndDesc<T: interface { fn +(T) -> T fn describe() -> string }>(a: T, b: T) -> string {
     let sum = a + b
     return sum.describe()
+}
+
+fn addTwoNamed<T: interface { fn +(x: T) -> T }>(a: T, b: T) -> T {
+    return a + b
+}
+
+fn mulTwo<T: interface { fn *(T) -> T }>(a: T, b: T) -> T {
+    return a * b
+}
+
+fn addThenDescribe<T: interface { fn +(T) -> T }, U: interface { fn describe() -> string }>(a: T, b: T, d: U) -> string {
+    let sum = a + b
+    return d.describe()
 }
 
 fn main() {
@@ -151,4 +181,68 @@ fn main() {
     // ====================================================================
     /// @NoError
     addTwo(a, a)
+
+    // ====================================================================
+    // 11. Named param constraint — NoOperators still fails
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    addTwoNamed(no, no)
+
+    // ====================================================================
+    // 12. Named param constraint — WrongReturnAdd still fails
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    addTwoNamed(wr, wr)
+
+    // ====================================================================
+    // 13. Named param constraint works for Addable (positive)
+    // ====================================================================
+    /// @NoError
+    addTwoNamed(a, a)
+
+    // ====================================================================
+    // 14. Multiply constraint — OnlyAdd has + but not * → TCE120
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    mulTwo(oa, oa)
+
+    // ====================================================================
+    // 15. Multiply constraint — NoOperators → TCE120
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    mulTwo(no, no)
+
+    // ====================================================================
+    // 16. Multiply constraint — WrongReturnMul has fn *(T) -> u32 → TCE120
+    // ====================================================================
+    let wrm = new WrongReturnMul(1)
+    /// @Error(TCE120): does not satisfy constraint
+    mulTwo(wrm, wrm)
+
+    // ====================================================================
+    // 17. Multiply constraint — OnlyMul satisfies (positive)
+    // ====================================================================
+    let om = new OnlyMul(3)
+    /// @NoError
+    mulTwo(om, om)
+
+    // ====================================================================
+    // 18. Multi-generic — first param OK, second param wrong
+    //     T=Addable satisfies fn +(T)->T, U=NoMethods fails fn describe()->string
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    addThenDescribe(a, a, nm)
+
+    // ====================================================================
+    // 19. Multi-generic — first param wrong, second param OK
+    //     T=NoOperators fails fn +(T)->T, U=HasDescribe satisfies fn describe()->string
+    // ====================================================================
+    /// @Error(TCE120): does not satisfy constraint
+    addThenDescribe(no, no, hd)
+
+    // ====================================================================
+    // 20. Multi-generic — both params satisfy (positive)
+    // ====================================================================
+    /// @NoError
+    addThenDescribe(a, a, hd)
 }

@@ -18,7 +18,7 @@ fn addTwo<T: interface { fn +(T) -> T }>(a: T, b: T) -> T {
 }
 
 // ========================================================================
-// Test 2: Multi-method operator constraint — fn +(T) -> T, fn -(T) -> T
+// Test 2: Multi-method operator constraint — fn +(T) -> T fn -(T) -> T
 // ========================================================================
 
 type AddSubable = class {
@@ -71,6 +71,53 @@ type Vec2 = class {
 }
 
 // ========================================================================
+// Test 5: Named params in interface constraint — fn +(x: T) -> T
+//         Verifies InterfaceFnParam handles name:type syntax
+// ========================================================================
+
+fn addTwoNamed<T: interface { fn +(x: T) -> T }>(a: T, b: T) -> T {
+    return a + b
+}
+
+// ========================================================================
+// Test 6: Multiply operator constraint — fn *(T) -> T
+// ========================================================================
+
+type Scalable = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn *(other: Scalable) -> Scalable = new Scalable(this.value * other.value)
+}
+
+fn mulTwo<T: interface { fn *(T) -> T }>(a: T, b: T) -> T {
+    return a * b
+}
+
+// ========================================================================
+// Test 7: Same generic function called with different concrete types
+//         Verifies generic substitution works per-call-site
+// ========================================================================
+
+type AnotherAddable = class {
+    let v: u32
+    fn init(v: u32 = 0u32) {
+        this.v = v
+    }
+    fn +(other: AnotherAddable) -> AnotherAddable = new AnotherAddable(this.v + other.v)
+}
+
+// ========================================================================
+// Test 8: Multiple generic params with different inline constraints
+// ========================================================================
+
+fn addThenDescribe<T: interface { fn +(T) -> T }, U: interface { fn describe() -> string }>(a: T, b: T, d: U) -> string {
+    let sum = a + b
+    return d.describe()
+}
+
+// ========================================================================
 // main — exercise all tests
 // ========================================================================
 
@@ -101,4 +148,27 @@ fn main() {
     let vsum = addTwo(v1, v2)
     /// @Type(vresult): Vec2
     let vresult = addSub(v1, v2, v3)
+
+    // Test 5: named params in constraint — same class, different generic fn
+    /// @Type(namedSum): Addable
+    let namedSum = addTwoNamed(a1, a2)
+
+    // Test 6: multiply operator
+    let s1 = new Scalable(3)
+    let s2 = new Scalable(7)
+    /// @Type(prod): Scalable
+    let prod = mulTwo(s1, s2)
+
+    // Test 7: same generic fn with different types
+    let aa1 = new AnotherAddable(100)
+    let aa2 = new AnotherAddable(200)
+    /// @Type(aaSum): AnotherAddable
+    let aaSum = addTwo(aa1, aa2)
+    // Also re-use addTwo with Vec2
+    /// @Type(v2sum): Vec2
+    let v2sum = addTwo(v1, v2)
+
+    // Test 8: multiple generic params with different constraints
+    /// @Type(mixed): string
+    let mixed = addThenDescribe(a1, a2, d)
 }

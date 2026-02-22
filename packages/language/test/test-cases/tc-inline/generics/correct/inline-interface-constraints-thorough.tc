@@ -1,0 +1,104 @@
+// Thorough positive tests for inline interface constraints.
+// All lines must pass without any diagnostics.
+
+// ========================================================================
+// Test 1: Single operator constraint — fn +(T) -> T
+// ========================================================================
+
+type Addable = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn +(x: Addable) -> Addable = new Addable(this.value + x.value)
+}
+
+fn addTwo<T: interface { fn +(T) -> T }>(a: T, b: T) -> T {
+    return a + b
+}
+
+// ========================================================================
+// Test 2: Multi-method operator constraint — fn +(T) -> T, fn -(T) -> T
+// ========================================================================
+
+type AddSubable = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn +(other: AddSubable) -> AddSubable = new AddSubable(this.value + other.value)
+    fn -(other: AddSubable) -> AddSubable = new AddSubable(this.value - other.value)
+}
+
+fn addSub<T: interface {
+    fn +(T) -> T
+    fn -(T) -> T
+}>(a: T, b: T, c: T) -> T {
+    return a + b - c
+}
+
+// ========================================================================
+// Test 3: Non-operator method constraint — fn describe() -> string
+// ========================================================================
+
+type Describable = class {
+    let name: string
+    fn init(name: string) {
+        this.name = name
+    }
+    fn describe() -> string {
+        return this.name
+    }
+}
+
+fn getDescription<T: interface { fn describe() -> string }>(obj: T) -> string {
+    return obj.describe()
+}
+
+// ========================================================================
+// Test 4: f32-based class with operator constraints
+// ========================================================================
+
+type Vec2 = class {
+    let x: f32
+    let y: f32
+    fn init(x: f32 = 0.0f, y: f32 = 0.0f) {
+        this.x = x
+        this.y = y
+    }
+    fn +(other: Vec2) -> Vec2 = new Vec2(this.x + other.x, this.y + other.y)
+    fn -(other: Vec2) -> Vec2 = new Vec2(this.x - other.x, this.y - other.y)
+}
+
+// ========================================================================
+// main — exercise all tests
+// ========================================================================
+
+fn main() {
+    // Test 1: single operator
+    let a1 = new Addable(10)
+    let a2 = new Addable(20)
+    /// @Type(sum1): Addable
+    let sum1 = addTwo(a1, a2)
+
+    // Test 2: multi-method operators
+    let as1 = new AddSubable(10)
+    let as2 = new AddSubable(20)
+    let as3 = new AddSubable(5)
+    /// @Type(result2): AddSubable
+    let result2 = addSub(as1, as2, as3)
+
+    // Test 3: non-operator method
+    let d = new Describable("hello")
+    /// @Type(desc): string
+    let desc = getDescription(d)
+
+    // Test 4: f32-based Vec2 with single-op and multi-op constraints
+    let v1 = new Vec2(1.0f, 2.0f)
+    let v2 = new Vec2(3.0f, 4.0f)
+    let v3 = new Vec2(0.5f, 0.5f)
+    /// @Type(vsum): Vec2
+    let vsum = addTwo(v1, v2)
+    /// @Type(vresult): Vec2
+    let vresult = addSub(v1, v2, v3)
+}

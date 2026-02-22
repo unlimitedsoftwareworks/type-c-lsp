@@ -1138,7 +1138,7 @@ export class TypeCTypeProvider {
 
             // If we can't infer type from context, return error
             return this.typeFactory.createErrorType(
-                `Parameter '${node.name}' requires type annotation or must be in a context where type can be inferred`,
+                `Parameter '${node.name ?? '<unnamed>'}' requires type annotation or must be in a context where type can be inferred`,
                 undefined,
                 node
             );
@@ -1210,7 +1210,7 @@ export class TypeCTypeProvider {
         if (ast.isBuiltinSymbolID(node)) return this.getType(node.type);
         if (ast.isBuiltinSymbolFn(node)) {
             const params = node.args.map(arg => this.typeFactory.createFunctionParameterType(
-                arg.name,
+                arg.name ?? '',
                 this.getType(arg.type),
                 arg.isMut
             ));
@@ -1399,7 +1399,7 @@ export class TypeCTypeProvider {
                 const methodHeader = m.method;
                 const genericParams = ((methodHeader?.genericParameters ?? [])?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                    arg.name,
+                    arg.name ?? '',
                     this.getType(arg.type),
                     arg.isMut,
                     !!arg.defaultValue
@@ -1451,7 +1451,7 @@ export class TypeCTypeProvider {
                 const methodHeader = m.method;
                 const genericParams = ((methodHeader?.genericParameters ?? []).map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                    arg.name,
+                    arg.name ?? '',
                     this.getType(arg.type),
                     arg.isMut,
                     !!arg.defaultValue
@@ -1548,7 +1548,7 @@ export class TypeCTypeProvider {
                 const methodHeader = m.method;
                 const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                    arg.name,
+                    arg.name ?? '',
                     this.getType(arg.type),
                     arg.isMut,
                     !!arg.defaultValue
@@ -1597,7 +1597,7 @@ export class TypeCTypeProvider {
                 const methodHeader = m.method;
                 const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
                 const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                    arg.name,
+                    arg.name ?? '',
                     this.getType(arg.type),
                     arg.isMut,
                     !!arg.defaultValue
@@ -1671,7 +1671,7 @@ export class TypeCTypeProvider {
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-            arg.name,
+            arg.name ?? '',
             this.getType(arg.type),
             arg.isMut,
             !!arg.defaultValue
@@ -1700,7 +1700,7 @@ export class TypeCTypeProvider {
         const methodHeader = node.method;
         const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-            arg.name,
+            arg.name ?? '',
             this.getType(arg.type),
             arg.isMut,
             !!arg.defaultValue
@@ -1791,7 +1791,7 @@ export class TypeCTypeProvider {
 
     private inferCoroutineType(node: ast.CoroutineType): TypeDescription {
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-            arg.name,
+            arg.name ?? '',
             this.getType(arg.type),
             arg.isMut
         )) ?? [];
@@ -1918,15 +1918,37 @@ export class TypeCTypeProvider {
         return actualType;
     }
 
+    /** Tracks generic types currently being inferred to prevent infinite recursion
+     *  from self-referential constraints like `T: interface { fn +(T) -> T }`. */
+    private readonly inferringGenerics = new Set<ast.GenericType>();
+
     private inferGenericType(node: ast.GenericType): TypeDescription {
-        const constraint = node.constraint ? this.getType(node.constraint) : undefined;
-        return this.typeFactory.createGenericType(node.name, constraint, node, node);
+        if (this.inferringGenerics.has(node)) {
+            // Cycle: constraint references its own generic param — return without constraint
+            return this.typeFactory.createGenericType(node.name, undefined, node, node);
+        }
+        this.inferringGenerics.add(node);
+        try {
+            const constraint = node.constraint ? this.getType(node.constraint) : undefined;
+            const result = this.typeFactory.createGenericType(node.name, constraint, node, node);
+            // Explicitly overwrite the cache entry for this node. During recursive constraint
+            // processing (e.g., T: interface { fn +(T) -> T }), the cycle detection path
+            // caches a GenericType with constraint=undefined. We must ensure the final
+            // result with the correct constraint overwrites that stale cache entry.
+            if (constraint) {
+                const documentUri = AstUtils.getDocument(node).uri;
+                this.typeCache.set(documentUri, node, result);
+            }
+            return result;
+        } finally {
+            this.inferringGenerics.delete(node);
+        }
     }
 
     private inferFFIDecl(node: ast.ExternFFIDecl): TypeDescription {
         const methods = node.methods?.map(m => {
             const params = m.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                arg.name,
+                arg.name ?? '',
                 this.getType(arg.type),
                 arg.isMut,
                 !!arg.defaultValue
@@ -1998,7 +2020,7 @@ export class TypeCTypeProvider {
                 const genericParams = (symbol.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
 
                 const params = symbol.args.map(arg => this.typeFactory.createFunctionParameterType(
-                    arg.name,
+                    arg.name ?? '',
                     this.getType(arg.type),
                     arg.isMut
                 ));
@@ -2054,7 +2076,7 @@ export class TypeCTypeProvider {
     private inferFunctionDeclaration(node: ast.FunctionDeclaration): TypeDescription {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
-            arg.name,
+            arg.name ?? '',
             this.getType(arg.type),
             arg.isMut,
             !!arg.defaultValue
@@ -2555,9 +2577,17 @@ export class TypeCTypeProvider {
                 for (let index = 0; index < genericParams.length; index++) {
                     const param = genericParams[index];
                     const concreteType = this.getType(node.genericArgs[index]);
-                    
-                    // Validate that the concrete type satisfies the generic parameter's constraint
-                    const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, param.constraint);
+
+                    // Add substitution before validating constraint, so self-referential
+                    // constraints like T: interface { fn +(T) -> T } can resolve T
+                    substitutions.set(param.name, concreteType);
+                    typeArgs.push(concreteType);
+
+                    // Substitute generics in the constraint before validating
+                    const constraint = param.constraint
+                        ? this.typeUtils.substituteGenerics(param.constraint, substitutions)
+                        : param.constraint;
+                    const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, constraint);
                     if (!constraintCheck.success) {
                         return this.typeFactory.createErrorType(
                             constraintCheck.message || `Type argument does not satisfy generic constraint`,
@@ -2565,9 +2595,6 @@ export class TypeCTypeProvider {
                             node
                         );
                     }
-                    
-                    substitutions.set(param.name, concreteType);
-                    typeArgs.push(concreteType);
                 }
 
                 // MONOMORPHIZATION: Register function instantiation with explicit generic args
@@ -3555,9 +3582,16 @@ export class TypeCTypeProvider {
                     for (let index = 0; index < genericParams.length; index++) {
                         const param = genericParams[index];
                         const concreteType = this.getType(node.genericArgs[index]);
-                        
-                        // Validate that the concrete type satisfies the generic parameter's constraint
-                        const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, param.constraint);
+
+                        // Add substitution before validating constraint, so self-referential
+                        // constraints like T: interface { fn +(T) -> T } can resolve T
+                        explicitSubstitutions.set(param.name, concreteType);
+
+                        // Substitute generics in the constraint before validating
+                        const constraint = param.constraint
+                            ? this.typeUtils.substituteGenerics(param.constraint, explicitSubstitutions)
+                            : param.constraint;
+                        const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, constraint);
                         if (!constraintCheck.success) {
                             // Return error immediately if constraint not satisfied
                             return this.typeFactory.createErrorType(
@@ -3566,8 +3600,6 @@ export class TypeCTypeProvider {
                                 node
                             );
                         }
-                        
-                        explicitSubstitutions.set(param.name, concreteType);
                     }
                     
                     substitutions = explicitSubstitutions;
@@ -3654,9 +3686,14 @@ export class TypeCTypeProvider {
                 for (let i = 0; i < genericParams.length; i++) {
                     const param = genericParams[i];
                     const inferredType = substitutions.get(param.name);
-                    
+
                     if (inferredType && !isNeverType(inferredType)) {
-                        const constraintCheck = this.typeUtils.validateGenericConstraint(inferredType, param.constraint);
+                        // Substitute generics in the constraint before validating, so
+                        // self-referential constraints like T: interface { fn +(T) -> T } can resolve T
+                        const constraint = param.constraint
+                            ? this.typeUtils.substituteGenerics(param.constraint, substitutions)
+                            : param.constraint;
+                        const constraintCheck = this.typeUtils.validateGenericConstraint(inferredType, constraint);
                         if (!constraintCheck.success) {
                             return this.typeFactory.createErrorType(
                                 constraintCheck.message || `Inferred type does not satisfy generic constraint`,
@@ -4404,14 +4441,14 @@ export class TypeCTypeProvider {
             } else {
                 // No type available
                 paramType = this.typeFactory.createErrorType(
-                    `Parameter '${arg.name}' requires type annotation or must be in a context where type can be inferred`,
+                    `Parameter '${arg.name ?? '<unnamed>'}' requires type annotation or must be in a context where type can be inferred`,
                     undefined,
                     arg
                 );
             }
 
             return this.typeFactory.createFunctionParameterType(
-                arg.name,
+                arg.name ?? '',
                 paramType,
                 arg.isMut
             );
@@ -4769,7 +4806,7 @@ export class TypeCTypeProvider {
     private inferFFIMethodHeader(node: ast.FFIMethodHeader): TypeDescription {
         return this.typeFactory.createFunctionType(
             node.header.args?.map(arg => this.typeFactory.createFunctionParameterType(
-                arg.name,
+                arg.name ?? '',
                 this.getType(arg.type),
                 arg.isMut
             )) ?? [],

@@ -1469,7 +1469,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            params.push({ name: param.name, type: paramType });
+            params.push({ name: param.name ?? '', type: paramType });
         }
 
         // Return types
@@ -1503,7 +1503,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            this.context.variables.set(param.name, { register: param.name, type: paramType });
+            this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
         }
 
         // Generate body
@@ -1550,7 +1550,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            params.push({ name: param.name, type: paramType });
+            params.push({ name: param.name ?? '', type: paramType });
         }
 
         // Return types
@@ -1584,7 +1584,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            this.context.variables.set(param.name, { register: param.name, type: paramType });
+            this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
         }
 
         // Generate body
@@ -1662,7 +1662,7 @@ export class IRGenerator {
     private visitFunctionDeclarationWithName(node: ast.FunctionDeclaration, funcName: string): void {
         // Build params
         const params: FunctionParam[] = node.header.args.map(param => ({
-            name: param.name,
+            name: param.name ?? '',
             type: param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType()
@@ -1705,7 +1705,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            this.context.variables.set(param.name, { register: param.name, type: paramType });
+            this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
         }
 
         // Generate body
@@ -3878,7 +3878,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            params.push({ name: param.name, type: paramType });
+            params.push({ name: param.name ?? '', type: paramType });
         }
 
         // Return type
@@ -3915,7 +3915,7 @@ export class IRGenerator {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType();
-            this.context.variables.set(param.name, { register: param.name, type: paramType });
+            this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
         }
 
         // Generate body
@@ -3965,7 +3965,7 @@ export class IRGenerator {
         const seen = new Set<string>();
 
         // Get the set of parameter names (these are not upvalues)
-        const paramNames = new Set(node.header.args.map(p => p.name));
+        const paramNames = new Set(node.header.args.map(p => p.name ?? ''));
 
         // Walk all QualifiedReference nodes in the lambda body
         const body = node.body ?? node.expr;

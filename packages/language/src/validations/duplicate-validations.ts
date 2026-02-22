@@ -234,7 +234,8 @@ export class DuplicateValidator extends TypeCBaseValidation {
 
         for (const param of parameters) {
             const paramName = param.name;
-            
+            if (!paramName) continue; // Skip unnamed params (interface method params)
+
             if (seenNames.has(paramName)) {
                 // Found a duplicate - report error on the current parameter
                 const errorCode = ErrorCode.TC_DUPLICATE_FUNCTION_PARAMETER;

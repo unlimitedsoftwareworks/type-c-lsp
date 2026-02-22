@@ -99,13 +99,16 @@ interface FunctionTypeHeader {
 FnHeader<regular> returns FunctionHeader:
     '(' ((args+=FnParam<regular>) (',' args+=FnParam<regular>)*)? ')' ('->' returnType=DataType<true>)?;
 
+InterfaceFnHeader returns FunctionHeader:
+    '(' ((args+=InterfaceFnParam) (',' args+=InterfaceFnParam)*)? ')' ('->' returnType=DataType<true>)?;
+
 FnTypeHeader returns FunctionTypeHeader:
     '(' ((args+=FnTypeParam) (',' args+=FnTypeParam)*)? ')' ('->' returnType=DataType<true>)?;
 
 
 interface FunctionParameter {
     isMut: boolean;
-    name: string;
+    name?: string;
     type?: DataType;
     defaultValue?: Expression;
 }
@@ -113,7 +116,9 @@ FnParam<regular> returns FunctionParameter:
     (<regular> (isMut?='mut')? name=ID ':' type=DataType<false> ('=' defaultValue=Expression)?) |
     (isMut?='mut')? name=ID (':' type=DataType<false>)?
     ;
-   
+
+InterfaceFnParam returns FunctionParameter:
+    (isMut?='mut')? ((name=ID ':')? type=DataType<false> ('=' defaultValue=Expression)?);
 
 
 interface FunctionTypeParameter {
@@ -649,7 +654,7 @@ interface MethodHeader {
 }
 
 MethodHeader<withinClass> returns MethodHeader:
-    'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader<true> ) | <!withinClass> header=FnHeader<true> );
+    'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader<true> ) | <!withinClass> header=InterfaceFnHeader );
 
 fragment ClassAttributesDecl:
     'let' attributes+=ClassAttributeDecl (',' attributes+=ClassAttributeDecl)*;

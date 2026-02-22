@@ -1,0 +1,58 @@
+// Test: Interface methods with type-only (unnamed) parameters
+// The InterfaceFnParam rule allows name-optional, type-required parameters
+
+// 1. Interface with unnamed typed params — T parses as type, not name
+type Processable = interface {
+    fn process(u32) -> void
+    fn getName() -> string
+}
+
+// 2. Interface with named params (still works)
+type Describable = interface {
+    fn describe(prefix: string) -> string
+}
+
+// 3. Interface with mixed named and unnamed params
+type Mixable = interface {
+    fn mix(name: string, u32) -> string
+}
+
+// 4. Interface with mut unnamed param
+type Resettable = interface {
+    fn reset(mut u32) -> void
+}
+
+// 5. Class satisfying an interface with unnamed params
+type MyProcessor = class Processable {
+    fn process(val: u32) -> void {}
+    fn getName() -> string {
+        return "processor"
+    }
+}
+
+// 6. Use the structural typing — class satisfies interface with unnamed params
+fn doProcess(p: Processable, val: u32) -> void {
+    p.process(val)
+}
+
+// 7. Inline interface constraint with self-referential generic param
+type Addable = class {
+    fn +(x: Addable) = this
+}
+
+fn addObj<T: interface { fn +(T) -> T }>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn main() {
+    let proc = new MyProcessor()
+    doProcess(proc, 42u32)
+
+    /// @Type(name): string
+    let name = proc.getName()
+
+    // 8. Inline interface constraint satisfied by class with operator overload
+    let v = new Addable()
+    /// @Type(result): Addable
+    let result = addObj(v, v)
+}

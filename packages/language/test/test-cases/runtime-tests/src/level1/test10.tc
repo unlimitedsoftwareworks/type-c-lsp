@@ -324,9 +324,20 @@ fn test_case_3(rn: TestUnit) {
     }
 
 
+/*
     fn addObj<T: interface { fn + (T) -> T} >(x: T, y: T) -> T {
         return x + y
     }
+
+    let c2 = addObj(1, 1)
+
+
+    fn addVars<U, V, W || (U + V) -> W>(a: U, b: V) -> W {
+        return a + b
+    }
+
+    let java = addVars<string, i32, i32>("hi", 1)
+*/
 
 
     fn add<U || (U+U) -> U>(x: U, y: U) -> U {

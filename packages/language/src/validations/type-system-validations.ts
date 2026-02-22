@@ -624,16 +624,21 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         
         // Check if EITHER operand is a generic type with a constraint that defines this operator
         // This allows both T + T and T + Constraint and Constraint + T patterns
-        if (isGenericType(leftType) && leftType.constraint) {
-            const operatorName = node.op;
-            if (this.constraintDefinesOperator(leftType.constraint, operatorName)) {
+        // Note: We also look up the constraint from the AST declaration as a fallback,
+        // because the cached GenericType may have constraint=undefined due to cycle detection
+        // during recursive type inference of self-referential constraints like T: interface { fn +(T) -> T }
+        if (isGenericType(leftType)) {
+            const constraint = leftType.constraint
+                ?? (leftType.declaration?.constraint ? this.typeProvider.getType(leftType.declaration.constraint) : undefined);
+            if (constraint && this.constraintDefinesOperator(constraint, node.op)) {
                 return;
             }
         }
 
-        if (isGenericType(rightType) && rightType.constraint) {
-            const operatorName = node.op;
-            if (this.constraintDefinesOperator(rightType.constraint, operatorName)) {
+        if (isGenericType(rightType)) {
+            const constraint = rightType.constraint
+                ?? (rightType.declaration?.constraint ? this.typeProvider.getType(rightType.declaration.constraint) : undefined);
+            if (constraint && this.constraintDefinesOperator(constraint, node.op)) {
                 return;
             }
         }
@@ -3854,7 +3859,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const errorMsg = this.checkForNullableBasicType(paramType);
         
         if (errorMsg) {
-            accept('error', `Parameter '${node.name}' cannot have ${errorMsg}`, {
+            accept('error', `Parameter '${node.name ?? '<unnamed>'}' cannot have ${errorMsg}`, {
                 node: node.type,
                 code: ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE
             });
@@ -4442,7 +4447,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             return ref.name;
         }
         if (ast.isFunctionParameter(ref)) {
-            return ref.name;
+            return ref.name ?? '';
         }
         if (ast.isClassAttributeDecl(ref)) {
             return ref.name;

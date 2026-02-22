@@ -1,0 +1,53 @@
+// Test: Errors involving interface methods with unnamed params
+
+// Interface with unnamed typed param — class does NOT satisfy it
+type Computable = interface {
+    fn compute(u32) -> u32
+    fn getName() -> string
+}
+
+fn doCompute<T: Computable>(obj: T) -> u32 {
+    return obj.compute(1u32)
+}
+
+// BadComputer: wrong return type on compute
+type BadComputer = class {
+    fn compute(x: u32) -> string {
+        return "oops"
+    }
+    fn getName() -> string {
+        return "bad"
+    }
+}
+
+// MissingMethod: missing getName entirely
+type MissingMethod = class {
+    fn compute(x: u32) -> u32 {
+        return x
+    }
+}
+
+// NotAddable: no + operator, can't satisfy inline interface constraint
+type NotAddable = class {
+    fn init() {}
+}
+
+fn addObj<T: interface { fn +(T) -> T }>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn test() {
+    let bad = new BadComputer()
+    let missing = new MissingMethod()
+
+    /// @Error(TCE120): does not satisfy constraint
+    doCompute(bad)
+
+    /// @Error(TCE120): does not satisfy constraint
+    doCompute(missing)
+
+    // Self-referential inline constraint: NotAddable has no + operator
+    let na = new NotAddable()
+    /// @Error(TCE120): does not satisfy constraint
+    addObj(na, na)
+}

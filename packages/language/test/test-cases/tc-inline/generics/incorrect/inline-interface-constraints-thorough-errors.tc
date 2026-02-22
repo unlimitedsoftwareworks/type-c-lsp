@@ -1,0 +1,154 @@
+// Thorough negative tests for inline interface constraints.
+// Every line with @Error must produce the expected diagnostic.
+
+// ========================================================================
+// Helper types
+// ========================================================================
+
+type Addable = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn +(x: Addable) -> Addable = new Addable(this.value + x.value)
+}
+
+type NoOperators = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+}
+
+type WrongReturnAdd = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    // Returns u32 instead of WrongReturnAdd — doesn't satisfy fn +(T) -> T
+    fn +(x: WrongReturnAdd) -> u32 = this.value + x.value
+}
+
+type OnlyAdd = class {
+    let value: u32
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+    fn +(x: OnlyAdd) -> OnlyAdd = new OnlyAdd(this.value + x.value)
+}
+
+type HasDescribe = class {
+    fn init() {}
+    fn describe() -> string {
+        return "hello"
+    }
+}
+
+type WrongDescribeReturn = class {
+    fn init() {}
+    fn describe() -> u32 {
+        return 42u32
+    }
+}
+
+type NoMethods = class {
+    fn init() {}
+}
+
+// ========================================================================
+// Generic functions with inline interface constraints
+// ========================================================================
+
+fn addTwo<T: interface { fn +(T) -> T }>(a: T, b: T) -> T {
+    return a + b
+}
+
+fn addSub<T: interface { fn +(T) -> T fn -(T) -> T }>(a: T, b: T, c: T) -> T {
+    return a + b - c
+}
+
+fn getDesc<T: interface { fn describe() -> string }>(obj: T) -> string {
+    return obj.describe()
+}
+
+fn addAndDesc<T: interface { fn +(T) -> T fn describe() -> string }>(a: T, b: T) -> string {
+    let sum = a + b
+    return sum.describe()
+}
+
+fn main() {
+    // ====================================================================
+    // 1. Class with no operators at all → TCE120
+    // ====================================================================
+    let no = new NoOperators(1)
+    /// @Error(TCE120): does not satisfy constraint
+    addTwo(no, no)
+
+    // ====================================================================
+    // 2. Class with wrong return type on operator → TCE120
+    //    WrongReturnAdd has fn +(WrongReturnAdd) -> u32, but constraint
+    //    requires fn +(T) -> T (i.e., fn +(WrongReturnAdd) -> WrongReturnAdd)
+    // ====================================================================
+    let wr = new WrongReturnAdd(1)
+    /// @Error(TCE120): does not satisfy constraint
+    addTwo(wr, wr)
+
+    // ====================================================================
+    // 3. Class has + but not - → TCE120 for addSub
+    //    OnlyAdd satisfies fn +(T) -> T but not fn -(T) -> T
+    // ====================================================================
+    let oa = new OnlyAdd(1)
+    /// @Error(TCE120): does not satisfy constraint
+    addSub(oa, oa, oa)
+
+    // ====================================================================
+    // 4. Class has describe() but wrong return type → TCE120
+    //    WrongDescribeReturn has fn describe() -> u32, constraint wants -> string
+    // ====================================================================
+    let wdr = new WrongDescribeReturn()
+    /// @Error(TCE120): does not satisfy constraint
+    getDesc(wdr)
+
+    // ====================================================================
+    // 5. Class has no methods at all → TCE120
+    // ====================================================================
+    let nm = new NoMethods()
+    /// @Error(TCE120): does not satisfy constraint
+    getDesc(nm)
+    /// @Error(TCE120): does not satisfy constraint
+    addTwo(nm, nm)
+
+    // ====================================================================
+    // 6. Mixed constraint: needs both + operator AND describe() method
+    //    Addable has + but no describe() → TCE120
+    // ====================================================================
+    let a = new Addable(1)
+    /// @Error(TCE120): does not satisfy constraint
+    addAndDesc(a, a)
+
+    // ====================================================================
+    // 7. HasDescribe has describe() but no + operator → TCE120
+    // ====================================================================
+    let hd = new HasDescribe()
+    /// @Error(TCE120): does not satisfy constraint
+    addAndDesc(hd, hd)
+
+    // ====================================================================
+    // 8. OnlyAdd satisfies addTwo but not addSub
+    //    Verify addTwo works (positive within negative file)
+    // ====================================================================
+    /// @NoError
+    addTwo(oa, oa)
+
+    // ====================================================================
+    // 9. HasDescribe satisfies getDesc (positive within negative file)
+    // ====================================================================
+    /// @NoError
+    getDesc(hd)
+
+    // ====================================================================
+    // 10. Addable satisfies addTwo (positive within negative file)
+    // ====================================================================
+    /// @NoError
+    addTwo(a, a)
+}

@@ -323,7 +323,17 @@ fn test_case_3(rn: TestUnit) {
         }
     }
 
-    let c = 1 + 2
+
+    fn addObj<T: interface { fn + (T) -> T} >(x: T, y: T) -> T {
+        return x + y
+    }
+
+
+    fn add<U || (U+U) -> U>(x: U, y: U) -> U {
+        return x + y
+    }
+
+    let c = add(1, 2)
     rn.assert_eq(c, 3)
     let d = add("hi", " there")
     rn.assert_eq(d, "hi there")
@@ -350,7 +360,7 @@ fn test_case_4(rn: TestUnit) {
     rn.assert_eq(resp2.code, "Ok")
 }
 
-fn main() -> u32 {
+fn test10() -> u32 {
     let test_1 = new TestUnit("test 1", "Test Set/Get", test_case_1)
     let test_2 = new TestUnit("test 2", "Test Variant", test_case_2)
     let test_3 = new TestUnit("test 3", "Test Interface/class/join", test_case_3)

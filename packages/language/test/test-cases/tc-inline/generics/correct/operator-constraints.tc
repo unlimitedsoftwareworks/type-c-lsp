@@ -1,0 +1,180 @@
+// =============================================================================
+// 1. Basic binary operator constraint
+// =============================================================================
+fn add<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+// =============================================================================
+// 2. Unary operator constraint
+// =============================================================================
+fn negate<T || -T -> T>(x: T) -> T {
+    return -x
+}
+
+// =============================================================================
+// 3. Multiple operator constraints on same type param
+// =============================================================================
+fn math<T || (T + T) -> T, (T * T) -> T>(x: T, y: T) -> T {
+    return x + y * x
+}
+
+// =============================================================================
+// 4. Combined per-param constraint with operator constraints
+// =============================================================================
+type Printable = interface {
+    fn toString() -> string
+}
+
+fn addAndPrint<T: Printable || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+// =============================================================================
+// 5. Multi-type-param operator constraint (result type matches a param type)
+// =============================================================================
+fn mixedAdd<T, U || (T + U) -> T>(x: T, y: U) -> T {
+    return x + y
+}
+
+// =============================================================================
+// 6. Comparison operator constraint returning bool
+// =============================================================================
+fn lessThan<T || (T < T) -> bool>(x: T, y: T) -> bool {
+    return x < y
+}
+
+fn equalTo<T || (T == T) -> bool>(x: T, y: T) -> bool {
+    return x == y
+}
+
+// =============================================================================
+// 7. Subtraction and division constraints
+// =============================================================================
+fn subtract<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn divide<T || (T / T) -> T>(x: T, y: T) -> T {
+    return x / y
+}
+
+// =============================================================================
+// 8. All four arithmetic ops constrained together
+// =============================================================================
+fn allArith<T || (T + T) -> T, (T - T) -> T, (T * T) -> T, (T / T) -> T>(a: T, b: T) -> T {
+    return (a + b) * (a - b) / b
+}
+
+// =============================================================================
+// 9. Unary ! constraint
+// =============================================================================
+fn logicalNot<T || !T -> bool>(x: T) -> bool {
+    return !x
+}
+
+// =============================================================================
+// 10. Class with overloaded + satisfying constraint at call site
+// =============================================================================
+type Vector = class {
+    let x: f32, y: f32
+
+    fn init(p: {x: f32, y: f32}) {}
+
+    fn +(other: Vector) -> Vector {
+        return new Vector({x: this.x + other.x, y: this.y + other.y})
+    }
+
+    fn -(other: Vector) -> Vector {
+        return new Vector({x: this.x - other.x, y: this.y - other.y})
+    }
+
+    fn -() -> Vector {
+        return new Vector({x: -this.x, y: -this.y})
+    }
+}
+
+// =============================================================================
+// 11. Nested expression using multiple constraints
+// =============================================================================
+fn quadratic<T || (T + T) -> T, (T * T) -> T, -T -> T>(a: T, b: T, c: T) -> T {
+    return a * b + c + -a
+}
+
+// =============================================================================
+// Main: call-site tests
+// =============================================================================
+fn main() {
+    // --- 1. Basic add ---
+    /// @Type(r1): i32
+    let r1 = add(1i32, 2i32)
+
+    /// @Type(r2): f64
+    let r2 = add(1.0, 2.0)
+
+    /// @Type(r3): string
+    let r3 = add("hello ", "world")
+
+    /// @Type(r4): u32
+    let r4 = add(10u32, 20u32)
+
+    // --- 2. Negate ---
+    /// @Type(r5): i32
+    let r5 = negate(42i32)
+
+    /// @Type(r6): f64
+    let r6 = negate(3.14)
+
+    // --- 3. Multiple constraints (math) ---
+    /// @Type(r7): f32
+    let r7 = math(1.0f, 2.0f)
+
+    /// @Type(r8): i32
+    let r8 = math(3i32, 4i32)
+
+    // --- 5. Multi-type-param ---
+    /// @Type(r9): string
+    let r9 = mixedAdd("count: ", 42i32)
+
+    // --- 6. Comparison constraints ---
+    /// @Type(r10): bool
+    let r10 = lessThan(1i32, 2i32)
+
+    /// @Type(r11): bool
+    let r11 = equalTo(10u32, 10u32)
+
+    // --- 7. Subtract and divide ---
+    /// @Type(r12): f64
+    let r12 = subtract(10.0, 3.0)
+
+    /// @Type(r13): i32
+    let r13 = divide(10i32, 2i32)
+
+    // --- 8. All arithmetic ---
+    /// @Type(r14): f32
+    let r14 = allArith(10.0f, 3.0f)
+
+    // --- 9. Logical not ---
+    /// @Type(r15): bool
+    let r15 = logicalNot(true)
+
+    // --- 10. Class with operator overload satisfying constraint ---
+    let v1 = new Vector({x: 1.0f, y: 2.0f})
+    let v2 = new Vector({x: 3.0f, y: 4.0f})
+
+    /// @Type(r16): Vector
+    let r16 = add(v1, v2)
+
+    /// @Type(r17): Vector
+    let r17 = subtract(v1, v2)
+
+    /// @Type(r18): Vector
+    let r18 = negate(v1)
+
+    // --- 11. Nested expression ---
+    /// @Type(r19): i32
+    let r19 = quadratic(2i32, 3i32, 1i32)
+
+    /// @Type(r20): f32
+    let r20 = quadratic(1.0f, 2.0f, 3.0f)
+}

@@ -67,7 +67,8 @@ import type {
     InterfaceTypeDescription,
     StructTypeDescription,
     ArrayTypeDescription,
-    FFITypeDescription
+    FFITypeDescription,
+    NullableTypeDescription
 } from 'type-c-language/types';
 import {
     TypeCTypeProvider,
@@ -485,7 +486,7 @@ export class IRGenerator {
             case TypeKind.StringLiteral: return ptrType('string');
             case TypeKind.Null: return ptrType('struct'); // null ptr
             case TypeKind.Array: return ptrType('array');
-            case TypeKind.Nullable: return this.convertTypeDescriptionToIR((type as any).baseType);
+            case TypeKind.Nullable: return this.convertTypeDescriptionToIR((type as NullableTypeDescription).baseType);
             case TypeKind.Struct: return ptrType('struct');
             case TypeKind.Class: return ptrType('class');
             case TypeKind.Interface: return ptrType('interface');
@@ -1769,7 +1770,12 @@ export class IRGenerator {
         } else if (ast.isBlockStatement(node)) {
             this.visitBlockStatement(node);
         } else if (ast.isFunctionDeclarationStatement(node)) {
-            this.visitFunctionDeclaration(node.fn);
+            const fn = node.fn;
+            if (fn.genericParameters && fn.genericParameters.length > 0) {
+                this.generateGenericFunctionInstantiations(fn);
+            } else {
+                this.visitFunctionDeclaration(fn);
+            }
         }
     }
 
@@ -4192,7 +4198,7 @@ export class IRGenerator {
                     // Collect all methods that need to be present
                     const methodsToCheck = isJoinType(patternTd)
                         ? patternTd.types.flatMap(t => isInterfaceType(t) ? t.methods : [])
-                        : (patternTd as any).methods ?? [];
+                        : isInterfaceType(patternTd) ? patternTd.methods : [];
 
                     if (methodsToCheck.length === 0) {
                         f.jmp(matchLabel);

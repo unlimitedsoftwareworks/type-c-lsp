@@ -2646,6 +2646,14 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
+        // Check for operator constraints on generic types
+        const resolvedLeftForConstraint = this.typeUtils.resolveIfReference(left);
+        const resolvedRightForConstraint = this.typeUtils.resolveIfReference(right);
+        if (isGenericType(resolvedLeftForConstraint) || isGenericType(resolvedRightForConstraint)) {
+            const constraintResult = this.findOperatorConstraint(node.op, resolvedLeftForConstraint, resolvedRightForConstraint, node);
+            if (constraintResult) return constraintResult;
+        }
+
         // Comparison operators return bool (primitive fallback)
         if (['==', '!=', '<', '>', '<=', '>='].includes(node.op)) {
             return this.typeFactory.createBoolType(node);
@@ -2690,6 +2698,13 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
+        // Check for operator constraints on generic types
+        const resolvedExpr = this.typeUtils.resolveIfReference(exprType);
+        if (isGenericType(resolvedExpr)) {
+            const constraintResult = this.findOperatorConstraint(node.op, resolvedExpr, undefined, node);
+            if (constraintResult) return constraintResult;
+        }
+
         // Primitive fallback: ! returns bool
         if (node.op === '!') {
             return this.typeFactory.createBoolType(node);
@@ -2715,6 +2730,70 @@ export class TypeCTypeProvider {
 
         // Other unary operators preserve the type
         return exprType;
+    }
+
+    /**
+     * Finds a matching operator constraint in the enclosing generic function/method/type declaration.
+     * Walks up the AST to find operator constraints declared with the `||` syntax.
+     *
+     * @param operator The operator string (e.g., '+', '-', '!')
+     * @param leftType The left operand type (or only operand for unary)
+     * @param rightType The right operand type (undefined for unary)
+     * @param node The expression node for context
+     * @returns The result type if a matching constraint is found, undefined otherwise
+     */
+    private findOperatorConstraint(
+        operator: string,
+        leftType: TypeDescription,
+        rightType: TypeDescription | undefined,
+        node: AstNode
+    ): TypeDescription | undefined {
+        let current: AstNode | undefined = node;
+        while (current) {
+            let constraints: ast.OperatorConstraint[] | undefined;
+
+            if (ast.isFunctionDeclaration(current)) {
+                constraints = current.operatorConstraints;
+            } else if (ast.isClassMethod(current)) {
+                constraints = current.method?.operatorConstraints;
+            } else if (ast.isTypeDeclaration(current)) {
+                constraints = current.operatorConstraints;
+            } else if (ast.isLambdaExpression(current)) {
+                // Lambdas don't have their own operator constraints, skip
+            }
+
+            if (constraints && constraints.length > 0) {
+                for (const constraint of constraints) {
+                    if (constraint.op !== operator) continue;
+
+                    if (rightType !== undefined) {
+                        // Binary constraint check
+                        if (!constraint.isBinary || !constraint.leftType || !constraint.rightType) continue;
+
+                        const constraintLeftType = this.getType(constraint.leftType);
+                        const constraintRightType = this.getType(constraint.rightType);
+
+                        if (this.typeUtils.areTypesEqual(leftType, constraintLeftType).success &&
+                            this.typeUtils.areTypesEqual(rightType, constraintRightType).success) {
+                            return this.getType(constraint.resultType);
+                        }
+                    } else {
+                        // Unary constraint check
+                        if (constraint.isBinary || !constraint.operandType) continue;
+
+                        const constraintOperandType = this.getType(constraint.operandType);
+
+                        if (this.typeUtils.areTypesEqual(leftType, constraintOperandType).success) {
+                            return this.getType(constraint.resultType);
+                        }
+                    }
+                }
+            }
+
+            current = current.$container;
+        }
+
+        return undefined;
     }
 
     /**

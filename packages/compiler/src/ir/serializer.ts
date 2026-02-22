@@ -286,7 +286,7 @@ function serializeInstruction(inst: IRInstruction): string {
             return `    ; ${inst.comment}`;
 
         default:
-            return `    ; unknown instruction: ${(inst as any).kind}`;
+            return `    ; unknown instruction: ${(inst)}`;
     }
 }
 

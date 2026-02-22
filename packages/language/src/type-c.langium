@@ -53,6 +53,7 @@ interface FunctionDeclaration {
     fnType: 'fn' | 'cfn';
     name: string;
     genericParameters?: GenericType[];
+    operatorConstraints?: OperatorConstraint[];
     header: FunctionHeader;
     body?: BlockStatement;
     expr?: Expression;
@@ -126,7 +127,9 @@ FnTypeParam returns FunctionTypeParameter:
 
 
 fragment GenericDecl:
-    GENERICS_OPEN (genericParameters+=GenericTypeDeclaration (',' genericParameters+=GenericTypeDeclaration)*) '>';
+    GENERICS_OPEN (genericParameters+=GenericTypeDeclaration (',' genericParameters+=GenericTypeDeclaration)*)
+    ('||' operatorConstraints+=OperatorConstraintRule (',' operatorConstraints+=OperatorConstraintRule)*)?
+    '>';
 
 interface GenericType {
     name: string;
@@ -134,6 +137,35 @@ interface GenericType {
 }
 GenericTypeDeclaration returns GenericType:
     name=ID (':' constraint=DataType<false>)?;
+
+interface OperatorConstraint {
+    isBinary: boolean;
+    leftType?: DataType;
+    op: string;
+    rightType?: DataType;
+    operandType?: DataType;
+    resultType: DataType;
+}
+
+OperatorConstraintRule returns OperatorConstraint:
+    BinaryOperatorConstraint | UnaryOperatorConstraint;
+
+BinaryOperatorConstraint returns OperatorConstraint:
+    isBinary?='(' leftType=PostfixType op=BinaryConstraintOp rightType=PostfixType ')' '->' resultType=DataType<false>;
+
+UnaryOperatorConstraint returns OperatorConstraint:
+    op=UnaryConstraintOp operandType=DataType<false> '->' resultType=DataType<false>;
+
+BinaryConstraintOp returns string:
+    '+' | '-' | '*' | '/' | '%' |
+    LESS_THAN | '>' | '<=' | '>=' |
+    '==' | '!=' |
+    '&' | '|' | '^' |
+    '<<' | RightShiftOp |
+    '&&' | '||';
+
+UnaryConstraintOp returns string:
+    '-' | '!' | '~' | '++' | '--';
 
 /**
  * Variable Declarations:
@@ -483,6 +515,7 @@ interface TypeDeclaration {
     isLocal?: boolean;
     name: string;
     genericParameters: GenericType[];
+    operatorConstraints?: OperatorConstraint[];
     definition: DataType;
 }
 
@@ -611,6 +644,7 @@ PrimitiveType:
 interface MethodHeader {
     header: FunctionHeader;
     genericParameters?: GenericType[];
+    operatorConstraints?: OperatorConstraint[];
     names: string[];
 }
 

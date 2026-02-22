@@ -173,4 +173,7 @@ export enum ErrorCode {
 
     // Entry Point Errors (TCE230-TCE239)
     TC_DUPLICATE_MAIN_FUNCTION = 'TCE230',
+
+    // Operator Constraint Errors (TCE240-TCE249)
+    TC_OPERATOR_CONSTRAINT_NOT_SATISFIED = 'TCE240',
 }

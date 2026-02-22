@@ -630,7 +630,7 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 return;
             }
         }
-        
+
         if (isGenericType(rightType) && rightType.constraint) {
             const operatorName = node.op;
             if (this.constraintDefinesOperator(rightType.constraint, operatorName)) {
@@ -638,6 +638,12 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
             }
         }
 
+        // Check for operator constraints declared with || syntax on the enclosing generic declaration
+        if (isGenericType(leftType) || isGenericType(rightType)) {
+            if (this.hasMatchingOperatorConstraint(node.op, leftType, rightType, node)) {
+                return;
+            }
+        }
 
         // Skip validation if either side is an error type (already reported or placeholder)
         if (leftType.kind === TypeKind.Error || rightType.kind === TypeKind.Error) {
@@ -867,6 +873,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
                 isMut: param.isMut,
                 hasDefault: param.hasDefault
             }));
+
+            // Validate operator constraints at call site
+            this.validateOperatorConstraintsAtCallSite(node, finalSubstitutions, accept);
         }
 
         // Check argument count (accounts for default parameters)
@@ -4490,6 +4499,216 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         
         // For other constraint types (classes, etc.), we don't support operator overloading
         // through constraints yet, so return false
+        return false;
+    }
+
+    /**
+     * Validates operator constraints at the call site of a generic function.
+     * Checks that the concrete types substituted for generic parameters actually
+     * support the required operators.
+     */
+    private validateOperatorConstraintsAtCallSite(
+        node: ast.FunctionCall,
+        substitutions: Map<string, TypeDescription>,
+        accept: ValidationAcceptor
+    ): void {
+        // Try to find the function declaration from the call expression
+        let constraints: ast.OperatorConstraint[] | undefined;
+
+        if (ast.isQualifiedReference(node.expr)) {
+            const ref = node.expr.reference?.ref;
+            if (ast.isFunctionDeclaration(ref)) {
+                constraints = ref.operatorConstraints;
+            }
+        } else if (ast.isMemberAccess(node.expr)) {
+            const ref = node.expr.element?.ref;
+            if (ast.isClassMethod(ref)) {
+                constraints = ref.method?.operatorConstraints;
+            }
+        }
+
+        if (!constraints || constraints.length === 0) return;
+
+        for (const constraint of constraints) {
+            if (constraint.isBinary && constraint.leftType && constraint.rightType) {
+                let leftConcreteType = this.typeProvider.getType(constraint.leftType);
+                let rightConcreteType = this.typeProvider.getType(constraint.rightType);
+
+                leftConcreteType = this.typeUtils.substituteGenerics(leftConcreteType, substitutions);
+                rightConcreteType = this.typeUtils.substituteGenerics(rightConcreteType, substitutions);
+
+                if (!this.isBinaryOperatorValid(constraint.op, leftConcreteType, rightConcreteType)) {
+                    accept('error',
+                        `Operator constraint not satisfied: Type '${leftConcreteType.toString()}' does not support binary operator '${constraint.op}' with '${rightConcreteType.toString()}'`,
+                        {
+                            node,
+                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                        }
+                    );
+                }
+            } else if (!constraint.isBinary && constraint.operandType) {
+                let operandConcreteType = this.typeProvider.getType(constraint.operandType);
+
+                operandConcreteType = this.typeUtils.substituteGenerics(operandConcreteType, substitutions);
+
+                if (!this.isUnaryOperatorValid(constraint.op, operandConcreteType)) {
+                    accept('error',
+                        `Operator constraint not satisfied: Type '${operandConcreteType.toString()}' does not support unary operator '${constraint.op}'`,
+                        {
+                            node,
+                            code: ErrorCode.TC_OPERATOR_CONSTRAINT_NOT_SATISFIED
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    /**
+     * Checks if a binary operator is valid for the given concrete types.
+     */
+    private isBinaryOperatorValid(op: string, leftType: TypeDescription, rightType: TypeDescription): boolean {
+        const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
+        const resolvedRight = this.typeUtils.resolveIfReference(rightType);
+
+        // Numeric types support arithmetic, comparison, bitwise operators
+        if (valUtils.isNumericType(resolvedLeft) && valUtils.isNumericType(resolvedRight)) {
+            return true;
+        }
+
+        // String supports +
+        if (op === '+' && (resolvedLeft.kind === TypeKind.String || resolvedRight.kind === TypeKind.String)) {
+            return true;
+        }
+
+        // Bool supports && and ||
+        if (['&&', '||'].includes(op) && resolvedLeft.kind === TypeKind.Bool && resolvedRight.kind === TypeKind.Bool) {
+            return true;
+        }
+
+        // Comparison operators (==, !=) generally work for compatible types
+        if (['==', '!='].includes(op)) {
+            return true;
+        }
+
+        // Check for class operator overloads
+        if (isClassType(resolvedLeft)) {
+            const operatorMethods = resolvedLeft.methods.filter(m => m.names.includes(op));
+            if (operatorMethods.some(method => {
+                if (method.parameters.length !== 1) return false;
+                return this.isTypeCompatible(resolvedRight, method.parameters[0].type).success;
+            })) {
+                return true;
+            }
+        }
+
+        // Check interface operator overloads
+        const interfaceType = this.typeUtils.asInterfaceType(resolvedLeft);
+        if (interfaceType) {
+            const allMethods = this.typeUtils.collectAllInterfaceMethods(interfaceType);
+            if (allMethods.some(method => {
+                if (!method.names.includes(op)) return false;
+                if (method.parameters.length !== 1) return false;
+                return this.isTypeCompatible(resolvedRight, method.parameters[0].type).success;
+            })) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Checks if a unary operator is valid for the given concrete type.
+     */
+    private isUnaryOperatorValid(op: string, operandType: TypeDescription): boolean {
+        const resolved = this.typeUtils.resolveIfReference(operandType);
+
+        // Numeric types support -, ~, ++, --
+        if (valUtils.isNumericType(resolved) && ['-', '~', '++', '--'].includes(op)) {
+            return true;
+        }
+
+        // Bool supports !
+        if (op === '!' && resolved.kind === TypeKind.Bool) return true;
+
+        // Check for class operator overloads
+        if (isClassType(resolved)) {
+            const operatorMethods = resolved.methods.filter(m => m.names.includes(op));
+            if (operatorMethods.some(method => method.parameters.length === 0)) {
+                return true;
+            }
+        }
+
+        // Check interface operator overloads
+        const interfaceType = this.typeUtils.asInterfaceType(resolved);
+        if (interfaceType) {
+            const allMethods = this.typeUtils.collectAllInterfaceMethods(interfaceType);
+            if (allMethods.some(method => {
+                if (!method.names.includes(op)) return false;
+                return method.parameters.length === 0;
+            })) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Gets operator constraints from the enclosing function/method/type declaration.
+     */
+    private getOperatorConstraints(node: AstNode): ast.OperatorConstraint[] | undefined {
+        let current: AstNode | undefined = node;
+        while (current) {
+            if (ast.isFunctionDeclaration(current)) {
+                return current.operatorConstraints;
+            } else if (ast.isClassMethod(current)) {
+                return current.method?.operatorConstraints;
+            } else if (ast.isTypeDeclaration(current)) {
+                return current.operatorConstraints;
+            }
+            current = current.$container;
+        }
+        return undefined;
+    }
+
+    /**
+     * Checks if a matching operator constraint exists in the enclosing declaration.
+     * Used for definition-site validation of binary/unary operations on generic types.
+     */
+    private hasMatchingOperatorConstraint(op: string, leftType: TypeDescription, rightType: TypeDescription | undefined, node: AstNode): boolean {
+        const constraints = this.getOperatorConstraints(node);
+        if (!constraints || constraints.length === 0) return false;
+
+        for (const constraint of constraints) {
+            if (constraint.op !== op) continue;
+
+            if (rightType !== undefined) {
+                // Binary check
+                if (!constraint.isBinary || !constraint.leftType || !constraint.rightType) continue;
+
+                const constraintLeftType = this.typeProvider.getType(constraint.leftType);
+                const constraintRightType = this.typeProvider.getType(constraint.rightType);
+
+                const leftMatch = this.typeUtils.areTypesEqual(leftType, constraintLeftType);
+                const rightMatch = this.typeUtils.areTypesEqual(rightType, constraintRightType);
+
+                if (leftMatch.success && rightMatch.success) {
+                    return true;
+                }
+            } else {
+                // Unary check
+                if (constraint.isBinary || !constraint.operandType) continue;
+
+                const constraintOperandType = this.typeProvider.getType(constraint.operandType);
+                const match = this.typeUtils.areTypesEqual(leftType, constraintOperandType);
+
+                if (match.success) {
+                    return true;
+                }
+            }
+        }
         return false;
     }
 

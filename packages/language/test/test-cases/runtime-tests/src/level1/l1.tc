@@ -8,6 +8,7 @@ from level1.test7 import test7
 from level1.test_is import testIs
 from level1.test8 import test8
 from level1.test9 import test9
+from level1.test10 import test10
 
 fn l1() {
     let funcs = [
@@ -20,7 +21,8 @@ fn l1() {
         test7,
         testIs,
         test8,
-        test9
+        test9,
+        test10
     ]
 
     foreach f in funcs {

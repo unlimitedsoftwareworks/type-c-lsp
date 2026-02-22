@@ -1,0 +1,71 @@
+// =============================================================================
+// 1. Using binary operator on generic WITHOUT any constraint
+// =============================================================================
+fn badAdd<T>(x: T, y: T) -> T {
+    /// @Error(TCE010): Binary operator '+' error
+    return x + y
+}
+
+fn badMul<T>(x: T, y: T) -> T {
+    /// @Error(TCE013): Arithmetic operator '*' error
+    return x * y
+}
+
+fn badSub<T>(x: T, y: T) -> T {
+    /// @Error(TCE013): Arithmetic operator '-' error
+    return x - y
+}
+
+// =============================================================================
+// 2. Using operator NOT covered by constraint (+ is constrained, but * is not)
+// =============================================================================
+fn addOnly<T || (T + T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE013): Arithmetic operator '*' error
+    return x * y
+}
+
+// =============================================================================
+// 3. Calling constrained function with struct that doesn't support +
+// =============================================================================
+fn add<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+type Dummy = struct {
+    x: u32
+}
+
+// =============================================================================
+// 4. Constrained function for subtraction
+// =============================================================================
+fn subtract<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+// =============================================================================
+// 5. Constrained function for unary negate
+// =============================================================================
+fn negate<T || -T -> T>(x: T) -> T {
+    return -x
+}
+
+fn main() {
+    let d1: Dummy = {x: 1u32}
+    let d2: Dummy = {x: 2u32}
+
+    // --- 3. Call add with struct that doesn't support + ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r1 = add(d1, d2)
+
+    // --- 4. Call subtract with struct that doesn't support - ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r2 = subtract(d1, d2)
+
+    // --- 5. Call negate with struct that doesn't support unary - ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r3 = negate(d1)
+
+    // --- Call add with bool (doesn't support +) ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r4 = add(true, false)
+}

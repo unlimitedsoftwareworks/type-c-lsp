@@ -1,0 +1,444 @@
+// =============================================================================
+// Stress tests for generic return type inference from operator constraints.
+// Every function here has at least one generic parameter that ONLY appears in
+// the result position of an operator constraint and must be inferred from the
+// concrete types of the operands.
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Helper classes with operator overloads
+// ---------------------------------------------------------------------------
+type Vec2 = class {
+    let x: f32, y: f32
+    fn init(p: {x: f32, y: f32}) {}
+
+    fn +(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x + other.x, y: this.y + other.y})
+    }
+    fn -(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x - other.x, y: this.y - other.y})
+    }
+    fn *(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x * other.x, y: this.y * other.y})
+    }
+    fn -() -> Vec2 {
+        return new Vec2({x: -this.x, y: -this.y})
+    }
+}
+
+type Matrix = class {
+    let data: f64
+    fn init(p: {data: f64}) {}
+
+    fn +(other: Matrix) -> Matrix {
+        return new Matrix({data: this.data + other.data})
+    }
+    fn *(other: Matrix) -> Matrix {
+        return new Matrix({data: this.data * other.data})
+    }
+    fn -(other: Matrix) -> Matrix {
+        return new Matrix({data: this.data - other.data})
+    }
+    fn -() -> Matrix {
+        return new Matrix({data: -this.data})
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 1. Basic binary: result type only in constraint
+// ---------------------------------------------------------------------------
+fn addInfer<A, B, R || (A + B) -> R>(x: A, y: B) -> R {
+    return x + y
+}
+
+fn subInfer<A, B, R || (A - B) -> R>(x: A, y: B) -> R {
+    return x - y
+}
+
+fn mulInfer<A, B, R || (A * B) -> R>(x: A, y: B) -> R {
+    return x * y
+}
+
+fn divInfer<A, B, R || (A / B) -> R>(x: A, y: B) -> R {
+    return x / y
+}
+
+fn modInfer<A, B, R || (A % B) -> R>(x: A, y: B) -> R {
+    return x % y
+}
+
+// ---------------------------------------------------------------------------
+// 2. Unary: result type only in constraint
+// ---------------------------------------------------------------------------
+fn negInfer<T, R || -T -> R>(x: T) -> R {
+    return -x
+}
+
+fn notInfer<T, R || !T -> R>(x: T) -> R {
+    return !x
+}
+
+fn bitnotInfer<T, R || ~T -> R>(x: T) -> R {
+    return ~x
+}
+
+// ---------------------------------------------------------------------------
+// 3. Comparison: result generic only in constraint (even though it's always bool)
+// ---------------------------------------------------------------------------
+fn ltInfer<A, B, R || (A < B) -> R>(x: A, y: B) -> R {
+    return x < y
+}
+
+fn eqInfer<A, B, R || (A == B) -> R>(x: A, y: B) -> R {
+    return x == y
+}
+
+fn neqInfer<A, B, R || (A != B) -> R>(x: A, y: B) -> R {
+    return x != y
+}
+
+fn gtInfer<A, B, R || (A > B) -> R>(x: A, y: B) -> R {
+    return x > y
+}
+
+fn lteInfer<A, B, R || (A <= B) -> R>(x: A, y: B) -> R {
+    return x <= y
+}
+
+fn gteInfer<A, B, R || (A >= B) -> R>(x: A, y: B) -> R {
+    return x >= y
+}
+
+// ---------------------------------------------------------------------------
+// 4. Logical: result generic only in constraint
+// ---------------------------------------------------------------------------
+fn andInfer<A, B, R || (A && B) -> R>(x: A, y: B) -> R {
+    return x && y
+}
+
+fn orInfer<A, B, R || (A || B) -> R>(x: A, y: B) -> R {
+    return x || y
+}
+
+// ---------------------------------------------------------------------------
+// 5. Bitwise: result generic only in constraint
+// ---------------------------------------------------------------------------
+fn bitAndInfer<A, B, R || (A & B) -> R>(x: A, y: B) -> R {
+    return x & y
+}
+
+fn bitOrInfer<A, B, R || (A | B) -> R>(x: A, y: B) -> R {
+    return x | y
+}
+
+fn bitXorInfer<A, B, R || (A ^ B) -> R>(x: A, y: B) -> R {
+    return x ^ y
+}
+
+fn shlInfer<A, B, R || (A << B) -> R>(x: A, y: B) -> R {
+    return x << y
+}
+
+fn shrInfer<A, B, R || (A >> B) -> R>(x: A, y: B) -> R {
+    return x >> y
+}
+
+// ---------------------------------------------------------------------------
+// 6. Multiple constraints with multiple inferred result types
+// ---------------------------------------------------------------------------
+fn addAndMul<A, B, R1, R2 || (A + B) -> R1, (A * B) -> R2>(x: A, y: B) -> R1 {
+    let _unused: R2 = x * y
+    return x + y
+}
+
+// ---------------------------------------------------------------------------
+// 7. Chain: constraint result feeds another constraint's operand
+//    W is inferred from (U + V) -> W, then used to resolve X via (W + W) -> X
+//    Actually, constraint resolution is single-pass so this tests that
+//    W must be inferred first. We'll keep both result types as the same.
+// ---------------------------------------------------------------------------
+fn chainedAdd<U, V, W || (U + V) -> W>(a: U, b: V, c: W) -> W {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 8. All numeric width combinations for return type inference
+// ---------------------------------------------------------------------------
+fn numAdd<A, B, R || (A + B) -> R>(a: A, b: B) -> R {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 9. Mixed string + numeric → string return inference
+// ---------------------------------------------------------------------------
+fn strConcat<A, B, R || (A + B) -> R>(a: A, b: B) -> R {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 10. Class operator overload return inference
+// ---------------------------------------------------------------------------
+fn classAdd<A, B, R || (A + B) -> R>(a: A, b: B) -> R {
+    return a + b
+}
+
+fn classSub<A, B, R || (A - B) -> R>(a: A, b: B) -> R {
+    return a - b
+}
+
+fn classNeg<T, R || -T -> R>(x: T) -> R {
+    return -x
+}
+
+// ---------------------------------------------------------------------------
+// 11. Multiple constraints — some already resolved, some need inference
+// ---------------------------------------------------------------------------
+fn addSubInfer<T, R1, R2 || (T + T) -> R1, (T - T) -> R2>(a: T, b: T) -> R1 {
+    let _diff: R2 = a - b
+    return a + b
+}
+
+fn arithInfer<T, RA, RS, RM, RD || (T + T) -> RA, (T - T) -> RS, (T * T) -> RM, (T / T) -> RD>(a: T, b: T) -> RA {
+    let _s: RS = a - b
+    let _m: RM = a * b
+    let _d: RD = a / b
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 12. Self-type constraint: same generic on both sides and result
+//     (result should still be inferred when it's separate from operand generic)
+// ---------------------------------------------------------------------------
+fn selfAdd<T, R || (T + T) -> R>(a: T, b: T) -> R {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 13. Constraint with already-resolved result (not never) — should NOT
+//     override. R appears in params so it's resolved already.
+// ---------------------------------------------------------------------------
+fn noOverride<T, R || (T + T) -> R>(a: T, b: T, hint: R) -> R {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// Main: call every function and assert inferred return types
+// ---------------------------------------------------------------------------
+fn main() {
+    // === 1. Basic binary with same-type operands ===
+    /// @Type(t1): i32
+    let t1 = addInfer(1i32, 2i32)
+
+    /// @Type(t2): f64
+    let t2 = addInfer(1.0, 2.0)
+
+    /// @Type(t3): u64
+    let t3 = subInfer(10u64, 3u64)
+
+    /// @Type(t4): f32
+    let t4 = mulInfer(2.0f, 3.0f)
+
+    /// @Type(t5): i32
+    let t5 = divInfer(10i32, 3i32)
+
+    /// @Type(t6): u32
+    let t6 = modInfer(10u32, 3u32)
+
+    // === 1b. Mixed numeric widths → promotion ===
+    // i32 + i64 → i64 (larger signed wins)
+    /// @Type(t7): i64
+    let t7 = addInfer(1i32, 2i64)
+
+    // u8 + u32 → u32 (larger unsigned wins)
+    /// @Type(t8): u32
+    let t8 = addInfer(1u8, 2u32)
+
+    // i32 + f64 → f64 (float dominates)
+    /// @Type(t9): f64
+    let t9 = addInfer(1i32, 2.0)
+
+    // u16 + i16 → i32 (mixed sign: u16 needs 17 bits signed → i32)
+    /// @Type(t10): i32
+    let t10 = addInfer(1u16, 2i16)
+
+    // f32 + f64 → f64 (larger float)
+    /// @Type(t11): f64
+    let t11 = addInfer(1.0f, 2.0)
+
+    // u32 + i8 → i64 (u32 needs 33 bits signed → i64)
+    /// @Type(t12): i64
+    let t12 = addInfer(1u32, 2i8)
+
+    // === 2. Unary result inference ===
+    /// @Type(t20): i32
+    let t20 = negInfer(5i32)
+
+    /// @Type(t21): f64
+    let t21 = negInfer(3.14)
+
+    /// @Type(t22): f32
+    let t22 = negInfer(1.0f)
+
+    /// @Type(t23): i64
+    let t23 = negInfer(100i64)
+
+    /// @Type(t24): bool
+    let t24 = notInfer(true)
+
+    /// @Type(t25): i32
+    let t25 = bitnotInfer(0xFFi32)
+
+    /// @Type(t26): u32
+    let t26 = bitnotInfer(0u32)
+
+    // === 3. Comparison → always bool ===
+    /// @Type(t30): bool
+    let t30 = ltInfer(1i32, 2i32)
+
+    /// @Type(t31): bool
+    let t31 = eqInfer(1.0, 2.0)
+
+    /// @Type(t32): bool
+    let t32 = neqInfer(10u32, 20u32)
+
+    /// @Type(t33): bool
+    let t33 = gtInfer(5i64, 3i64)
+
+    /// @Type(t34): bool
+    let t34 = lteInfer(1.0f, 2.0f)
+
+    /// @Type(t35): bool
+    let t35 = gteInfer(100u8, 50u8)
+
+    // === 4. Logical → always bool ===
+    /// @Type(t40): bool
+    let t40 = andInfer(true, false)
+
+    /// @Type(t41): bool
+    let t41 = orInfer(true, true)
+
+    // === 5. Bitwise → common numeric type ===
+    /// @Type(t50): i32
+    let t50 = bitAndInfer(0xFFi32, 0x0Fi32)
+
+    /// @Type(t51): u32
+    let t51 = bitOrInfer(0x00u32, 0xFFu32)
+
+    /// @Type(t52): i64
+    let t52 = bitXorInfer(1i64, 2i64)
+
+    /// @Type(t53): u32
+    let t53 = shlInfer(1u32, 4u32)
+
+    /// @Type(t54): i32
+    let t54 = shrInfer(256i32, 2i32)
+
+    // === 6. Multiple constraints with multiple inferred types ===
+    /// @Type(t60): i32
+    let t60 = addAndMul(3i32, 4i32)
+
+    /// @Type(t61): f64
+    let t61 = addAndMul(1.0, 2.0)
+
+    // === 7. Chained — W inferred from U+V, c explicitly typed ===
+    // string + i32 → string, c: string
+    /// @Type(t70): string
+    let t70 = chainedAdd("x", 1i32, "fallback")
+
+    // i32 + i32 → i32, c: i32
+    /// @Type(t71): i32
+    let t71 = chainedAdd(1i32, 2i32, 0i32)
+
+    // === 8. All numeric width combos ===
+    /// @Type(t80): u8
+    let t80 = numAdd(1u8, 2u8)
+
+    /// @Type(t81): u16
+    let t81 = numAdd(1u16, 2u16)
+
+    /// @Type(t82): i8
+    let t82 = numAdd(1i8, 2i8)
+
+    /// @Type(t83): i16
+    let t83 = numAdd(1i16, 2i16)
+
+    // === 9. String concatenation inference ===
+    // string + i32 → string
+    /// @Type(t90): string
+    let t90 = strConcat("count: ", 42i32)
+
+    // i32 + string → string
+    /// @Type(t91): string
+    let t91 = strConcat(42i32, " items")
+
+    // string + string → string
+    /// @Type(t92): string
+    let t92 = strConcat("hello ", "world")
+
+    // string + f64 → string
+    /// @Type(t93): string
+    let t93 = strConcat("pi=", 3.14)
+
+    // string + bool → string
+    /// @Type(t94): string
+    let t94 = strConcat("flag=", true)
+
+    // string + u8 → string
+    /// @Type(t95): string
+    let t95 = strConcat("byte: ", 255u8)
+
+    // === 10. Class operator overloads ===
+    let v1 = new Vec2({x: 1.0f, y: 2.0f})
+    let v2 = new Vec2({x: 3.0f, y: 4.0f})
+
+    /// @Type(t100): Vec2
+    let t100 = classAdd(v1, v2)
+
+    /// @Type(t101): Vec2
+    let t101 = classSub(v1, v2)
+
+    /// @Type(t102): Vec2
+    let t102 = classNeg(v1)
+
+    let m1 = new Matrix({data: 1.0})
+    let m2 = new Matrix({data: 2.0})
+
+    /// @Type(t103): Matrix
+    let t103 = classAdd(m1, m2)
+
+    /// @Type(t104): Matrix
+    let t104 = classSub(m1, m2)
+
+    /// @Type(t105): Matrix
+    let t105 = classNeg(m1)
+
+    // === 11. Multiple constraints, all inferred independently ===
+    /// @Type(t110): i32
+    let t110 = addSubInfer(5i32, 3i32)
+
+    /// @Type(t111): f64
+    let t111 = addSubInfer(1.0, 2.0)
+
+    /// @Type(t112): i32
+    let t112 = arithInfer(10i32, 3i32)
+
+    /// @Type(t113): f32
+    let t113 = arithInfer(1.0f, 2.0f)
+
+    // === 12. Self-type constraint ===
+    /// @Type(t120): i32
+    let t120 = selfAdd(1i32, 2i32)
+
+    /// @Type(t121): string
+    let t121 = selfAdd("a", "b")
+
+    /// @Type(t122): Vec2
+    let t122 = selfAdd(v1, v2)
+
+    // === 13. Already-resolved result (R from params, not never) ===
+    /// @Type(t130): i32
+    let t130 = noOverride(1i32, 2i32, 0i32)
+
+    /// @Type(t131): f64
+    let t131 = noOverride(1.0, 2.0, 0.0)
+}

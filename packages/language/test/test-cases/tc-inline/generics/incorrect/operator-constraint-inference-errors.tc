@@ -1,0 +1,154 @@
+// =============================================================================
+// Negative stress tests for generic return type inference from operator
+// constraints. These verify that the compiler correctly REJECTS invalid uses.
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Helper: struct with no operator overloads at all
+// ---------------------------------------------------------------------------
+type Empty = struct {
+    x: u32
+}
+
+// ---------------------------------------------------------------------------
+// Helper: class with only + operator (no -, *, etc.)
+// ---------------------------------------------------------------------------
+type OnlyAdd = class {
+    let val: i32
+    fn init(p: {val: i32}) {}
+
+    fn +(other: OnlyAdd) -> OnlyAdd {
+        return new OnlyAdd({val: this.val + other.val})
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 1. Constraint requires + but type doesn't support it
+// ---------------------------------------------------------------------------
+fn addInfer<A, B, R || (A + B) -> R>(a: A, b: B) -> R {
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 2. Constraint requires - but type doesn't support it
+// ---------------------------------------------------------------------------
+fn subInfer<A, B, R || (A - B) -> R>(a: A, b: B) -> R {
+    return a - b
+}
+
+// ---------------------------------------------------------------------------
+// 3. Constraint requires * but type doesn't support it
+// ---------------------------------------------------------------------------
+fn mulInfer<A, B, R || (A * B) -> R>(a: A, b: B) -> R {
+    return a * b
+}
+
+// ---------------------------------------------------------------------------
+// 4. Constraint requires unary - but type doesn't support it
+// ---------------------------------------------------------------------------
+fn negInfer<T, R || -T -> R>(x: T) -> R {
+    return -x
+}
+
+// ---------------------------------------------------------------------------
+// 5. Constraint requires ! but type doesn't support it (non-bool)
+// ---------------------------------------------------------------------------
+fn notInfer<T, R || !T -> R>(x: T) -> R {
+    return !x
+}
+
+// ---------------------------------------------------------------------------
+// 6. Constraint requires ~ but type doesn't support it (non-numeric)
+// ---------------------------------------------------------------------------
+fn bitnotInfer<T, R || ~T -> R>(x: T) -> R {
+    return ~x
+}
+
+// ---------------------------------------------------------------------------
+// 7. Multiple constraints where one is unsatisfied
+// ---------------------------------------------------------------------------
+fn addAndMul<T, R1, R2 || (T + T) -> R1, (T * T) -> R2>(a: T, b: T) -> R1 {
+    let _m: R2 = a * b
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 8. Class satisfies + but not - (partial overload)
+// ---------------------------------------------------------------------------
+fn addAndSub<T, R1, R2 || (T + T) -> R1, (T - T) -> R2>(a: T, b: T) -> R1 {
+    let _s: R2 = a - b
+    return a + b
+}
+
+// ---------------------------------------------------------------------------
+// 9. Logical operators on non-bool types
+// ---------------------------------------------------------------------------
+fn andInfer<A, B, R || (A && B) -> R>(a: A, b: B) -> R {
+    return a && b
+}
+
+// ---------------------------------------------------------------------------
+// Main: call-site error tests
+// ---------------------------------------------------------------------------
+fn main() {
+    let e1: Empty = {x: 1u32}
+    let e2: Empty = {x: 2u32}
+
+    // --- 1. Struct has no + operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r1 = addInfer(e1, e2)
+
+    // --- 2. Struct has no - operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r2 = subInfer(e1, e2)
+
+    // --- 3. Struct has no * operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r3 = mulInfer(e1, e2)
+
+    // --- 4. Struct has no unary - → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r4 = negInfer(e1)
+
+    // --- 5. Struct has no ! operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r5 = notInfer(e1)
+
+    // --- 6. String has no ~ operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r6 = bitnotInfer("hello")
+
+    // --- 7. Bool doesn't support + or * → TCE240 (two errors, one per constraint) ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r7 = addAndMul(true, false)
+
+    // --- 8. OnlyAdd class has + but NOT - → TCE240 for - constraint ---
+    let oa1 = new OnlyAdd({val: 1i32})
+    let oa2 = new OnlyAdd({val: 2i32})
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r8 = addAndSub(oa1, oa2)
+
+    // --- 9. i32 doesn't support && → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r9 = andInfer(1i32, 2i32)
+
+    // --- 10. bool has no unary - → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r10 = negInfer(true)
+
+    // --- 11. bool has no ~ → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r11 = bitnotInfer(true)
+
+    // --- 12. string has no - operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r12 = subInfer("hello", "world")
+
+    // --- 13. string has no * operator → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r13 = mulInfer("hello", "world")
+
+    // --- 14. string has no unary - → TCE240 ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r14 = negInfer("hello")
+}

@@ -102,6 +102,20 @@ fn quadratic<T || (T + T) -> T, (T * T) -> T, -T -> T>(a: T, b: T, c: T) -> T {
 }
 
 // =============================================================================
+// 12. Operator constraint infers return type generic (W only in constraint result)
+// =============================================================================
+fn addVars<U, V, W || (U + V) -> W>(a: U, b: V) -> W {
+    return a + b
+}
+
+// =============================================================================
+// 13. Unary constraint infers return type generic
+// =============================================================================
+fn negateResult<T, R || -T -> R>(x: T) -> R {
+    return -x
+}
+
+// =============================================================================
 // Main: call-site tests
 // =============================================================================
 fn main() {
@@ -177,4 +191,18 @@ fn main() {
 
     /// @Type(r20): f32
     let r20 = quadratic(1.0f, 2.0f, 3.0f)
+
+    // --- 12. Operator constraint infers return type generic ---
+    /// @Type(oc1): string
+    let oc1 = addVars("count: ", 42i32)
+
+    /// @Type(oc2): i32
+    let oc2 = addVars(1i32, 2i32)
+
+    /// @Type(oc3): f64
+    let oc3 = addVars(1.0, 2.0)
+
+    // --- 13. Unary constraint infers return type generic ---
+    /// @Type(oc4): i32
+    let oc4 = negateResult(5i32)
 }

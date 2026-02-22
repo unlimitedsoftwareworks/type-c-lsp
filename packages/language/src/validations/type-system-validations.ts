@@ -4576,8 +4576,9 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
         const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
         const resolvedRight = this.typeUtils.resolveIfReference(rightType);
 
-        // Numeric types support arithmetic, comparison, bitwise operators
-        if (valUtils.isNumericType(resolvedLeft) && valUtils.isNumericType(resolvedRight)) {
+        // Numeric types support arithmetic, comparison, and bitwise operators
+        const numericOps = ['+', '-', '*', '/', '%', '<', '>', '<=', '>=', '==', '!=', '&', '|', '^', '<<', '>>'];
+        if (valUtils.isNumericType(resolvedLeft) && valUtils.isNumericType(resolvedRight) && numericOps.includes(op)) {
             return true;
         }
 

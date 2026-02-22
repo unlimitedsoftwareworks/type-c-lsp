@@ -2964,6 +2964,132 @@ export class TypeCTypeProvider {
     }
 
     /**
+     * Determines the result type of `leftType op rightType` (or `op operandType` for unary)
+     * without requiring an AST expression node. Used to resolve generic return types
+     * from operator constraints at call sites.
+     */
+    private resolveOperatorResultType(
+        operator: string,
+        leftType: TypeDescription,
+        rightType: TypeDescription | undefined,
+        node: AstNode
+    ): TypeDescription | undefined {
+        if (rightType !== undefined) {
+            // Binary operator
+            // 1. Try class/interface operator overload
+            const overload = this.resolveOperatorOverload(leftType, operator, [rightType], node);
+            if (overload) return overload;
+
+            // 2. Comparison operators → bool
+            if (['==', '!=', '<', '>', '<=', '>='].includes(operator)) {
+                return this.typeFactory.createBoolType(node);
+            }
+
+            // 3. String concatenation: string + <anything> or <anything> + string → string
+            if (operator === '+') {
+                const leftIsString = isStringType(leftType) || isStringLiteralType(leftType) || isStringEnumType(leftType);
+                const rightIsString = isStringType(rightType) || isStringLiteralType(rightType) || isStringEnumType(rightType);
+                if (leftIsString || rightIsString) {
+                    return this.typeFactory.createStringType(node);
+                }
+            }
+
+            // 4. Numeric arithmetic: common numeric type
+            if (['+', '-', '*', '/', '%'].includes(operator)) {
+                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
+                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
+                if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
+                    const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
+                    if (!isErrorType(commonNumeric)) return commonNumeric;
+                }
+            }
+
+            // 5. Bitwise operators: common numeric type
+            if (['&', '|', '^', '<<', '>>'].includes(operator)) {
+                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
+                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
+                if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
+                    const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
+                    if (!isErrorType(commonNumeric)) return commonNumeric;
+                }
+            }
+
+            // 6. Logical → bool (only valid on bool operands)
+            if (['&&', '||'].includes(operator)) {
+                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
+                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
+                if (resolvedLeft.kind === TypeKind.Bool && resolvedRight.kind === TypeKind.Bool) {
+                    return this.typeFactory.createBoolType(node);
+                }
+            }
+        } else {
+            // Unary operator
+            const overload = this.resolveOperatorOverload(leftType, operator, [], node);
+            if (overload) return overload;
+
+            // ! is only valid on bool
+            if (operator === '!') {
+                const resolved = this.typeUtils.resolveIfReference(leftType);
+                if (resolved.kind === TypeKind.Bool) {
+                    return this.typeFactory.createBoolType(node);
+                }
+            }
+            if (operator === '-' || operator === '~') {
+                if (isNumericType(leftType)) return leftType;
+            }
+        }
+
+        return undefined;
+    }
+
+    /**
+     * Resolves still-`never` generic parameters by evaluating operator constraints.
+     * For example, given `fn<U, V, W || (U + V) -> W>`, if U=string and V=u32 are
+     * already inferred but W is `never`, this evaluates `string + u32 → string` and
+     * sets W=string.
+     */
+    private resolveGenericsFromOperatorConstraints(
+        constraints: ast.OperatorConstraint[],
+        substitutions: Map<string, TypeDescription>,
+        genericParamNames: string[],
+        node: AstNode
+    ): void {
+        for (const constraint of constraints) {
+            const resultType = this.getType(constraint.resultType);
+            if (!isGenericType(resultType)) continue;
+            if (!genericParamNames.includes(resultType.name)) continue;
+
+            const currentValue = substitutions.get(resultType.name);
+            if (currentValue && !isNeverType(currentValue)) continue;
+
+            if (constraint.isBinary && constraint.leftType && constraint.rightType) {
+                let leftType = this.getType(constraint.leftType);
+                let rightType = this.getType(constraint.rightType);
+                leftType = this.typeUtils.substituteGenerics(leftType, substitutions);
+                rightType = this.typeUtils.substituteGenerics(rightType, substitutions);
+
+                if (isGenericType(leftType) || isGenericType(rightType)) continue;
+                if (isNeverType(leftType) || isNeverType(rightType)) continue;
+
+                const resolved = this.resolveOperatorResultType(constraint.op, leftType, rightType, node);
+                if (resolved) {
+                    substitutions.set(resultType.name, resolved);
+                }
+            } else if (!constraint.isBinary && constraint.operandType) {
+                let operandType = this.getType(constraint.operandType);
+                operandType = this.typeUtils.substituteGenerics(operandType, substitutions);
+
+                if (isGenericType(operandType) || isNeverType(operandType)) continue;
+
+                const resolved = this.resolveOperatorResultType(constraint.op, operandType, undefined, node);
+                if (resolved) {
+                    substitutions.set(resultType.name, resolved);
+                }
+            }
+        }
+    }
+
+    /**
      * Infers the type of member access expressions (e.g., `obj.field`, `arr.length`, `arr?.clone()`).
      * 
      * **This is the most critical method for generic type substitution.**
@@ -3681,7 +3807,21 @@ export class TypeCTypeProvider {
                         }
                     }
                 }
-                
+
+                // Resolve remaining generics from operator constraints
+                // e.g., fn<U, V, W || (U + V) -> W>(...) — infer W from what U + V produces
+                if (ast.isQualifiedReference(node.expr)) {
+                    const funcRef = node.expr.reference?.ref;
+                    if (funcRef && ast.isFunctionDeclaration(funcRef) && funcRef.operatorConstraints?.length) {
+                        this.resolveGenericsFromOperatorConstraints(
+                            funcRef.operatorConstraints,
+                            substitutions,
+                            genericParamNames,
+                            node
+                        );
+                    }
+                }
+
                 // Validate that inferred types satisfy constraints
                 for (let i = 0; i < genericParams.length; i++) {
                     const param = genericParams[i];

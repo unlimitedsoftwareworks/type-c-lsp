@@ -295,6 +295,11 @@ export class TypeCTypeProvider {
             }
         }
 
+        // Function parameter default value: fn foo(x: u32 = expr)
+        if (ast.isFunctionParameter(parent) && parent.type && parent.defaultValue === node) {
+            return this.getType(parent.type);
+        }
+
         // Variable declaration with annotation
         // let x: T = expr
         if (ast.isVariableDeclaration(parent) && parent.annotation && parent.initializer === node) {
@@ -1130,6 +1135,11 @@ export class TypeCTypeProvider {
                 return this.getType(node.type);
             }
 
+            // If parameter has a default value, infer type from it
+            if (node.defaultValue) {
+                return this.inferExpression(node.defaultValue);
+            }
+
             // Otherwise, try to infer from context (lambda passed to function expecting specific function type)
             const expectedType = this.getExpectedType(node);
             if (expectedType) {
@@ -1672,7 +1682,7 @@ export class TypeCTypeProvider {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name ?? '',
-            this.getType(arg.type),
+            arg.type ? this.getType(arg.type) : this.getType(arg.defaultValue),
             arg.isMut,
             !!arg.defaultValue
         )) ?? [];
@@ -1701,7 +1711,7 @@ export class TypeCTypeProvider {
         const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name ?? '',
-            this.getType(arg.type),
+            arg.type ? this.getType(arg.type) : this.getType(arg.defaultValue),
             arg.isMut,
             !!arg.defaultValue
         )) ?? [];
@@ -2077,7 +2087,7 @@ export class TypeCTypeProvider {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
             arg.name ?? '',
-            this.getType(arg.type),
+            arg.type ? this.getType(arg.type) : this.getType(arg.defaultValue),
             arg.isMut,
             !!arg.defaultValue
         )) ?? [];

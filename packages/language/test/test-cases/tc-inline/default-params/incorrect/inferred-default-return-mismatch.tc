@@ -1,0 +1,7 @@
+// Test: Return type mismatch when parameter type is inferred from default
+
+/// @Error(TCE041): Function return type mismatch
+fn bad(x = "hello") -> u32 {
+    /// @Error(TCE031): Return type mismatch
+    return x
+}

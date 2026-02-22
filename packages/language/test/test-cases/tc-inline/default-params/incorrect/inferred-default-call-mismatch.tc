@@ -1,0 +1,10 @@
+// Test: Calling a function with inferred param type using wrong argument type
+
+fn foo(x = 0u32) -> u32 {
+    return x
+}
+
+fn main() {
+    /// @Error(TCE021): Function call argument 1 type mismatch
+    foo("hello")
+}

@@ -1,0 +1,113 @@
+// Test: Contextual typing for default values + type inference from defaults
+
+// === Feature 1: Contextual typing makes untyped literals match the declared type ===
+
+type Counter = class {
+    let value: u32
+
+    // 0 is contextually typed as u32 (not i32) because of the annotation
+    fn init(value: u32 = 0) {
+        this.value = value
+    }
+}
+
+// Bare 0 contextually becomes i64; bare 1.0 contextually becomes f32
+fn standalone(x: i64 = 0, y: f32 = 1.0) -> i64 {
+    return x
+}
+
+// === Feature 2: Infer parameter type from default value (no type annotation) ===
+
+fn inferred(x = 0u32) -> u32 {
+    return x
+}
+
+fn inferredFloat(x = 1.0f) -> f32 {
+    return x
+}
+
+fn inferredString(x = "hello") -> string {
+    return x
+}
+
+fn inferredBool(x = true) -> bool {
+    return x
+}
+
+// === Feature 2 in class init ===
+
+type Foo = class {
+    let x: u32
+
+    fn init(x = 0u32) {
+        this.x = x
+    }
+}
+
+// === Feature 2 in non-init class method ===
+
+type Bar = class {
+    let v: i64
+    fn init() { this.v = 0 }
+    fn add(delta = 1i64) -> i64 {
+        return this.v + delta
+    }
+}
+
+// === Mix: some explicit, some inferred (all with defaults) ===
+
+fn mixed(a: u32 = 0, b = 100i64) -> i64 {
+    return b
+}
+
+// Multiple inferred defaults
+fn multiInferred(a = 1u32, b = 2u32, c = 3u32) -> u32 {
+    return a + b + c
+}
+
+// === Calling all of the above ===
+
+fn main() {
+    // Class init with contextual default
+    let c = new Counter()
+    let c2 = new Counter(42u32)
+
+    // Class init with inferred default
+    let f = new Foo()
+    let f2 = new Foo(10u32)
+
+    // Non-init class method with inferred default
+    let b = new Bar()
+    /// @Type(added): i64
+    let added = b.add()
+    /// @Type(added2): i64
+    let added2 = b.add(10i64)
+
+    /// @Type(r1): i64
+    let r1 = standalone()
+
+    /// @Type(r2): u32
+    let r2 = inferred()
+
+    /// @Type(r3): f32
+    let r3 = inferredFloat()
+
+    /// @Type(r4): string
+    let r4 = inferredString()
+
+    /// @Type(r5): bool
+    let r5 = inferredBool()
+
+    /// @Type(r6): i64
+    let r6 = mixed()
+
+    /// @Type(r7): u32
+    let r7 = multiInferred()
+
+    // Also call with explicit args matching the inferred types
+    /// @Type(r8): u32
+    let r8 = inferred(42u32)
+
+    /// @Type(r9): u32
+    let r9 = multiInferred(10u32, 20u32, 30u32)
+}

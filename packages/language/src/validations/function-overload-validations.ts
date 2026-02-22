@@ -311,6 +311,9 @@ export class FunctionOverloadValidator extends TypeCBaseValidation {
                 signatures.push({ sig: signature, method });
             }
         }
+
+        // Check for ambiguous overloads due to default parameters
+        this.checkDefaultParamAmbiguity(signatures.map(s => s.sig), accept);
     }
 
     /**

@@ -3854,10 +3854,10 @@ export class TypeCTypeSystemValidator extends TypeCBaseValidation {
      */
     checkFunctionParameter = (node: ast.FunctionParameter, accept: ValidationAcceptor): void => {
         if (!node.type) return;
-        
+
         const paramType = this.typeProvider.getType(node.type);
         const errorMsg = this.checkForNullableBasicType(paramType);
-        
+
         if (errorMsg) {
             accept('error', `Parameter '${node.name ?? '<unnamed>'}' cannot have ${errorMsg}`, {
                 node: node.type,

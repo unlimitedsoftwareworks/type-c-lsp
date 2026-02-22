@@ -1,0 +1,17 @@
+// Test: Ambiguous class method overloads due to default parameters
+// Both init overloads accept 0 args when defaults are used
+
+type Addable = class {
+    let value: u32
+
+    fn init(value: u32 = 0u32) {
+        this.value = value
+    }
+
+    /// @Error(TCE028): Ambiguous function overload
+    fn init(value: string = "hgi") {
+
+    }
+
+    fn +(x: Addable) -> Addable = new Addable(this.value + x.value)
+}

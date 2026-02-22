@@ -2513,11 +2513,23 @@ export class IRGenerator {
             return this.visitNullCoalescing(node);
         }
 
-        // Logical short-circuit
-        if (op === '&&') {
-            return this.visitLogicalAnd(node);
-        }
-        if (op === '||') {
+        // Logical short-circuit (only for primitives; classes may overload && and ||)
+        if (op === '&&' || op === '||') {
+            const leftTd = this.getType(node.left);
+            const rightTd = this.getType(node.right);
+            const overload = this.resolveOperatorMethod(leftTd, op, [rightTd]);
+            if (overload) {
+                const left = this.visitExpression(node.left, undefined);
+                const right = this.visitExpression(node.right, undefined);
+                return this.emitOperatorCall(
+                    left, overload.methodId, overload.returnType,
+                    [right.register], [right.type]
+                );
+            }
+            // No overload — use primitive short-circuit logic
+            if (op === '&&') {
+                return this.visitLogicalAnd(node);
+            }
             return this.visitLogicalOr(node);
         }
 

@@ -1,0 +1,29 @@
+
+from std.internal.io import io
+
+namespace stdio {
+    fn flush() -> void {
+        io.flush()
+    }
+
+    fn flush_stderr() -> void {
+        io.flush_stderr()
+    }
+}
+
+// string print (direct, no buffer conversion needed)
+fn print(s: string) -> void {
+    io.print_str(s)
+}
+
+fn println(s: string) -> void {
+    io.println_str(s)
+}
+
+fn printErr(s: string) -> void {
+    io.eprint_str(s)
+}
+
+fn printlnErr(s: string) -> void {
+    io.eprintln_str(s)
+}

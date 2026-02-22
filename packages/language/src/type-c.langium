@@ -661,10 +661,11 @@ MethodOperatorName returns string:
     '%' |  
     LESS_THAN | 
     '>' | 
-    LESS_THAN '=' | 
-    '>' '=' | 
+    '<=' |
+    LESS_THAN '=' |
+    '>' '=' |
     '>' '>' |
-    LESS_THAN LESS_THAN | 
+    LESS_THAN LESS_THAN |
     '!' | 
     '~' | 
     '&' | 

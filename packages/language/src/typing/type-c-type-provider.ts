@@ -2628,16 +2628,6 @@ export class TypeCTypeProvider {
             return right;
         }
 
-        // Comparison operators return bool
-        if (['==', '!=', '<', '>', '<=', '>='].includes(node.op)) {
-            return this.typeFactory.createBoolType(node);
-        }
-
-        // Logical operators
-        if (['&&', '||'].includes(node.op)) {
-            return this.typeFactory.createBoolType(node);
-        }
-
         // Null coalescing
         if (node.op === '??') {
             // The result type is the RHS type
@@ -2649,11 +2639,21 @@ export class TypeCTypeProvider {
             return right;
         }
 
-        // Check for operator overloads on classes/interfaces
-        // Only classes and interfaces can have operator overloads
+        // Check for operator overloads on classes/interfaces FIRST
+        // Classes/interfaces can override the return type of any operator
         const operatorOverload = this.resolveOperatorOverload(left, node.op, [right], node);
         if (operatorOverload) {
             return operatorOverload;
+        }
+
+        // Comparison operators return bool (primitive fallback)
+        if (['==', '!=', '<', '>', '<=', '>='].includes(node.op)) {
+            return this.typeFactory.createBoolType(node);
+        }
+
+        // Logical operators return bool (primitive fallback)
+        if (['&&', '||'].includes(node.op)) {
+            return this.typeFactory.createBoolType(node);
         }
 
         // Primitive fallback for '+' supports string concatenation.
@@ -2683,14 +2683,16 @@ export class TypeCTypeProvider {
     private inferUnaryExpression(node: ast.UnaryExpression): TypeDescription {
         const exprType = this.inferExpression(node.expr);
 
-        if (node.op === '!') {
-            return this.typeFactory.createBoolType(node);
-        }
-
-        // Check for operator overloads on classes/interfaces BEFORE checking for errors
+        // Check for operator overloads on classes/interfaces FIRST
+        // Classes/interfaces can override the return type of any operator (including !)
         const operatorOverload = this.resolveOperatorOverload(exprType, node.op, [], node);
         if (operatorOverload) {
             return operatorOverload;
+        }
+
+        // Primitive fallback: ! returns bool
+        if (node.op === '!') {
+            return this.typeFactory.createBoolType(node);
         }
 
         // Check if unary minus is being applied to unsigned integer type

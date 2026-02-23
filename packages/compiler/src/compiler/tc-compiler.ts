@@ -58,6 +58,7 @@ import {
     isStringType,
     isStringLiteralType,
     isEnumType,
+    isMetaClassType,
     getMinArity
 } from 'type-c-language/types';
 import type {
@@ -1261,6 +1262,21 @@ export class IRGenerator {
                 this.popSubstitutions();
             }
         }
+
+        // Compile static methods of generic classes — they can't use class type params
+        // (enforced by static-context-validations), so compile them once with base class name
+        const classType = classDecl.definition as ast.ClassType;
+        const staticMethods = classType.methods.filter(m => m.isStatic);
+        if (staticMethods.length > 0) {
+            this.classNodeToIRName.set(classDecl, classDecl.name);
+            for (const method of staticMethods) {
+                if (method.method) {
+                    this.generateMethod(classDecl.name, method);
+                }
+            }
+            // Also generate monomorphized versions of generic static methods
+            this.generateGenericMethodInstantiations(classDecl, classDecl.name, classDecl.name);
+        }
     }
 
     private generateClass(
@@ -1461,10 +1477,11 @@ export class IRGenerator {
 
         this.debugIR(`  Generating method: ${fullMethodName}`);
 
-        // Build params: implicit 'this' + user params
-        const params: FunctionParam[] = [
-            { name: 'this', type: ptrType('class') }
-        ];
+        // Build params: implicit 'this' for instance methods + user params
+        const params: FunctionParam[] = [];
+        if (!classMethod.isStatic) {
+            params.push({ name: 'this', type: ptrType('class') });
+        }
         for (const param of methodHeader.header.args) {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
@@ -1472,10 +1489,23 @@ export class IRGenerator {
             params.push({ name: param.name ?? '', type: paramType });
         }
 
-        // Return types
+        // Return types — expand tuple types into multiple returns
         const returnTypes: IRType[] = [];
         if (methodHeader.header.returnType) {
-            returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+            const retTd = this.getType(methodHeader.header.returnType);
+            if (isTupleType(retTd)) {
+                for (const elem of retTd.elementTypes) {
+                    returnTypes.push(this.convertTypeDescriptionToIR(elem));
+                }
+            } else {
+                returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+            }
+        } else if (classMethod.expr && ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+            // No explicit return type but expression body is a tuple — infer from elements
+            for (const elem of classMethod.expr.expressions) {
+                const elemTd = this.getType(elem);
+                returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
+            }
         }
 
         const lirFunc = this.program.createFunction(
@@ -1495,8 +1525,10 @@ export class IRGenerator {
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
 
-        // Map 'this' parameter
-        this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+        // Map 'this' parameter (only for instance methods)
+        if (!classMethod.isStatic) {
+            this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+        }
 
         // Map user parameters
         for (const param of methodHeader.header.args) {
@@ -1510,8 +1542,20 @@ export class IRGenerator {
         if (classMethod.body) {
             this.visitBlockStatement(classMethod.body);
         } else if (classMethod.expr) {
-            const result = this.visitExpression(classMethod.expr, undefined);
-            lirFunc.ret([result.register], [result.type]);
+            // Handle tuple expression bodies (e.g., `= (a, b)`)
+            if (ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of classMethod.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                lirFunc.ret(values, types);
+            } else {
+                const result = this.visitExpression(classMethod.expr, undefined);
+                lirFunc.ret([result.register], [result.type]);
+            }
         }
 
         // Ensure function ends with a return (implicit void return)
@@ -1542,10 +1586,11 @@ export class IRGenerator {
         if (!classMethod.method) return;
         const methodHeader = classMethod.method;
 
-        // Build params: implicit 'this' + user params
-        const params: FunctionParam[] = [
-            { name: 'this', type: ptrType('class') }
-        ];
+        // Build params: implicit 'this' for instance methods + user params
+        const params: FunctionParam[] = [];
+        if (!classMethod.isStatic) {
+            params.push({ name: 'this', type: ptrType('class') });
+        }
         for (const param of methodHeader.header.args) {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
@@ -1553,10 +1598,23 @@ export class IRGenerator {
             params.push({ name: param.name ?? '', type: paramType });
         }
 
-        // Return types
+        // Return types — expand tuple types into multiple returns
         const returnTypes: IRType[] = [];
         if (methodHeader.header.returnType) {
-            returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+            const retTd = this.getType(methodHeader.header.returnType);
+            if (isTupleType(retTd)) {
+                for (const elem of retTd.elementTypes) {
+                    returnTypes.push(this.convertTypeDescriptionToIR(elem));
+                }
+            } else {
+                returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+            }
+        } else if (classMethod.expr && ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+            // No explicit return type but expression body is a tuple — infer from elements
+            for (const elem of classMethod.expr.expressions) {
+                const elemTd = this.getType(elem);
+                returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
+            }
         }
 
         const lirFunc = this.program.createFunction(
@@ -1576,8 +1634,10 @@ export class IRGenerator {
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
 
-        // Map 'this' parameter
-        this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+        // Map 'this' parameter (only for instance methods)
+        if (!classMethod.isStatic) {
+            this.context.variables.set('this', { register: 'this', type: ptrType('class') });
+        }
 
         // Map user parameters
         for (const param of methodHeader.header.args) {
@@ -1591,8 +1651,20 @@ export class IRGenerator {
         if (classMethod.body) {
             this.visitBlockStatement(classMethod.body);
         } else if (classMethod.expr) {
-            const result = this.visitExpression(classMethod.expr, undefined);
-            lirFunc.ret([result.register], [result.type]);
+            // Handle tuple expression bodies (e.g., `= (a, b)`)
+            if (ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of classMethod.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                lirFunc.ret(values, types);
+            } else {
+                const result = this.visitExpression(classMethod.expr, undefined);
+                lirFunc.ret([result.register], [result.type]);
+            }
         }
 
         // Ensure function ends with a return (implicit void return)
@@ -1616,24 +1688,50 @@ export class IRGenerator {
     // ============================================================================
 
     private generateFunctions(node: ast.Module | ast.NamespaceDecl): void {
+        // Generate non-generic functions first
         for (const n of node.definitions) {
             if (ast.isFunctionDeclaration(n)) {
-                if (n.genericParameters && n.genericParameters.length > 0) {
-                    this.generateGenericFunctionInstantiations(n);
-                } else {
+                if (!(n.genericParameters && n.genericParameters.length > 0)) {
                     this.visitFunctionDeclaration(n);
                 }
             }
         }
+
+        // Generate generic function instantiations with fixpoint iteration.
+        // Compiling one instantiation may register new ones (e.g., doStuff3<i64>
+        // calling doStuff2<i64> inside its body), so we loop until no new
+        // instantiations are produced.
+        const genericFuncs = node.definitions.filter(
+            (n): n is ast.FunctionDeclaration =>
+                ast.isFunctionDeclaration(n) && n.genericParameters !== undefined && n.genericParameters.length > 0
+        );
+        const generatedNames = new Set<string>();
+        let prevCount = 0;
+        do {
+            prevCount = generatedNames.size;
+            for (const funcDecl of genericFuncs) {
+                this.generateGenericFunctionInstantiations(funcDecl, generatedNames);
+            }
+        } while (generatedNames.size > prevCount);
     }
 
-    private generateGenericFunctionInstantiations(funcDecl: ast.FunctionDeclaration): void {
+    private generateGenericFunctionInstantiations(
+        funcDecl: ast.FunctionDeclaration,
+        generatedNames: Set<string>
+    ): void {
         const allInstantiations = this.monoMorph.getAllFunctionInstantiations();
         const funcInstantiations = allInstantiations.filter(
             inst => inst.declaration === funcDecl
         );
 
         for (const instantiation of funcInstantiations) {
+            const funcName = this.callableRegistry.getGenericFunctionName(
+                funcDecl,
+                instantiation.typeArgs
+            );
+            if (generatedNames.has(funcName)) continue;
+            generatedNames.add(funcName);
+
             const substitutions = new Map<string, TypeDescription>();
             funcDecl.genericParameters.forEach((param: ast.GenericType, index: number) => {
                 if (index < instantiation.typeArgs.length) {
@@ -1643,10 +1741,6 @@ export class IRGenerator {
 
             this.pushSubstitutions(substitutions);
             try {
-                const funcName = this.callableRegistry.getGenericFunctionName(
-                    funcDecl,
-                    instantiation.typeArgs
-                );
                 this.visitFunctionDeclarationWithName(funcDecl, funcName);
             } finally {
                 this.popSubstitutions();
@@ -1668,7 +1762,7 @@ export class IRGenerator {
                 : voidType()
         }));
 
-        // Return types
+        // Return types — expand tuple types into multiple returns
         const returnTypes: IRType[] = [];
         if (node.header.returnType) {
             const retTd = this.getType(node.header.returnType);
@@ -1678,6 +1772,12 @@ export class IRGenerator {
                 }
             } else {
                 returnTypes.push(this.convertTypeDescriptionToIR(retTd));
+            }
+        } else if (node.expr && ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+            // No explicit return type but expression body is a tuple — infer return types from elements
+            for (const elem of node.expr.expressions) {
+                const elemTd = this.getType(elem);
+                returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
             }
         }
 
@@ -1712,8 +1812,20 @@ export class IRGenerator {
         if (node.body) {
             this.visitBlockStatement(node.body);
         } else if (node.expr) {
-            const result = this.visitExpression(node.expr, undefined);
-            lirFunc.ret([result.register], [result.type]);
+            // Handle tuple expression bodies (e.g., `fn f() = (a, b)`)
+            if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of node.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                lirFunc.ret(values, types);
+            } else {
+                const result = this.visitExpression(node.expr, undefined);
+                lirFunc.ret([result.register], [result.type]);
+            }
         }
 
         // Ensure function ends with a return (implicit void return)
@@ -1772,7 +1884,7 @@ export class IRGenerator {
         } else if (ast.isFunctionDeclarationStatement(node)) {
             const fn = node.fn;
             if (fn.genericParameters && fn.genericParameters.length > 0) {
-                this.generateGenericFunctionInstantiations(fn);
+                this.generateGenericFunctionInstantiations(fn, new Set<string>());
             } else {
                 this.visitFunctionDeclaration(fn);
             }
@@ -1790,6 +1902,10 @@ export class IRGenerator {
                 this.func().mov(varReg, result.register, varType);
             } else if (ast.isVariableDeclTupleDestructuring(varDecl) && varDecl.initializer) {
                 this.visitTupleDestructuring(varDecl);
+            } else if (ast.isVariableDeclArrayDestructuring(varDecl) && varDecl.initializer) {
+                this.visitArrayDestructuring(varDecl);
+            } else if (ast.isVariableDeclStructDestructuring(varDecl) && varDecl.initializer) {
+                this.visitStructDestructuring(varDecl);
             }
         }
     }
@@ -1848,7 +1964,51 @@ export class IRGenerator {
                 const objTd = this.getType(memberAccess.expr);
                 const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
 
-                if (isClassType(resolvedObjTd) && memberRef) {
+                if (isMetaClassType(resolvedObjTd) && memberRef) {
+                    // Static method call on a class
+                    const baseClass = resolvedObjTd.baseClass;
+                    const classNode = baseClass.node;
+                    let classDecl: ast.TypeDeclaration | undefined;
+                    if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                        classDecl = classNode.$container;
+                    } else if (classNode && ast.isTypeDeclaration(classNode)) {
+                        classDecl = classNode;
+                    }
+
+                    const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                    if (className) {
+                        const methodName = this.getReferenceName(memberRef);
+                        let methodHeader: ast.MethodHeader | undefined;
+                        if (ast.isClassMethod(memberRef)) {
+                            methodHeader = memberRef.method;
+                        } else if (ast.isMethodHeader(memberRef)) {
+                            methodHeader = memberRef;
+                        }
+
+                        let funcName: string;
+                        if (methodHeader?.genericParameters?.length) {
+                            // Generic static method — resolve type args
+                            const memberType = this.typeProvider.getType(memberAccess);
+                            const resolvedMemberType = isReferenceType(memberType) ? this.typeUtils.resolveIfReference(memberType) : memberType;
+                            const parameterTypes = isFunctionType(resolvedMemberType)
+                                ? resolvedMemberType.parameters.map(p => p.type)
+                                : (methodHeader.header?.args || []).map(p => this.typeProvider.getType(p));
+                            const methodTypeArgs = this.resolveGenericCallTypeArgs(init, methodHeader.genericParameters, parameterTypes);
+                            if (!methodTypeArgs) {
+                                throw new Error(`Unable to resolve generic arguments for static method '${methodName}'`);
+                            }
+                            const classKey = classDecl?.name || className;
+                            funcName = this.callableRegistry.getGenericMethodName(classKey, methodHeader, methodTypeArgs, classDecl);
+                        } else {
+                            funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                        }
+
+                        // No obj.register for static calls
+                        f.call(dests, funcName, argRegs, argTypes, retTypes);
+                    } else {
+                        f.call(dests, 'unknown', argRegs, argTypes, retTypes);
+                    }
+                } else if (isClassType(resolvedObjTd) && memberRef) {
                     // Concrete class — direct call
                     const methodName = this.getReferenceName(memberRef);
                     const classNode = resolvedObjTd.node;
@@ -1873,7 +2033,56 @@ export class IRGenerator {
             } else if (ast.isQualifiedReference(init.expr)) {
                 const ref = init.expr.reference?.ref;
                 if (ref && ast.isFunctionDeclaration(ref)) {
-                    const funcName = this.C(ref);
+                    let funcName = this.C(ref);
+                    if (ref.genericParameters && ref.genericParameters.length > 0) {
+                        // First try with type-provider-inferred parameter types
+                        const calleeType = this.typeProvider.getType(init.expr);
+                        const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                        let parameterTypes = isFunctionType(resolvedCalleeType)
+                            ? resolvedCalleeType.parameters.map(p => p.type)
+                            : (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+
+                        let inferredTypeArgs = this.resolveGenericCallTypeArgs(init, ref.genericParameters, parameterTypes);
+
+                        // If inference failed (e.g., type provider already resolved generics),
+                        // fall back to using the declaration's raw parameter types
+                        if (!inferredTypeArgs) {
+                            const declParamTypes = (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                            // Check if declaration params contain generics (unresolved)
+                            if (declParamTypes.some(t => isGenericType(t))) {
+                                inferredTypeArgs = this.resolveGenericCallTypeArgs(init, ref.genericParameters, declParamTypes);
+                            }
+                        }
+
+                        // If still failed, try to resolve from the call's return type context
+                        if (!inferredTypeArgs && isFunctionType(resolvedCalleeType)) {
+                            // The type provider has already resolved the call — extract type args
+                            // by matching resolved param types against generic declaration params
+                            const declParamTypes = (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                            const genericParamNames = ref.genericParameters.map(p => p.name);
+                            const resolvedTypeArgs: TypeDescription[] = [];
+                            for (const name of genericParamNames) {
+                                // Find this generic in declaration params and get the resolved type
+                                let found = false;
+                                for (let i = 0; i < declParamTypes.length; i++) {
+                                    const dpt = declParamTypes[i];
+                                    if (isGenericType(dpt) && dpt.name === name) {
+                                        resolvedTypeArgs.push(resolvedCalleeType.parameters[i].type);
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if (!found) break;
+                            }
+                            if (resolvedTypeArgs.length === genericParamNames.length) {
+                                inferredTypeArgs = resolvedTypeArgs;
+                            }
+                        }
+
+                        if (inferredTypeArgs) {
+                            funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
+                        }
+                    }
                     f.call(dests, funcName, argRegs, argTypes, retTypes);
                 } else {
                     const varInfo = this.lookupVariable(this.getReferenceName(ref));
@@ -1913,15 +2122,130 @@ export class IRGenerator {
         }
     }
 
+    /**
+     * Handle array destructuring: let [x, y, ...rest] = arr
+     * Extracts elements from an array into individual variables.
+     */
+    private visitArrayDestructuring(varDecl: ast.VariableDeclArrayDestructuring): void {
+        const f = this.func();
+        const elements = varDecl.elements;
+
+        // Evaluate the initializer (should be an array)
+        const arrResult = this.visitExpression(varDecl.initializer!, undefined);
+        const initTd = this.getType(varDecl.initializer!);
+        const resolvedInitTd = isReferenceType(initTd) ? this.typeUtils.resolveIfReference(initTd) : initTd;
+
+        // Determine element type from array type
+        let elemIRType: IRType = scalarType('u64');
+        if (isArrayType(resolvedInitTd)) {
+            elemIRType = this.convertTypeDescriptionToIR((resolvedInitTd as ArrayTypeDescription).elementType);
+        }
+
+        for (let i = 0; i < elements.length; i++) {
+            const elem = elements[i];
+            if (!elem.name) continue; // wildcard '_'
+
+            if (elem.isSpread) {
+                // Spread element: slice the rest of the array
+                const startReg = this.tmp();
+                const lenReg = this.tmp();
+                f.constInt(startReg, BigInt(i), 'u64');
+                f.arrayLength(lenReg, arrResult.register);
+                const sliceReg = this.tmp();
+                f.arraySlice(sliceReg, arrResult.register, startReg, lenReg);
+                const varType = ptrType('array') as IRType;
+                const varReg = this.allocateVariable(elem.name, varType);
+                f.mov(varReg, sliceReg, varType);
+            } else {
+                // Regular element: get by index
+                const idxReg = this.tmp();
+                f.constInt(idxReg, BigInt(i), 'u64');
+                const valReg = this.tmp();
+                f.arrayGet(valReg, arrResult.register, idxReg, elemIRType);
+                const varReg = this.allocateVariable(elem.name, elemIRType);
+                f.mov(varReg, valReg, elemIRType);
+            }
+        }
+    }
+
+    /**
+     * Handle struct destructuring: let {name, age: myAge, ...rest} = obj
+     * Extracts fields from a struct into individual variables.
+     */
+    private visitStructDestructuring(varDecl: ast.VariableDeclStructDestructuring): void {
+        const f = this.func();
+        const elements = varDecl.elements;
+
+        // Evaluate the initializer (should be a struct)
+        const structResult = this.visitExpression(varDecl.initializer!, undefined);
+        const initTd = this.getType(varDecl.initializer!);
+        const resolvedInitTd = isReferenceType(initTd) ? this.typeUtils.resolveIfReference(initTd) : initTd;
+        const structTd = this.typeUtils.asStructType(resolvedInitTd);
+
+        if (!structTd) {
+            // Not a struct type - can't destructure
+            return;
+        }
+
+        // Collect field names that are individually destructured (for spread exclusion)
+        const destructuredFieldNames = new Set<string>();
+        for (const elem of elements) {
+            if (!elem.isSpread && elem.name) {
+                destructuredFieldNames.add(elem.originalName ?? elem.name);
+            }
+        }
+
+        for (const elem of elements) {
+            if (!elem.name) continue; // wildcard '_'
+
+            if (elem.isSpread) {
+                // Spread: create a new struct with the remaining fields
+                const remainingFields = (structTd as StructTypeDescription).fields
+                    .filter(field => !destructuredFieldNames.has(field.name));
+
+                // Get the type for the spread variable from the type provider
+                const spreadTd = this.getType(elem);
+                const resolvedSpreadTd = isReferenceType(spreadTd) ? this.typeUtils.resolveIfReference(spreadTd) : spreadTd;
+                const spreadStructTd = this.typeUtils.asStructType(resolvedSpreadTd) ?? resolvedSpreadTd;
+
+                const shapeId = this.getOrDeclareStructShape(spreadStructTd);
+                const newStruct = this.tmp();
+                f.structAlloc(newStruct, shapeId);
+
+                // Copy remaining fields from source to new struct
+                for (const field of remainingFields) {
+                    const fieldType = this.convertTypeDescriptionToIR(field.type);
+                    const nameId = this.getOrCreateFieldNameId(field.name);
+                    const fieldVal = this.tmp();
+                    f.structGet(fieldVal, structResult.register, nameId, fieldType);
+                    f.structSet(newStruct, nameId, fieldVal, fieldType);
+                }
+
+                const varType = ptrType('struct') as IRType;
+                const varReg = this.allocateVariable(elem.name, varType);
+                f.mov(varReg, newStruct, varType);
+            } else {
+                // Regular field extraction
+                const fieldName = elem.originalName ?? elem.name;
+                const field = (structTd as StructTypeDescription).fields.find(fld => fld.name === fieldName);
+                if (field) {
+                    const fieldType = this.convertTypeDescriptionToIR(field.type);
+                    const nameId = this.getOrCreateFieldNameId(fieldName);
+                    const valReg = this.tmp();
+                    f.structGet(valReg, structResult.register, nameId, fieldType);
+                    const varReg = this.allocateVariable(elem.name, fieldType);
+                    f.mov(varReg, valReg, fieldType);
+                }
+            }
+        }
+    }
+
     // ---- Return ----
 
     private visitReturnStatement(node: ast.ReturnStatement): void {
         if (node.expr) {
-            const result = this.visitExpression(node.expr, undefined);
-            // Check if returning a tuple expression
+            // Check if returning a tuple expression directly
             if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
-                // Multi-value return handled in visitTupleExpression
-                // result is the first value; we need all values
                 const values: VReg[] = [];
                 const types: IRType[] = [];
                 for (const elem of node.expr.expressions) {
@@ -1930,12 +2254,156 @@ export class IRGenerator {
                     types.push(r.type);
                 }
                 this.func().ret(values, types);
-            } else {
-                this.func().ret([result.register], [result.type]);
+                return;
             }
+
+            // Check if returning a function call that returns a tuple
+            // (e.g., `return doStuff2<T>(x)` where doStuff2 returns (T, T))
+            const retTd = this.getType(node.expr);
+            if (isTupleType(retTd) && ast.isFunctionCall(node.expr)) {
+                this.visitTupleReturningCall(node.expr, retTd);
+                return;
+            }
+
+            const result = this.visitExpression(node.expr, undefined);
+            this.func().ret([result.register], [result.type]);
         } else {
             this.func().ret();
         }
+    }
+
+    /**
+     * Handle returning a function call that returns a tuple.
+     * Generates a multi-dest call and returns all values.
+     */
+    private visitTupleReturningCall(
+        callNode: ast.FunctionCall,
+        tupleTd: TypeDescription
+    ): void {
+        const f = this.func();
+
+        // Determine element types from the tuple type
+        const retTypes: IRType[] = [];
+        if (isTupleType(tupleTd)) {
+            for (const elemTd of tupleTd.elementTypes) {
+                retTypes.push(this.convertTypeDescriptionToIR(elemTd));
+            }
+        }
+        const dests: VReg[] = retTypes.map(() => this.tmp());
+
+        // Evaluate arguments
+        const argRegs: VReg[] = [];
+        const argTypes: IRType[] = [];
+        if (callNode.args) {
+            for (const arg of callNode.args) {
+                const argResult = this.visitExpression(arg, undefined);
+                argRegs.push(argResult.register);
+                argTypes.push(argResult.type);
+            }
+        }
+
+        // Expand default arguments
+        this.expandDefaultArguments(callNode, argRegs, argTypes);
+
+        // Determine call target (reuse logic from visitFunctionCall/visitMethodCall)
+        if (ast.isMemberAccess(callNode.expr)) {
+            const memberAccess = callNode.expr;
+            const obj = this.visitExpression(memberAccess.expr, undefined);
+            const memberRef = memberAccess.element?.ref;
+            const objTd = this.getType(memberAccess.expr);
+            const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+            if (isMetaClassType(resolvedObjTd) && memberRef) {
+                const baseClass = resolvedObjTd.baseClass;
+                const classNode = baseClass.node;
+                let classDecl: ast.TypeDeclaration | undefined;
+                if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                    classDecl = classNode.$container;
+                } else if (classNode && ast.isTypeDeclaration(classNode)) {
+                    classDecl = classNode;
+                }
+                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                if (className) {
+                    const methodName = this.getReferenceName(memberRef);
+                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    f.call(dests, funcName, argRegs, argTypes, retTypes);
+                }
+            } else if (isClassType(resolvedObjTd) && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const classNode = resolvedObjTd.node;
+                const className = classNode && ast.isTypeDeclaration(classNode)
+                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    : undefined;
+                if (className) {
+                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+                } else {
+                    const methodId = this.getMethodId(resolvedObjTd, methodName);
+                    f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+                }
+            } else if (isInterfaceType(resolvedObjTd) && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const methodId = this.getMethodId(resolvedObjTd, methodName);
+                f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+            }
+        } else if (ast.isQualifiedReference(callNode.expr)) {
+            const ref = callNode.expr.reference?.ref;
+            if (ref && ast.isFunctionDeclaration(ref)) {
+                let funcName = this.C(ref);
+                if (ref.genericParameters && ref.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(callNode.expr);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    let parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                    let inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, ref.genericParameters, parameterTypes);
+                    if (!inferredTypeArgs) {
+                        const declParamTypes = (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                        if (declParamTypes.some(t => isGenericType(t))) {
+                            inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, ref.genericParameters, declParamTypes);
+                        }
+                    }
+                    if (!inferredTypeArgs && isFunctionType(resolvedCalleeType)) {
+                        const declParamTypes = (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                        const genericParamNames = ref.genericParameters.map(p => p.name);
+                        const resolvedTypeArgs: TypeDescription[] = [];
+                        for (const name of genericParamNames) {
+                            let found = false;
+                            for (let i = 0; i < declParamTypes.length; i++) {
+                                const dpt = declParamTypes[i];
+                                if (isGenericType(dpt) && dpt.name === name) {
+                                    resolvedTypeArgs.push(resolvedCalleeType.parameters[i].type);
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) break;
+                        }
+                        if (resolvedTypeArgs.length === genericParamNames.length) {
+                            inferredTypeArgs = resolvedTypeArgs;
+                        }
+                    }
+                    if (inferredTypeArgs) {
+                        funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
+                    }
+                }
+                f.call(dests, funcName, argRegs, argTypes, retTypes);
+            } else {
+                const varInfo = this.lookupVariable(this.getReferenceName(ref));
+                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                    f.callClosure(dests, varInfo.register, argRegs, argTypes, retTypes);
+                }
+            }
+        } else {
+            const funcExpr = this.visitExpression(callNode.expr, undefined);
+            if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
+                f.callClosure(dests, funcExpr.register, argRegs, argTypes, retTypes);
+            } else {
+                f.call(dests, funcExpr.register, argRegs, argTypes, retTypes);
+            }
+        }
+
+        f.ret(dests, retTypes);
     }
 
     // ---- Control Flow Statements ----
@@ -3305,7 +3773,44 @@ export class IRGenerator {
             }
         }
 
-        if (isFFIType(resolvedObjTd)) {
+        if (isMetaClassType(resolvedObjTd)) {
+            // Static method call on a class
+            const baseClass = resolvedObjTd.baseClass;
+            const classNode = baseClass.node;
+            let classDecl: ast.TypeDeclaration | undefined;
+            if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                classDecl = classNode.$container;
+            } else if (classNode && ast.isTypeDeclaration(classNode)) {
+                classDecl = classNode;
+            }
+
+            const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+            if (className && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                let methodHeader: ast.MethodHeader | undefined;
+                if (ast.isClassMethod(memberRef)) methodHeader = memberRef.method;
+                else if (ast.isMethodHeader(memberRef)) methodHeader = memberRef;
+
+                let funcName: string;
+                if (methodHeader?.genericParameters?.length) {
+                    const memberType = this.typeProvider.getType(memberAccess);
+                    const resolvedMemberType = isReferenceType(memberType) ? this.typeUtils.resolveIfReference(memberType) : memberType;
+                    const parameterTypes = isFunctionType(resolvedMemberType)
+                        ? resolvedMemberType.parameters.map(p => p.type)
+                        : (methodHeader.header?.args || []).map(p => this.typeProvider.getType(p));
+                    const methodTypeArgs = this.resolveGenericCallTypeArgs(node, methodHeader.genericParameters, parameterTypes);
+                    if (!methodTypeArgs) {
+                        throw new Error(`Unable to resolve generic arguments for static method '${methodName}' on class '${className}'`);
+                    }
+                    const classKey = classDecl?.name || className;
+                    funcName = this.callableRegistry.getGenericMethodName(classKey, methodHeader, methodTypeArgs, classDecl);
+                } else {
+                    funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                }
+                // No obj.register for static calls
+                f.call(dests, funcName, argRegs, argTypes, retTypes);
+            }
+        } else if (isFFIType(resolvedObjTd)) {
             // FFI method call — resolve method index from extern block order
             const ffiTd = resolvedObjTd as FFITypeDescription;
             const ffiMethodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
@@ -3375,6 +3880,9 @@ export class IRGenerator {
         } else {
             // Fallback: treat as direct call with mangled name
             const methodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
+            if(methodName === 'unkown') {
+                console.error('breakpoint, unknown name generated')
+            }
             f.call(dests, methodName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
         }
 

@@ -3807,6 +3807,14 @@ export class TypeCTypeProvider {
                 // Check if it's a ReferenceType
                 if (isReferenceType(baseType)) {
                     extractClassInfo(baseType);
+                } else if (isMetaClassType(baseType)) {
+                    // Static method call on a class (e.g., Z.callme2(...))
+                    const classNode = baseType.baseClass.node;
+                    if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                        classDeclaration = classNode.$container;
+                    } else if (classNode && ast.isTypeDeclaration(classNode)) {
+                        classDeclaration = classNode;
+                    }
                 }
                 
                 // Register if we have a generic class instantiation

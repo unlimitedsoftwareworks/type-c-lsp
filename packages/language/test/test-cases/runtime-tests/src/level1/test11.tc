@@ -107,9 +107,15 @@ fn test_case_3(rn: TestUnit) {
     rn.assert_eq(tt, -3)
 
     // Test with edge cases
-    let (uu, vv) = doStuff3<u32>(255)  // Test overflow
-    rn.assert_eq(uu, 0)  // 255 + 1 = 0 (overflow)
-    rn.assert_eq(vv, 1)  // 255 + 2 = 1 (overflow)
+    let (uu, vv) = doStuff3<u32>(255)
+    rn.assert_eq(uu, 256)  // 255 + 1 = 256 (u32 does not overflow at 255)
+    rn.assert_eq(vv, 257)  // 255 + 2 = 257
+
+    let x1 = 255u8
+    let x2 = 255u8
+
+    rn.assert_eq(x1+1u8, 1) 
+    rn.assert_eq(x1+2u8, 2)
 
     let (ww, xx) = doStuff3<i64>(-100)  // Test underflow
     rn.assert_eq(ww, -99)

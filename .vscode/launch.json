@@ -10,6 +10,7 @@
             "type": "extensionHost",
             "request": "launch",
             "args": [
+                "${workspaceFolder}/packages/language/test/test-cases/runtime-tests",
                 "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
             ],
             "sourceMaps": true,

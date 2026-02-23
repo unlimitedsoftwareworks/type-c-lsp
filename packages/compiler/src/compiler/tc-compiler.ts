@@ -129,6 +129,8 @@ export class IRGenerator {
     readonly typeProvider: TypeCTypeProvider;
     readonly monoMorph: MonomorphizationRegistry;
     readonly typeUtils: TypeCTypeUtils;
+    private allDocuments: LangiumDocument<AstNode>[] = [];
+    private typeNameCache: Map<string, TypeDescription | null> = new Map();
 
     ffiRegistery: FFIRegistery = new FFIRegistery();
 
@@ -1098,6 +1100,8 @@ export class IRGenerator {
     // ============================================================================
 
     public generate(documents: LangiumDocument<AstNode>[]): IRProgram {
+        this.allDocuments = documents;
+        this.typeNameCache.clear();
         for (const doc of documents) {
             if (!ast.isModule(doc.parseResult.value)) {
                 console.log("Invalid node");
@@ -4536,6 +4540,7 @@ export class IRGenerator {
     private visitMatchStatement(node: ast.MatchStatement): void {
         const f = this.func();
         const subject = this.visitExpression(node.target, undefined);
+        const subjectTd = this.getType(node.target);
         const endLabel = this.generateLabel('match_end');
 
         for (let i = 0; i < node.cases.length; i++) {
@@ -4547,7 +4552,7 @@ export class IRGenerator {
 
             // Check pattern
             if (matchCase.pattern) {
-                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel);
+                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel, subjectTd);
             } else {
                 // Default case: always matches
                 f.jmp(bodyLabel);
@@ -4578,6 +4583,7 @@ export class IRGenerator {
     private visitMatchExpression(node: ast.MatchExpression): ExpressionResult {
         const f = this.func();
         const subject = this.visitExpression(node.target, undefined);
+        const subjectTd = this.getType(node.target);
         const resultReg = this.tmp();
         const resultType = this.getNodeIRType(node);
         const endLabel = this.generateLabel('matchexpr_end');
@@ -4592,7 +4598,7 @@ export class IRGenerator {
             const bodyLabel = this.generateLabel('matchexpr_body');
 
             if (matchCase.pattern) {
-                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel);
+                this.emitPatternCheck(subject, matchCase.pattern, bodyLabel, nextCaseLabel, subjectTd);
             } else {
                 f.jmp(bodyLabel);
             }
@@ -4627,7 +4633,8 @@ export class IRGenerator {
         subject: ExpressionResult,
         pattern: ast.MatchCasePattern,
         matchLabel: string,
-        failLabel: string
+        failLabel: string,
+        subjectTd?: TypeDescription
     ): void {
         const f = this.func();
 
@@ -4643,14 +4650,27 @@ export class IRGenerator {
             }
             f.br(cmpReg, matchLabel, failLabel);
         } else if (ast.isVariablePattern(pattern)) {
-            // Variable pattern: always matches, binds in emitPatternBindings
-            f.jmp(matchLabel);
+            // Check if this variable name actually refers to a type declaration
+            // (grammar ambiguity: plain identifiers like User1 are parsed as VariablePattern)
+            const resolvedAsType = this.tryResolveVariableAsType(pattern.name);
+            if (resolvedAsType) {
+                // Treat as a type instance pattern — emit `is` check
+                const resolvedSubjectTd = subjectTd ? this.typeUtils.resolveIfReference(subjectTd) : undefined;
+                const checkReg = this.emitIsTypeCheck(
+                    subject.register, resolvedSubjectTd, resolvedAsType
+                );
+                f.br(checkReg, matchLabel, failLabel);
+            } else {
+                // Variable pattern: always matches, binds in emitPatternBindings
+                f.jmp(matchLabel);
+            }
         } else if (ast.isWildcardPattern(pattern)) {
             // Wildcard: always matches
             f.jmp(matchLabel);
         } else if (ast.isTypeInstancePattern(pattern)) {
-            // Type instance pattern: check variant tag
-            const patternTd = this.getType(pattern.type);
+            // Type instance pattern: check variant tag, class, interface, or join
+            const rawPatternTd = this.getType(pattern.type);
+            const patternTd = isReferenceType(rawPatternTd) ? this.typeUtils.resolveIfReference(rawPatternTd) : rawPatternTd;
             if (isVariantConstructorType(patternTd)) {
                 // Read tag from subject
                 const tagReg = this.tmp();
@@ -4664,12 +4684,6 @@ export class IRGenerator {
                 const cmpReg = this.tmp();
                 f.cmpEq(cmpReg, tagReg, expectedTagReg, 'u8');
                 f.br(cmpReg, matchLabel, failLabel);
-            } else if (isClassType(patternTd)) {
-                // Class type pattern: check if subject is an instance of this class
-                const classId = this.resolveClassUidFromDataType(pattern.type);
-                const checkReg = this.tmp();
-                f.interfaceIsClass(checkReg, subject.register, classId);
-                f.br(checkReg, matchLabel, failLabel);
             } else if (isEnumType(patternTd)) {
                 // Enum case pattern: compare subject u32 value with expected case index
                 const enumCaseIndex = this.resolveEnumCaseIndex(pattern.type);
@@ -4683,50 +4697,13 @@ export class IRGenerator {
                     // Couldn't resolve case index, assume match
                     f.jmp(matchLabel);
                 }
-            } else if (isInterfaceType(patternTd) || isJoinType(patternTd)) {
-                // Interface or join type pattern: check conformance (like an `is` check)
-                // Navigate to MatchStatement/MatchExpression to get the subject type
-                const matchNode = pattern.$container?.$container;
-                let subjectTd: TypeDescription | undefined;
-                if (matchNode && (ast.isMatchStatement(matchNode) || ast.isMatchExpression(matchNode))) {
-                    subjectTd = this.getType(matchNode.target);
-                }
+            } else if (isClassType(patternTd) || isInterfaceType(patternTd) || isJoinType(patternTd)) {
+                // Class/Interface/Join type pattern — use the same logic as the `is` operator
                 const resolvedSubjectTd = subjectTd ? this.typeUtils.resolveIfReference(subjectTd) : undefined;
-
-                if (resolvedSubjectTd && isClassType(resolvedSubjectTd)) {
-                    // Subject is a class — compile-time assignability check
-                    const compatible = this.typeUtils.isAssignable(resolvedSubjectTd, patternTd).success;
-                    if (compatible) {
-                        f.jmp(matchLabel);
-                    } else {
-                        f.jmp(failLabel);
-                    }
-                } else if (resolvedSubjectTd && isInterfaceType(resolvedSubjectTd)) {
-                    // Subject is an interface — need runtime method checks
-                    // Collect all methods that need to be present
-                    const methodsToCheck = isJoinType(patternTd)
-                        ? patternTd.types.flatMap(t => isInterfaceType(t) ? t.methods : [])
-                        : isInterfaceType(patternTd) ? patternTd.methods : [];
-
-                    if (methodsToCheck.length === 0) {
-                        f.jmp(matchLabel);
-                    } else {
-                        for (const method of methodsToCheck) {
-                            for (const methodName of method.names) {
-                                const methodId = this.getOrCreateMethodNameId(methodName);
-                                const checkReg = this.tmp();
-                                f.interfaceHasMethod(checkReg, subject.register, methodId);
-                                const nextLabel = this.generateLabel('iface_pat_next');
-                                f.br(checkReg, nextLabel, failLabel);
-                                f.label(nextLabel);
-                            }
-                        }
-                        f.jmp(matchLabel);
-                    }
-                } else {
-                    // Unknown subject type — attempt runtime check via method presence
-                    f.jmp(matchLabel);
-                }
+                const checkReg = this.emitIsTypeCheck(
+                    subject.register, resolvedSubjectTd, patternTd, pattern.type
+                );
+                f.br(checkReg, matchLabel, failLabel);
             } else {
                 // Other non-variant type patterns: assume match for now
                 f.jmp(matchLabel);
@@ -4841,10 +4818,14 @@ export class IRGenerator {
         const f = this.func();
 
         if (ast.isVariablePattern(pattern)) {
-            // Bind subject value to pattern variable
-            const varType = subject.type;
-            const varReg = this.allocateVariable(pattern.name, varType);
-            f.mov(varReg, subject.register, varType);
+            // Skip binding if this variable name actually refers to a type (grammar ambiguity)
+            const resolvedAsType = this.tryResolveVariableAsType(pattern.name);
+            if (!resolvedAsType) {
+                // Bind subject value to pattern variable
+                const varType = subject.type;
+                const varReg = this.allocateVariable(pattern.name, varType);
+                f.mov(varReg, subject.register, varType);
+            }
         } else if (ast.isTypeInstancePattern(pattern)) {
             // If pattern has nested bindings (e.g., Ok(value), Ok(Ok(inner))),
             // bind constructor fields to pattern variables recursively
@@ -5147,6 +5128,128 @@ export class IRGenerator {
     // Type Operations
     // ============================================================================
 
+    /**
+     * Try to resolve a VariablePattern name as a type declaration.
+     * This handles the grammar ambiguity where plain identifiers like `User1`
+     * in match patterns are parsed as VariablePattern instead of TypeInstancePattern.
+     * Returns the resolved TypeDescription if the name refers to a class, interface,
+     * or other matchable type; undefined otherwise.
+     */
+    private tryResolveVariableAsType(name: string): TypeDescription | undefined {
+        if (this.typeNameCache.has(name)) {
+            const cached = this.typeNameCache.get(name);
+            return cached ?? undefined;
+        }
+        for (const doc of this.allDocuments) {
+            const module = doc.parseResult.value;
+            if (!ast.isModule(module)) continue;
+            for (const node of AstUtils.streamAllContents(module)) {
+                if (ast.isTypeDeclaration(node) && node.name === name) {
+                    const td = this.typeProvider.getType(node);
+                    const resolved = isReferenceType(td) ? this.typeUtils.resolveIfReference(td) : td;
+                    if (isClassType(resolved) || isInterfaceType(resolved) || isJoinType(resolved)) {
+                        this.typeNameCache.set(name, resolved);
+                        return resolved;
+                    }
+                }
+            }
+        }
+        this.typeNameCache.set(name, null);
+        return undefined;
+    }
+
+    /**
+     * Collect all method names from an interface or join type for runtime `is` checks.
+     */
+    private collectInterfaceMethodNames(td: TypeDescription): string[] {
+        const names: string[] = [];
+        if (isJoinType(td)) {
+            for (const t of td.types) {
+                if (isInterfaceType(t)) {
+                    for (const method of t.methods) {
+                        names.push(...method.names);
+                    }
+                }
+            }
+        } else if (isInterfaceType(td)) {
+            for (const method of td.methods) {
+                names.push(...method.names);
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Emit an `is` type check for class/interface/join targets.
+     * Returns a VReg containing bool (u8 0/1).
+     *
+     * This is the shared core for both the `is` expression and type-instance match patterns.
+     * When resolvedLeft is undefined (subject type unknown at compile time),
+     * runtime checks are always emitted.
+     */
+    private emitIsTypeCheck(
+        subjectReg: VReg,
+        resolvedLeft: TypeDescription | undefined,
+        resolvedTarget: TypeDescription,
+        destDataType?: ast.DataType
+    ): VReg {
+        const f = this.func();
+        const temp = this.tmp();
+
+        // Subject is a class → fully resolved at compile time
+        if (resolvedLeft && isClassType(resolvedLeft)) {
+            const compatible = this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success;
+            f.constInt(temp, compatible ? 1 : 0, 'u8');
+            return temp;
+        }
+
+        // Subject is an interface (or type unknown) → may need runtime checks
+        if (isClassType(resolvedTarget)) {
+            // Check if subject is an instance of this class (runtime)
+            if (destDataType) {
+                const targetClassId = this.resolveClassUidFromDataType(destDataType);
+                f.interfaceIsClass(temp, subjectReg, targetClassId);
+            } else {
+                f.constInt(temp, 0, 'u8');
+            }
+            return temp;
+        }
+
+        if (isInterfaceType(resolvedTarget) || isJoinType(resolvedTarget)) {
+            // If subject type is known and already satisfies the target, emit true
+            if (resolvedLeft && this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success) {
+                f.constInt(temp, 1, 'u8');
+                return temp;
+            }
+            // Runtime: check all target methods exist on the object
+            const methods = this.collectInterfaceMethodNames(resolvedTarget);
+            if (methods.length === 0) {
+                f.constInt(temp, 1, 'u8');
+                return temp;
+            }
+            const failLabel = this.generateLabel('is_fail');
+            const endLabel = this.generateLabel('is_end');
+            for (const methodName of methods) {
+                const methodId = this.getOrCreateMethodNameId(methodName);
+                const checkReg = this.tmp();
+                f.interfaceHasMethod(checkReg, subjectReg, methodId);
+                const nextLabel = this.generateLabel('is_next');
+                f.br(checkReg, nextLabel, failLabel);
+                f.label(nextLabel);
+            }
+            f.constInt(temp, 1, 'u8');
+            f.jmp(endLabel);
+            f.label(failLabel);
+            f.constInt(temp, 0, 'u8');
+            f.label(endLabel);
+            return temp;
+        }
+
+        // Default: false
+        f.constInt(temp, 0, 'u8');
+        return temp;
+    }
+
     private visitInstanceCheckExpression(node: ast.InstanceCheckExpression): ExpressionResult {
         const f = this.func();
         const expr = this.visitExpression(node.left, undefined);
@@ -5176,65 +5279,9 @@ export class IRGenerator {
             return { register: temp, type: scalarType('bool') };
         }
 
-        // Branch on LHS type (following the old compiler's pattern):
-        // When LHS is a class, the concrete type is fully known → everything resolves at compile time.
-        // When LHS is an interface, the concrete type is unknown → runtime checks needed.
-
-        if (isClassType(resolvedLeft)) {
-            // LHS is a class → fully resolved at compile time
-            // Use type compatibility: if the class is assignable to the target, emit true, else false.
-            const compatible = this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success;
-            f.constInt(temp, compatible ? 1 : 0, 'u8');
-            return { register: temp, type: scalarType('bool') };
-        }
-
-        if (isInterfaceType(resolvedLeft)) {
-            // LHS is an interface → runtime type is unknown
-            if (isClassType(resolvedTarget)) {
-                // Interface `is` Class → always runtime, we can't know which class is behind the interface
-                const targetClassId = this.resolveClassUidFromDataType(node.destType);
-                f.interfaceIsClass(temp, expr.register, targetClassId);
-                return { register: temp, type: scalarType('bool') };
-            }
-            if (isInterfaceType(resolvedTarget)) {
-                // Interface `is` Interface
-                // If the LHS interface already satisfies the target (is same or wider), emit true.
-                // Otherwise fall through to runtime checks — the actual object might still satisfy it.
-                if (this.typeUtils.isAssignable(resolvedLeft, resolvedTarget).success) {
-                    f.constInt(temp, 1, 'u8');
-                    return { register: temp, type: scalarType('bool') };
-                }
-                // Runtime: check all target methods exist on the object
-                const targetMethods = resolvedTarget.methods;
-                if (targetMethods.length === 0) {
-                    // Empty interface — everything satisfies it
-                    f.constInt(temp, 1, 'u8');
-                    return { register: temp, type: scalarType('bool') };
-                }
-                const failLabel = this.generateLabel('iface_fail');
-                const endLabel = this.generateLabel('iface_end');
-                for (const method of targetMethods) {
-                    for (const methodName of method.names) {
-                        const methodId = this.getOrCreateMethodNameId(methodName);
-                        const checkReg = this.tmp();
-                        f.interfaceHasMethod(checkReg, expr.register, methodId);
-                        const nextLabel = this.generateLabel('iface_next');
-                        f.br(checkReg, nextLabel, failLabel);
-                        f.label(nextLabel);
-                    }
-                }
-                f.constInt(temp, 1, 'u8');
-                f.jmp(endLabel);
-                f.label(failLabel);
-                f.constInt(temp, 0, 'u8');
-                f.label(endLabel);
-                return { register: temp, type: scalarType('bool') };
-            }
-        }
-
-        // Anything else: emit false
-        f.constInt(temp, 0, 'u8');
-        return { register: temp, type: scalarType('bool') };
+        // Class/interface/join type check (shared helper)
+        const result = this.emitIsTypeCheck(expr.register, resolvedLeft, resolvedTarget, node.destType);
+        return { register: result, type: scalarType('bool') };
     }
 
     private visitTypeCastExpression(node: ast.TypeCastExpression): ExpressionResult {

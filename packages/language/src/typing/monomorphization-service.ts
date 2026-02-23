@@ -485,16 +485,13 @@ export class MonomorphizationRegistry {
      * @example
      * ```typescript
      * mangleName("Array<u32>") → "Array$u32"
-     * mangleName("Result<i32,string>") → "Result$i32$string"
-     * mangleName("Array<u32>::map<string>") → "Array$u32$map$string"
+     * mangleName("Result<i32,string>") → "Result<i32,string>"
+     * mangleName("Array<u32>::map<string>") → "Array<u32>.map<string>"
      * ```
      */
     mangleName(key: string): string {
         return key
-            .replace(/</g, '$')
-            .replace(/>/g, '')
-            .replace(/,/g, '$')
-            .replace(/::/g, '$')
-            .replace(/\s+/g, ''); // Remove whitespace
+            .replace(/::/g, '.')
+            .replace(/\s+/g, '');
     }
 }

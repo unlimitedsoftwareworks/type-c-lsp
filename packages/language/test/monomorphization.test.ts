@@ -253,7 +253,7 @@ describe('Monomorphization Service', () => {
         expect(arrayU32).toBeDefined();
         
         const mangledName = registry.mangleName(arrayU32!.key);
-        expect(mangledName).toBe('Array$u32');
+        expect(mangledName).toBe('Array<u32>');
     });
 
     test('should handle nested generics in mangling', async () => {
@@ -967,15 +967,13 @@ describe('Monomorphization Service', () => {
         
         if (nestedClass) {
             const mangledName = registry.mangleName(nestedClass.key);
-            
-            // Should be valid identifier: no <, >, or commas
-            expect(mangledName).not.toContain('<');
-            expect(mangledName).not.toContain('>');
-            expect(mangledName).not.toContain(',');
+
+            // Should have :: replaced with . and no whitespace
+            expect(mangledName).not.toContain('::');
             expect(mangledName).not.toContain(' ');
-            
-            // Should contain $ separators
-            expect(mangledName).toContain('$');
+
+            // Should preserve <> and , for readability
+            expect(mangledName).toContain('<');
         }
     });
 });

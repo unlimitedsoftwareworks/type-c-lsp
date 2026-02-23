@@ -66,7 +66,7 @@ export class CallableRegistry {
      * 
      * @example
      * // For: sort<u32>(arr)
-     * getGenericFunctionName(sortDecl, [u32Type]) // Returns: "sort$u32"
+     * getGenericFunctionName(sortDecl, [u32Type]) // Returns: "sort<u32>"
      */
     getGenericFunctionName(
         declaration: ast.FunctionDeclaration,
@@ -99,7 +99,7 @@ export class CallableRegistry {
      * 
      * @example
      * // For: arr.map<string>(fn) where arr: Array<u32>
-     * getGenericMethodName("Array<u32>", mapDecl, [stringType]) // Returns: "Array$u32$map$string"
+     * getGenericMethodName("Array<u32>", mapDecl, [stringType]) // Returns: "Array<u32>.map<string>"
      */
     getGenericMethodName(
         classKey: string,
@@ -148,7 +148,7 @@ export class CallableRegistry {
         const methodName = methodDecl.names[0];
         const key = `${classKey}::${methodName}`;
         
-        // Mangle the key (this handles things like Array<u32> → Array$u32)
+        // Mangle the key (this handles things like Array<u32>::map → Array<u32>.map)
         return this.monoRegistry.mangleName(key);
     }
 

@@ -1,0 +1,410 @@
+// =============================================================================
+// Stress tests for forwarding operator constraints between generic functions.
+// When a generic function calls another generic function with the same (or
+// compatible) operator constraint on its type parameter, the constraint should
+// propagate — no spurious TCE240 errors.
+// =============================================================================
+
+// =============================================================================
+// 1. Basic forwarding: same constraint signature
+// =============================================================================
+fn inner1<T || (T + i32) -> T>(x: T) -> (T, T) {
+    return (x + 1, x + 2)
+}
+
+fn outer1<T || (T + i32) -> T>(x: T) -> (T, T) {
+    return inner1<T>(x)
+}
+
+// =============================================================================
+// 2. Forwarding with (T + T) -> T constraint
+// =============================================================================
+fn innerAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn outerAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return innerAdd<T>(x, y)
+}
+
+// =============================================================================
+// 3. Forwarding unary operator constraint
+// =============================================================================
+fn innerNeg<T || -T -> T>(x: T) -> T {
+    return -x
+}
+
+fn outerNeg<T || -T -> T>(x: T) -> T {
+    return innerNeg<T>(x)
+}
+
+// =============================================================================
+// 4. Chain of 3 forwarding calls
+// =============================================================================
+fn level0<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn level1<T || (T + T) -> T>(x: T, y: T) -> T {
+    return level0<T>(x, y)
+}
+
+fn level2<T || (T + T) -> T>(x: T, y: T) -> T {
+    return level1<T>(x, y)
+}
+
+// =============================================================================
+// 5. Forwarding multiple operator constraints
+// =============================================================================
+fn innerMultiOp<T || (T + T) -> T, (T * T) -> T, (T - T) -> T>(a: T, b: T) -> T {
+    return (a + b) * (a - b)
+}
+
+fn outerMultiOp<T || (T + T) -> T, (T * T) -> T, (T - T) -> T>(a: T, b: T) -> T {
+    return innerMultiOp<T>(a, b)
+}
+
+// =============================================================================
+// 6. Superset forwarding: caller has MORE constraints than callee
+// =============================================================================
+fn needsOnlyAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn hasAddAndMul<T || (T + T) -> T, (T * T) -> T>(x: T, y: T) -> T {
+    // callee only needs +, caller has both + and *
+    return needsOnlyAdd<T>(x, y)
+}
+
+// =============================================================================
+// 7. Forwarding with mixed binary and unary constraints
+// =============================================================================
+fn needsBinaryAndUnary<T || (T + T) -> T, -T -> T>(x: T, y: T) -> T {
+    return -x + y
+}
+
+fn forwardMixed<T || (T + T) -> T, -T -> T>(a: T, b: T) -> T {
+    return needsBinaryAndUnary<T>(a, b)
+}
+
+// =============================================================================
+// 8. Forwarding with comparison operator constraints
+// =============================================================================
+fn innerCompare<T || (T < T) -> bool>(x: T, y: T) -> bool {
+    return x < y
+}
+
+fn outerCompare<T || (T < T) -> bool>(x: T, y: T) -> bool {
+    return innerCompare<T>(x, y)
+}
+
+// =============================================================================
+// 9. Forwarding with equality operator constraint
+// =============================================================================
+fn innerEq<T || (T == T) -> bool>(x: T, y: T) -> bool {
+    return x == y
+}
+
+fn outerEq<T || (T == T) -> bool>(a: T, b: T) -> bool {
+    return innerEq<T>(a, b)
+}
+
+// =============================================================================
+// 10. Forwarding with division constraint
+// =============================================================================
+fn innerDiv<T || (T / T) -> T>(x: T, y: T) -> T {
+    return x / y
+}
+
+fn outerDiv<T || (T / T) -> T>(a: T, b: T) -> T {
+    return innerDiv<T>(a, b)
+}
+
+// =============================================================================
+// 11. Forwarding with subtraction constraint
+// =============================================================================
+fn innerSub<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn outerSub<T || (T - T) -> T>(a: T, b: T) -> T {
+    return innerSub<T>(a, b)
+}
+
+// =============================================================================
+// 12. Forwarding with logical not constraint
+// =============================================================================
+fn innerNot<T || !T -> bool>(x: T) -> bool {
+    return !x
+}
+
+fn outerNot<T || !T -> bool>(x: T) -> bool {
+    return innerNot<T>(x)
+}
+
+// =============================================================================
+// 13. Forwarding with cross-type constraint (T + U -> T)
+// =============================================================================
+fn innerCross<T, U || (T + U) -> T>(x: T, y: U) -> T {
+    return x + y
+}
+
+fn outerCross<T, U || (T + U) -> T>(a: T, b: U) -> T {
+    return innerCross<T, U>(a, b)
+}
+
+// =============================================================================
+// 14. Forwarding with inferred result type (W only in constraint)
+// =============================================================================
+fn innerInfer<U, V, W || (U + V) -> W>(a: U, b: V) -> W {
+    return a + b
+}
+
+fn outerInfer<U, V, W || (U + V) -> W>(x: U, y: V) -> W {
+    return innerInfer<U, V, W>(x, y)
+}
+
+// =============================================================================
+// 15. Forwarding + local use: caller uses constraint AND forwards it
+// =============================================================================
+fn innerHelper<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn outerUseAndForward<T || (T + T) -> T>(a: T, b: T, c: T) -> T {
+    let partial = a + b
+    return innerHelper<T>(partial, c)
+}
+
+// =============================================================================
+// 16. Forwarding across multiple independent calls
+// =============================================================================
+fn addPair<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn subPair<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn combinedOps<T || (T + T) -> T, (T - T) -> T>(a: T, b: T, c: T) -> T {
+    let sum = addPair<T>(a, b)
+    let diff = subPair<T>(a, c)
+    return addPair<T>(sum, diff)
+}
+
+// =============================================================================
+// 17. Class with operator overloads for call-site verification
+// =============================================================================
+type Vec2 = class {
+    let x: f32, y: f32
+
+    fn init(p: {x: f32, y: f32}) {}
+
+    fn +(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x + other.x, y: this.y + other.y})
+    }
+
+    fn -(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x - other.x, y: this.y - other.y})
+    }
+
+    fn -() -> Vec2 {
+        return new Vec2({x: -this.x, y: -this.y})
+    }
+
+    fn *(other: Vec2) -> Vec2 {
+        return new Vec2({x: this.x * other.x, y: this.y * other.y})
+    }
+}
+
+// =============================================================================
+// 18. Deep chain: 4 levels of forwarding
+// =============================================================================
+fn deep0<T || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return x + y - x
+}
+
+fn deep1<T || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep0<T>(x, y)
+}
+
+fn deep2<T || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep1<T>(x, y)
+}
+
+fn deep3<T || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep2<T>(x, y)
+}
+
+// =============================================================================
+// 19. Forwarding with concrete right operand types
+// =============================================================================
+fn innerAddI32<T || (T + i32) -> T>(x: T) -> T {
+    return x + 1
+}
+
+fn outerAddI32<T || (T + i32) -> T>(x: T) -> T {
+    return innerAddI32<T>(x)
+}
+
+fn innerAddF64<T || (T + f64) -> T>(x: T) -> T {
+    return x + 1.0
+}
+
+fn outerAddF64<T || (T + f64) -> T>(x: T) -> T {
+    return innerAddF64<T>(x)
+}
+
+// =============================================================================
+// 20. Forwarding with bitwise operator constraints
+// =============================================================================
+fn innerBitAnd<T || (T & T) -> T>(x: T, y: T) -> T {
+    return x & y
+}
+
+fn outerBitAnd<T || (T & T) -> T>(a: T, b: T) -> T {
+    return innerBitAnd<T>(a, b)
+}
+
+fn innerBitOr<T || (T | T) -> T>(x: T, y: T) -> T {
+    return x | y
+}
+
+fn outerBitOr<T || (T | T) -> T>(a: T, b: T) -> T {
+    return innerBitOr<T>(a, b)
+}
+
+// =============================================================================
+// 21. Forwarding with superset constraints — caller has many, callee needs few
+// =============================================================================
+fn needsJustSub<T || (T - T) -> T>(a: T, b: T) -> T {
+    return a - b
+}
+
+fn hasEverything<T || (T + T) -> T, (T - T) -> T, (T * T) -> T, (T / T) -> T>(a: T, b: T) -> T {
+    let diff = needsJustSub<T>(a, b)
+    return diff + a * b / a
+}
+
+// =============================================================================
+// Main: call-site tests to verify end-to-end correctness
+// =============================================================================
+fn main() {
+    // --- 1. Basic forwarding with concrete types ---
+    /// @Type(r1): (i32, i32)
+    let r1 = outer1(10i32)
+
+    /// @Type(r2): (i64, i64)
+    let r2 = outer1(5i64)
+
+    // --- 2. (T + T) -> T forwarding ---
+    /// @Type(r3): i32
+    let r3 = outerAdd(3i32, 4i32)
+
+    /// @Type(r4): f64
+    let r4 = outerAdd(1.0, 2.0)
+
+    // --- 3. Unary forwarding ---
+    /// @Type(r5): i32
+    let r5 = outerNeg(42i32)
+
+    /// @Type(r6): f64
+    let r6 = outerNeg(3.14)
+
+    // --- 4. Three-level chain ---
+    /// @Type(r7): i32
+    let r7 = level2(10i32, 20i32)
+
+    /// @Type(r8): f32
+    let r8 = level2(1.0f, 2.0f)
+
+    // --- 5. Multiple operator constraints ---
+    /// @Type(r9): i32
+    let r9 = outerMultiOp(5i32, 3i32)
+
+    // --- 6. Superset forwarding ---
+    /// @Type(r10): f32
+    let r10 = hasAddAndMul(1.0f, 2.0f)
+
+    // --- 7. Mixed binary + unary ---
+    /// @Type(r11): i32
+    let r11 = forwardMixed(10i32, 20i32)
+
+    // --- 8. Comparison forwarding ---
+    /// @Type(r12): bool
+    let r12 = outerCompare(1i32, 2i32)
+
+    // --- 9. Equality forwarding ---
+    /// @Type(r13): bool
+    let r13 = outerEq(10u32, 10u32)
+
+    // --- 10. Division forwarding ---
+    /// @Type(r14): i32
+    let r14 = outerDiv(10i32, 2i32)
+
+    // --- 11. Subtraction forwarding ---
+    /// @Type(r15): f64
+    let r15 = outerSub(10.0, 3.0)
+
+    // --- 12. Logical not forwarding ---
+    /// @Type(r16): bool
+    let r16 = outerNot(true)
+
+    // --- 13. Cross-type forwarding ---
+    /// @Type(r17): string
+    let r17 = outerCross("count: ", 42i32)
+
+    // --- 14. Inferred result type forwarding ---
+    /// @Type(r18): string
+    let r18 = outerInfer("val: ", 10i32)
+
+    /// @Type(r19): i32
+    let r19 = outerInfer(1i32, 2i32)
+
+    // --- 15. Use + forward ---
+    /// @Type(r20): i32
+    let r20 = outerUseAndForward(1i32, 2i32, 3i32)
+
+    // --- 16. Multiple independent forwarded calls ---
+    /// @Type(r21): f32
+    let r21 = combinedOps(1.0f, 2.0f, 3.0f)
+
+    // --- 17. Class instances through forwarding chain ---
+    let v1 = new Vec2({x: 1.0f, y: 2.0f})
+    let v2 = new Vec2({x: 3.0f, y: 4.0f})
+
+    /// @Type(r22): Vec2
+    let r22 = outerAdd(v1, v2)
+
+    /// @Type(r23): Vec2
+    let r23 = outerSub(v1, v2)
+
+    /// @Type(r24): Vec2
+    let r24 = outerNeg(v1)
+
+    /// @Type(r25): Vec2
+    let r25 = outerMultiOp(v1, v2)
+
+    // --- 18. Deep 4-level chain ---
+    /// @Type(r26): i32
+    let r26 = deep3(100i32, 50i32)
+
+    // --- 19. Concrete right operand forwarding ---
+    /// @Type(r27): i32
+    let r27 = outerAddI32(10i32)
+
+    /// @Type(r28): f64
+    let r28 = outerAddF64(1.0)
+
+    // --- 20. Bitwise forwarding ---
+    /// @Type(r29): u32
+    let r29 = outerBitAnd(0xFFu32, 0x0Fu32)
+
+    /// @Type(r30): u32
+    let r30 = outerBitOr(0xF0u32, 0x0Fu32)
+
+    // --- 21. Superset caller with many constraints, callee needs few ---
+    /// @Type(r31): i32
+    let r31 = hasEverything(10i32, 3i32)
+}

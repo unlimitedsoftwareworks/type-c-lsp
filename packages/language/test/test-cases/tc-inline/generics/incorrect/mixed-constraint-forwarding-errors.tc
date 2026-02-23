@@ -1,0 +1,233 @@
+// =============================================================================
+// Negative stress tests for MIXED constraint forwarding (: + || syntax).
+// Verifies the compiler REJECTS invalid mixed forwarding scenarios.
+// =============================================================================
+
+// =============================================================================
+// Interface definitions
+// =============================================================================
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Printable = interface {
+    fn toString() -> string
+}
+
+type Hashable = interface {
+    fn hash() -> u64
+}
+
+// =============================================================================
+// Helper classes
+// =============================================================================
+
+// Implements Serializable + supports + but NOT Printable
+type OnlySerializableAdd = class {
+    let val: i32
+    fn init(val: i32) {}
+
+    fn serialize() -> string {
+        return "data"
+    }
+
+    fn +(other: OnlySerializableAdd) -> OnlySerializableAdd {
+        return new OnlySerializableAdd(this.val + other.val)
+    }
+}
+
+// Implements Printable but no operator overloads
+type OnlyPrintable = class {
+    fn toString() -> string {
+        return "print"
+    }
+}
+
+// Supports + operator but implements no interface
+type OnlyAdd = class {
+    let val: i32
+    fn init(val: i32) {}
+
+    fn +(other: OnlyAdd) -> OnlyAdd {
+        return new OnlyAdd(this.val + other.val)
+    }
+}
+
+// Plain struct: no interfaces, no operators
+type Empty = struct {
+    x: u32
+}
+
+// =============================================================================
+// Constrained functions used as callees
+// =============================================================================
+fn needsBoth<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = x + y
+    return x.serialize()
+}
+
+fn needsMixed<T: Printable || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return x + y - x
+}
+
+fn needsSerializable<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn needsAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn needsSub<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn needsHashAndAdd<T: Hashable || (T + T) -> T>(x: T, y: T) -> u64 {
+    let sum = x + y
+    return x.hash()
+}
+
+// =============================================================================
+// 1. Has only interface constraint, callee needs mixed (missing operator)
+// =============================================================================
+fn onlyInterface<T: Serializable>(x: T, y: T) -> string {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 2. Has only operator constraint, callee needs mixed (missing interface)
+// =============================================================================
+fn onlyOperator<T || (T + T) -> T>(x: T, y: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 3. Has WRONG interface + correct operator
+// =============================================================================
+fn wrongInterface<T: Printable || (T + T) -> T>(x: T, y: T) -> string {
+    // Callee needs Serializable, caller has Printable
+    /// @Error(TCE120): does not satisfy constraint
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 4. Has correct interface + WRONG operator
+// =============================================================================
+fn wrongOperator<T: Serializable || (T * T) -> T>(x: T, y: T) -> string {
+    // Callee needs (T + T) -> T, caller has (T * T) -> T
+    /// @Error(TCE240): Operator constraint not satisfied
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 5. Has mixed but callee needs MORE operators
+// =============================================================================
+fn subsetOps<T: Printable || (T + T) -> T>(x: T, y: T) -> T {
+    // Callee needs + AND -, caller only has +
+    /// @Error(TCE240): Operator constraint not satisfied
+    return needsMixed(x, y)
+}
+
+// =============================================================================
+// 6. No constraint at all, callee needs mixed
+// =============================================================================
+fn noConstraint<T>(x: T, y: T) -> string {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 7. Has mixed, but forward to callee with DIFFERENT interface requirement
+// =============================================================================
+fn hasPrintableAdd<T: Printable || (T + T) -> T>(x: T, y: T) -> u64 {
+    // Callee needs Hashable, caller has Printable
+    /// @Error(TCE120): does not satisfy constraint
+    return needsHashAndAdd(x, y)
+}
+
+// =============================================================================
+// 8. Has mixed, but forward operator to function needing different operator
+// =============================================================================
+fn hasAddNotSub<T: Serializable || (T + T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return needsSub(x, y)
+}
+
+// =============================================================================
+// 9. Broken chain: middle drops the interface constraint
+// =============================================================================
+fn chainNeedsBoth<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = x + y
+    return x.serialize()
+}
+
+fn chainMid<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    return chainNeedsBoth(x, y)
+}
+
+fn chainBrokenInterface<T || (T + T) -> T>(x: T, y: T) -> string {
+    // Has operator but not the interface constraint
+    /// @Error(TCE120): does not satisfy constraint
+    return chainMid(x, y)
+}
+
+// =============================================================================
+// 10. Broken chain: middle drops the operator constraint
+// =============================================================================
+fn chainBrokenOp<T: Serializable>(x: T, y: T) -> string {
+    // Has interface but not the operator constraint
+    /// @Error(TCE240): Operator constraint not satisfied
+    return chainMid(x, y)
+}
+
+// =============================================================================
+// 11. Concrete call-site: type satisfies interface but NOT operator
+// =============================================================================
+fn forwardMixed<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = x + y
+    return x.serialize()
+}
+
+fn main() {
+    // --- OnlyPrintable: has toString but not serialize, no + ---
+    let op = new OnlyPrintable()
+    /// @Error(TCE120): does not satisfy constraint
+    let r1 = forwardMixed(op, op)
+
+    // --- OnlyAdd: has + but not Serializable ---
+    let oa1 = new OnlyAdd(1)
+    let oa2 = new OnlyAdd(2)
+    /// @Error(TCE120): does not satisfy constraint
+    let r2 = forwardMixed(oa1, oa2)
+
+    // --- Empty struct: no interfaces, no operators ---
+    let e1: Empty = {x: 1u32}
+    let e2: Empty = {x: 2u32}
+    /// @Error(TCE120): does not satisfy constraint
+    let r3 = forwardMixed(e1, e2)
+
+    // --- u32: no interface, has + but not Serializable ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r4 = needsBoth(1u32, 2u32)
+
+    // --- bool: no interface, no + ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r5 = needsBoth(true, false)
+}
+
+// =============================================================================
+// 12. Mixed params: swap constrained params to wrong callees
+// =============================================================================
+fn swapMixed<A: Serializable, B: Printable || (A + A) -> A, (B - B) -> B>(a1: A, a2: A, b1: B, b2: B) -> string {
+    // A is Serializable+add, but needsSub needs (T-T)->T, A only has +
+    /// @Error(TCE240): Operator constraint not satisfied
+    let bad1 = needsSub(a1, a2)
+
+    // B is Printable+sub, but needsSerializable needs Serializable, B has Printable
+    /// @Error(TCE120): does not satisfy constraint
+    let bad2 = needsSerializable(b1)
+
+    return "fail"
+}

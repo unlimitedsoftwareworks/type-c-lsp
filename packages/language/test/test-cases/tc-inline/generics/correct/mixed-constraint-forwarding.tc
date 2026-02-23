@@ -1,0 +1,317 @@
+// =============================================================================
+// Stress tests for forwarding MIXED constraints (: + || syntax combined).
+// When a generic function has both an interface constraint AND operator
+// constraints, forwarding to callees that need either or both must work.
+// =============================================================================
+
+// =============================================================================
+// Interface definitions
+// =============================================================================
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Printable = interface {
+    fn toString() -> string
+}
+
+type Hashable = interface {
+    fn hash() -> u64
+}
+
+type PrintableAndSerializable = interface Printable, Serializable {
+}
+
+// =============================================================================
+// 1. Basic: mixed constraint forwarding to function needing only the interface
+// =============================================================================
+fn needsSerializable<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn mixedForwardToInterface<T: Serializable || (T + T) -> T>(x: T) -> string {
+    return needsSerializable(x)
+}
+
+// =============================================================================
+// 2. Mixed constraint forwarding to function needing only the operator
+// =============================================================================
+fn needsAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn mixedForwardToOperator<T: Serializable || (T + T) -> T>(x: T, y: T) -> T {
+    return needsAdd(x, y)
+}
+
+// =============================================================================
+// 3. Mixed constraint forwarding to function needing BOTH
+// =============================================================================
+fn needsBoth<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = x + y
+    return x.serialize()
+}
+
+fn forwardBoth<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    return needsBoth(x, y)
+}
+
+// =============================================================================
+// 4. Caller has mixed, callee has same mixed — exact match
+// =============================================================================
+fn innerExact<T: Printable || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn outerExact<T: Printable || (T - T) -> T>(a: T, b: T) -> T {
+    return innerExact(a, b)
+}
+
+// =============================================================================
+// 5. Superset: caller has mixed with MORE operators, callee needs fewer
+// =============================================================================
+fn needsOnlyMul<T || (T * T) -> T>(x: T, y: T) -> T {
+    return x * y
+}
+
+fn hasManyOps<T: Printable || (T + T) -> T, (T - T) -> T, (T * T) -> T>(x: T, y: T) -> T {
+    return needsOnlyMul(x, y)
+}
+
+// =============================================================================
+// 6. Superset: caller has mixed, callee needs only a subset interface
+// =============================================================================
+fn needsPrintable<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn hasPrintableAndOps<T: Printable || (T + T) -> T, (T * T) -> T>(x: T) -> string {
+    return needsPrintable(x)
+}
+
+// =============================================================================
+// 7. Caller has stricter interface + ops, forward to callee with weaker interface
+// =============================================================================
+fn hasBigMixed<T: PrintableAndSerializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = needsAdd(x, y)
+    let s = needsPrintable(x)
+    let t = needsSerializable(x)
+    return s
+}
+
+// =============================================================================
+// 8. Chain: 3 levels of mixed constraint forwarding
+// =============================================================================
+fn chain0<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    let sum = x + y
+    return sum.serialize()
+}
+
+fn chain1<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    return chain0(x, y)
+}
+
+fn chain2<T: Serializable || (T + T) -> T>(x: T, y: T) -> string {
+    return chain1(x, y)
+}
+
+// =============================================================================
+// 9. Mixed with unary operator constraint
+// =============================================================================
+fn needsNeg<T || -T -> T>(x: T) -> T {
+    return -x
+}
+
+fn mixedWithUnary<T: Printable || -T -> T>(x: T) -> T {
+    return needsNeg(x)
+}
+
+// =============================================================================
+// 10. Mixed constraint: use interface AND operator in same function, then forward
+// =============================================================================
+fn innerMixed<T: Printable || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn outerUseBoth<T: Printable || (T + T) -> T>(a: T, b: T) -> string {
+    let s = a.toString()
+    let sum = innerMixed(a, b)
+    return s
+}
+
+// =============================================================================
+// 11. Multiple type params, each with different mixed constraints
+// =============================================================================
+fn needsPrintableParam<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn needsAddParam<U || (U + U) -> U>(x: U, y: U) -> U {
+    return x + y
+}
+
+fn multiMixed<A: Printable, B: Serializable || (A + A) -> A, (B - B) -> B>(a1: A, a2: A, b: B) -> string {
+    let sum = needsAddParam(a1, a2)
+    let s = needsPrintableParam(a1)
+    let t = needsSerializable(b)
+    return s
+}
+
+// =============================================================================
+// 12. Expression-body with mixed constraints
+// =============================================================================
+fn innerAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn exprBodyMixed<T: Printable || (T + T) -> T>(x: T, y: T) -> T = innerAdd(x, y)
+
+// =============================================================================
+// 15. Forward mixed to function needing a different operator than +
+// =============================================================================
+fn needsDiv<T || (T / T) -> T>(x: T, y: T) -> T {
+    return x / y
+}
+
+fn mixedWithDiv<T: Serializable || (T + T) -> T, (T / T) -> T>(a: T, b: T) -> T {
+    let sum = needsAdd(a, b)
+    return needsDiv(a, b)
+}
+
+// =============================================================================
+// 16. Mixed constraint with concrete right operand
+// =============================================================================
+fn needsAddI32<T || (T + i32) -> T>(x: T) -> T {
+    return x + 1
+}
+
+fn mixedWithConcreteOp<T: Printable || (T + i32) -> T>(x: T) -> T {
+    return needsAddI32(x)
+}
+
+// =============================================================================
+// 17. Deep chain (4 levels) with mixed constraints
+// =============================================================================
+fn deep0Mixed<T: Serializable || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn deep1Mixed<T: Serializable || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep0Mixed(x, y)
+}
+
+fn deep2Mixed<T: Serializable || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep1Mixed(x, y)
+}
+
+fn deep3Mixed<T: Serializable || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return deep2Mixed(x, y)
+}
+
+// =============================================================================
+// Class that implements interface AND supports operator overloads
+// =============================================================================
+type NumStr = class {
+    let value: i32
+
+    fn init(value: i32) {
+        this.value = value
+    }
+
+    fn serialize() -> string {
+        return "num"
+    }
+
+    fn toString() -> string {
+        return "num"
+    }
+
+    fn hash() -> u64 {
+        return 0u64
+    }
+
+    fn +(other: NumStr) -> NumStr {
+        return new NumStr(this.value + other.value)
+    }
+
+    fn -(other: NumStr) -> NumStr {
+        return new NumStr(this.value - other.value)
+    }
+
+    fn *(other: NumStr) -> NumStr {
+        return new NumStr(this.value * other.value)
+    }
+
+    fn /(other: NumStr) -> NumStr {
+        return new NumStr(this.value / other.value)
+    }
+
+    fn -() -> NumStr {
+        return new NumStr(-this.value)
+    }
+}
+
+// =============================================================================
+// Main: call-site tests
+// =============================================================================
+fn main() {
+    let n1 = new NumStr(10)
+    let n2 = new NumStr(20)
+    let n3 = new NumStr(5)
+
+    // --- 1. Mixed → interface only ---
+    /// @Type(r1): string
+    let r1 = mixedForwardToInterface(n1)
+
+    // --- 2. Mixed → operator only ---
+    /// @Type(r2): NumStr
+    let r2 = mixedForwardToOperator(n1, n2)
+
+    // --- 3. Mixed → both ---
+    /// @Type(r3): string
+    let r3 = forwardBoth(n1, n2)
+
+    // --- 4. Exact match ---
+    /// @Type(r4): NumStr
+    let r4 = outerExact(n1, n2)
+
+    // --- 5. Superset ops ---
+    /// @Type(r5): NumStr
+    let r5 = hasManyOps(n1, n2)
+
+    // --- 6. Superset interface ---
+    /// @Type(r6): string
+    let r6 = hasPrintableAndOps(n1)
+
+    // --- 7. Big mixed superset ---
+    /// @Type(r7): string
+    let r7 = hasBigMixed(n1, n2)
+
+    // --- 8. Chain ---
+    /// @Type(r8): string
+    let r8 = chain2(n1, n2)
+
+    // --- 9. Mixed with unary ---
+    /// @Type(r9): NumStr
+    let r9 = mixedWithUnary(n1)
+
+    // --- 10. Use both + forward ---
+    /// @Type(r10): string
+    let r10 = outerUseBoth(n1, n2)
+
+    // --- 11. Multiple type params ---
+    /// @Type(r11): string
+    let r11 = multiMixed(n1, n2, n1)
+
+    // --- 12. Expression body ---
+    /// @Type(r12): NumStr
+    let r12 = exprBodyMixed(n1, n2)
+
+    // --- 13. Different operator (div) with mixed ---
+    /// @Type(r13): NumStr
+    let r13 = mixedWithDiv(n1, n2)
+
+    // --- 14. Deep 4-level chain ---
+    /// @Type(r14): NumStr
+    let r14 = deep3Mixed(n1, n2)
+}

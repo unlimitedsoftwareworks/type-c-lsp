@@ -1,0 +1,258 @@
+// =============================================================================
+// Negative stress tests for generic constraint forwarding (: syntax).
+// These verify the compiler still REJECTS invalid forwarding scenarios.
+// =============================================================================
+
+// =============================================================================
+// Interface definitions
+// =============================================================================
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Printable = interface {
+    fn toString() -> string
+}
+
+type Hashable = interface {
+    fn hash() -> u64
+}
+
+type Comparable = interface {
+    fn compare(other: Comparable) -> i32
+}
+
+type PrintableAndSerializable = interface Printable, Serializable {
+}
+
+type FullyFeatured = interface Printable, Serializable, Hashable {
+}
+
+// =============================================================================
+// Helper classes
+// =============================================================================
+
+// Implements ONLY Printable (not Serializable, not Hashable)
+type OnlyPrintable = class {
+    fn toString() -> string {
+        return "OnlyPrintable"
+    }
+}
+
+// Implements ONLY Serializable (not Printable, not Hashable)
+type OnlySerializable = class {
+    fn serialize() -> string {
+        return "data"
+    }
+}
+
+// Implements nothing
+type PlainObj = class {
+    let x: u32
+    fn init(x: u32) {}
+}
+
+// Implements Printable + Serializable but NOT Hashable
+type PrintAndSerialize = class {
+    fn toString() -> string {
+        return "PrintAndSerialize"
+    }
+
+    fn serialize() -> string {
+        return "data"
+    }
+}
+
+// =============================================================================
+// Constrained functions used as callees
+// =============================================================================
+fn needsSerializable<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn needsPrintable<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn needsHashable<T: Hashable>(x: T) -> u64 {
+    return x.hash()
+}
+
+fn needsPrintableAndSerializable<T: PrintableAndSerializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn needsFullyFeatured<T: FullyFeatured>(x: T) -> string {
+    return x.serialize()
+}
+
+fn needsComparable<T: Comparable>(x: T) -> i32 {
+    return 0i32
+}
+
+// =============================================================================
+// 1. No constraint at all — cannot forward to constrained function
+// =============================================================================
+fn noConstraint<T>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsSerializable(x)
+}
+
+// =============================================================================
+// 2. Wrong constraint: has Printable, needs Serializable
+// =============================================================================
+fn wrongConstraint1<T: Printable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsSerializable(x)
+}
+
+// =============================================================================
+// 3. Wrong constraint: has Serializable, needs Printable
+// =============================================================================
+fn wrongConstraint2<T: Serializable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsPrintable(x)
+}
+
+// =============================================================================
+// 4. Wrong constraint: has Serializable, needs Hashable
+// =============================================================================
+fn wrongConstraint3<T: Serializable>(x: T) -> u64 {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsHashable(x)
+}
+
+// =============================================================================
+// 5. Subset constraint: has Printable, but callee needs PrintableAndSerializable
+// =============================================================================
+fn subsetConstraint1<T: Printable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsPrintableAndSerializable(x)
+}
+
+// =============================================================================
+// 6. Subset constraint: has Serializable, but callee needs PrintableAndSerializable
+// =============================================================================
+fn subsetConstraint2<T: Serializable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsPrintableAndSerializable(x)
+}
+
+// =============================================================================
+// 7. Has PrintableAndSerializable, but callee needs FullyFeatured (adds Hashable)
+// =============================================================================
+fn missingHashable<T: PrintableAndSerializable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsFullyFeatured(x)
+}
+
+// =============================================================================
+// 8. Has Printable, but callee needs Comparable (completely unrelated)
+// =============================================================================
+fn unrelatedConstraint<T: Printable>(x: T) -> i32 {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsComparable(x)
+}
+
+// =============================================================================
+// 9. Multiple type params: forwarding wrong param to wrong constraint
+// =============================================================================
+fn swappedParams<A: Printable, B: Serializable>(a: A, b: B) -> string {
+    // a is Printable, but needsSerializable expects Serializable
+    /// @Error(TCE120): does not satisfy constraint
+    return needsSerializable(a)
+}
+
+fn swappedParams2<A: Printable, B: Serializable>(a: A, b: B) -> string {
+    // b is Serializable, but needsPrintable expects Printable
+    /// @Error(TCE120): does not satisfy constraint
+    return needsPrintable(b)
+}
+
+// =============================================================================
+// 10. Broken chain: middle link drops the constraint
+// =============================================================================
+fn chainBase<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn chainMid<T: Serializable>(x: T) -> string {
+    return chainBase(x)
+}
+
+fn chainBroken<T>(x: T) -> string {
+    // T has no constraint, can't forward to chainMid which needs Serializable
+    /// @Error(TCE120): does not satisfy constraint
+    return chainMid(x)
+}
+
+// =============================================================================
+// 11. Concrete call-site errors: type doesn't satisfy constraint
+// =============================================================================
+fn forwardSerializable<T: Serializable>(x: T) -> string {
+    return needsSerializable(x)
+}
+
+fn forwardHashable<T: Hashable>(x: T) -> u64 {
+    return needsHashable(x)
+}
+
+fn main() {
+    // --- u32 doesn't implement Serializable ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r1 = forwardSerializable<u32>(1)
+
+    // --- bool doesn't implement Serializable ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r2 = forwardSerializable<bool>(true)
+
+    // --- string doesn't implement Serializable ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r3 = forwardSerializable<string>("hi")
+
+    // --- OnlyPrintable doesn't implement Serializable ---
+    let op = new OnlyPrintable()
+    /// @Error(TCE120): does not satisfy constraint
+    let r4 = forwardSerializable(op)
+
+    // --- OnlySerializable doesn't implement Hashable ---
+    let os = new OnlySerializable()
+    /// @Error(TCE120): does not satisfy constraint
+    let r5 = forwardHashable(os)
+
+    // --- PlainObj doesn't implement anything ---
+    let po = new PlainObj(1)
+    /// @Error(TCE120): does not satisfy constraint
+    let r6 = forwardSerializable(po)
+    /// @Error(TCE120): does not satisfy constraint
+    let r7 = forwardHashable(po)
+
+    // --- PrintAndSerialize doesn't implement Hashable ---
+    let ps = new PrintAndSerialize()
+    /// @Error(TCE120): does not satisfy constraint
+    let r8 = forwardHashable(ps)
+
+    // --- needsFullyFeatured requires all three interfaces ---
+    /// @Error(TCE120): does not satisfy constraint
+    let r9 = needsFullyFeatured(op)
+    /// @Error(TCE120): does not satisfy constraint
+    let r10 = needsFullyFeatured(os)
+    /// @Error(TCE120): does not satisfy constraint
+    let r11 = needsFullyFeatured(ps)
+}
+
+// =============================================================================
+// 12. No constraint with explicit type arg
+// =============================================================================
+fn nakedExplicit<T>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsSerializable<T>(x)
+}
+
+// =============================================================================
+// 13. Wrong constraint with explicit type arg
+// =============================================================================
+fn wrongExplicit<T: Printable>(x: T) -> string {
+    /// @Error(TCE120): does not satisfy constraint
+    return needsSerializable<T>(x)
+}

@@ -1,0 +1,209 @@
+// =============================================================================
+// Negative stress tests for operator constraint forwarding.
+// These verify that the compiler still REJECTS invalid constraint forwarding.
+// =============================================================================
+
+// =============================================================================
+// Helper types
+// =============================================================================
+type Empty = struct {
+    x: u32
+}
+
+type OnlyAdd = class {
+    let val: i32
+    fn init(p: {val: i32}) {}
+
+    fn +(other: OnlyAdd) -> OnlyAdd {
+        return new OnlyAdd({val: this.val + other.val})
+    }
+}
+
+// =============================================================================
+// Basic constrained functions (used as callees)
+// =============================================================================
+fn add<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn sub<T || (T - T) -> T>(x: T, y: T) -> T {
+    return x - y
+}
+
+fn mul<T || (T * T) -> T>(x: T, y: T) -> T {
+    return x * y
+}
+
+fn neg<T || -T -> T>(x: T) -> T {
+    return -x
+}
+
+fn addI32<T || (T + i32) -> T>(x: T) -> T {
+    return x + 1
+}
+
+fn addAndSub<T || (T + T) -> T, (T - T) -> T>(x: T, y: T) -> T {
+    return x + y - x
+}
+
+fn allArith<T || (T + T) -> T, (T - T) -> T, (T * T) -> T, (T / T) -> T>(a: T, b: T) -> T {
+    return (a + b) * (a - b) / b
+}
+
+// =============================================================================
+// 1. Caller has NO operator constraints, calls constrained function
+//    The callee's constraint cannot be satisfied by an unconstrained generic.
+// =============================================================================
+fn noConstraint1<T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return add<T>(x, y)
+}
+
+// =============================================================================
+// 2. Caller has WRONG operator constraint (has *, needs +)
+// =============================================================================
+fn wrongOp1<T || (T * T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return add<T>(x, y)
+}
+
+// =============================================================================
+// 3. Caller has WRONG operator constraint (has +, needs -)
+// =============================================================================
+fn wrongOp2<T || (T + T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return sub<T>(x, y)
+}
+
+// =============================================================================
+// 4. Caller has WRONG operator constraint (has +, needs *)
+// =============================================================================
+fn wrongOp3<T || (T + T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return mul<T>(x, y)
+}
+
+// =============================================================================
+// 5. Caller has binary constraint, callee needs unary
+// =============================================================================
+fn binaryNotUnary<T || (T + T) -> T>(x: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return neg<T>(x)
+}
+
+// =============================================================================
+// 6. Caller has unary constraint, callee needs binary
+// =============================================================================
+fn unaryNotBinary<T || -T -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return add<T>(x, y)
+}
+
+// =============================================================================
+// 7. Caller has subset of callee's multiple constraints (only + but needs + and -)
+// =============================================================================
+fn onlyAddNotSub<T || (T + T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return addAndSub<T>(x, y)
+}
+
+// =============================================================================
+// 8. Caller has subset: only - but callee needs + and -
+// =============================================================================
+fn onlySubNotAdd<T || (T - T) -> T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return addAndSub<T>(x, y)
+}
+
+// =============================================================================
+// 9. Caller has 2 of 4 required constraints (+ and - but not * and /)
+// =============================================================================
+fn onlyTwoOfFour<T || (T + T) -> T, (T - T) -> T>(a: T, b: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return allArith<T>(a, b)
+}
+
+// =============================================================================
+// 10. Wrong operand types: caller has (T + T), callee needs (T + i32)
+// =============================================================================
+fn wrongOperandType<T || (T + T) -> T>(x: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return addI32<T>(x)
+}
+
+// =============================================================================
+// 11. Concrete type at call site that doesn't support the operator
+//     Even through forwarding, the final concrete type must satisfy constraints
+// =============================================================================
+fn forwardAdd<T || (T + T) -> T>(x: T, y: T) -> T {
+    return add<T>(x, y)
+}
+
+fn main() {
+    let e1: Empty = {x: 1u32}
+    let e2: Empty = {x: 2u32}
+
+    // --- Struct doesn't support + even through forwarding ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r1 = forwardAdd(e1, e2)
+
+    // --- bool doesn't support + even through forwarding ---
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r2 = forwardAdd(true, false)
+
+    // --- OnlyAdd supports + but not - ---
+    let oa1 = new OnlyAdd({val: 1i32})
+    let oa2 = new OnlyAdd({val: 2i32})
+
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r3 = sub(oa1, oa2)
+
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r4 = mul(oa1, oa2)
+
+    /// @Error(TCE240): Operator constraint not satisfied
+    let r5 = neg(oa1)
+}
+
+// =============================================================================
+// 12. No constraints at all, multiple callee constraint scenarios
+// =============================================================================
+fn naked1<T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return sub<T>(x, y)
+}
+
+fn naked2<T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return mul<T>(x, y)
+}
+
+fn naked3<T>(x: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return neg<T>(x)
+}
+
+// =============================================================================
+// 13. Chained forwarding where middle link is missing constraint
+//     level0 needs (T+T)->T, level1 has it, level2 does NOT
+// =============================================================================
+fn chainBase<T || (T + T) -> T>(x: T, y: T) -> T {
+    return x + y
+}
+
+fn chainMid<T || (T + T) -> T>(x: T, y: T) -> T {
+    return chainBase<T>(x, y)
+}
+
+fn chainBroken<T>(x: T, y: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return chainMid<T>(x, y)
+}
+
+// =============================================================================
+// 14. Wrong operator for unary: has ! but needs -
+// =============================================================================
+fn wrongUnary<T || !T -> bool>(x: T) -> T {
+    /// @Error(TCE240): Operator constraint not satisfied
+    return neg<T>(x)
+}

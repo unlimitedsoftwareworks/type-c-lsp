@@ -1,7 +1,4 @@
 
-
-fn addVars<U, V, W || (U + V) -> W>(a: U, b: V) -> W {
-    return a + b
-}
-
-let java = addVars<string, i32, i32>("hi", 1)
+fn doStuff(x: u32) -> (u32, u32) = (x+1, x+2)
+fn doStuff2<T || (T+u32) -> T>(x: T) = (x+1, x+2)
+fn doStuff3<T || (T+u32) -> T>(x: T) -> (T, T) { return doStuff2<T>(x) }

@@ -1,0 +1,368 @@
+// =============================================================================
+// Stress tests for forwarding generic type parameter constraints (: syntax)
+// between function calls. When a generic function with T: SomeConstraint calls
+// another generic function requiring T: SomeConstraint, the constraint should
+// propagate — no spurious TCE120 errors.
+// =============================================================================
+
+// =============================================================================
+// Interface definitions
+// =============================================================================
+type Serializable = interface {
+    fn serialize() -> string
+}
+
+type Printable = interface {
+    fn toString() -> string
+}
+
+type Comparable = interface {
+    fn compare(other: Comparable) -> i32
+}
+
+type Hashable = interface {
+    fn hash() -> u64
+}
+
+type Cloneable = interface {
+    fn clone() -> Cloneable
+}
+
+// Combined interface
+type PrintableAndSerializable = interface Printable, Serializable {
+}
+
+type FullyFeatured = interface Printable, Serializable, Hashable {
+}
+
+// =============================================================================
+// 1. Basic forwarding: same constraint
+// =============================================================================
+fn serialize<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn serializeObj<T: Serializable>(x: T) -> string {
+    return serialize(x)
+}
+
+// =============================================================================
+// 2. Expression-body forwarding
+// =============================================================================
+fn printIt<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn printOuter<T: Printable>(x: T) -> string = printIt(x)
+
+// =============================================================================
+// 3. Three-level chain
+// =============================================================================
+fn level0Print<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn level1Print<T: Printable>(x: T) -> string {
+    return level0Print(x)
+}
+
+fn level2Print<T: Printable>(x: T) -> string {
+    return level1Print(x)
+}
+
+// =============================================================================
+// 4. Forwarding with explicit type argument
+// =============================================================================
+fn hashIt<T: Hashable>(x: T) -> u64 {
+    return x.hash()
+}
+
+fn hashOuter<T: Hashable>(x: T) -> u64 {
+    return hashIt<T>(x)
+}
+
+// =============================================================================
+// 5. Superset forwarding: caller has STRICTER constraint than callee
+// =============================================================================
+fn needsPrintable<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn hasPrintableAndSerializable<T: PrintableAndSerializable>(x: T) -> string {
+    // T: PrintableAndSerializable implies T: Printable, so this should work
+    return needsPrintable(x)
+}
+
+// =============================================================================
+// 6. Forwarding to multiple callees with different constraints
+// =============================================================================
+fn needsSerializable<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn callBothFromFullyFeatured<T: FullyFeatured>(x: T) -> string {
+    let s = needsPrintable(x)
+    let t = needsSerializable(x)
+    return s
+}
+
+// =============================================================================
+// 7. Multiple type parameters, each forwarded independently
+// =============================================================================
+fn printOne<T: Printable>(x: T) -> string {
+    return x.toString()
+}
+
+fn serializeOne<U: Serializable>(x: U) -> string {
+    return x.serialize()
+}
+
+fn processBoth<A: Printable, B: Serializable>(a: A, b: B) -> string {
+    let s1 = printOne(a)
+    let s2 = serializeOne(b)
+    return s1
+}
+
+// =============================================================================
+// 8. Forwarding with mixed constrained and unconstrained params
+// =============================================================================
+fn formatValue<T: Printable>(x: T, prefix: string) -> string {
+    return prefix
+}
+
+fn wrapFormat<T: Printable>(item: T) -> string {
+    return formatValue(item, "[")
+}
+
+// =============================================================================
+// 9. Forwarding within local function
+// =============================================================================
+fn outerWithLocal<T: Serializable>(x: T) -> string {
+    fn localHelper<U: Serializable>(y: U) -> string {
+        return y.serialize()
+    }
+    return localHelper(x)
+}
+
+// =============================================================================
+// 10. Chain of 4 levels
+// =============================================================================
+fn deep0<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn deep1<T: Serializable>(x: T) -> string {
+    return deep0(x)
+}
+
+fn deep2<T: Serializable>(x: T) -> string {
+    return deep1(x)
+}
+
+fn deep3<T: Serializable>(x: T) -> string {
+    return deep2(x)
+}
+
+// =============================================================================
+// 11. Forwarding + local use: caller uses constraint AND forwards it
+// =============================================================================
+fn innerSerialize<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn useAndForward<T: Serializable>(a: T, b: T) -> string {
+    let directResult = a.serialize()
+    let forwardedResult = innerSerialize(b)
+    return directResult
+}
+
+// =============================================================================
+// 12. Forwarding to function with array parameter
+// =============================================================================
+fn processArray<T: Printable>(arr: T[]) -> string {
+    return "ok"
+}
+
+fn forwardArray<T: Printable>(items: T[]) -> string {
+    return processArray(items)
+}
+
+// =============================================================================
+// 13. Forwarding with nullable constrained parameter
+// =============================================================================
+fn handleNullable<T: Printable>(x: T?) -> string {
+    if x == null {
+        return "null"
+    }
+    return "ok"
+}
+
+fn forwardNullable<T: Printable>(x: T?) -> string {
+    return handleNullable(x)
+}
+
+// =============================================================================
+// 14. Forwarding with return type using constrained generic
+// =============================================================================
+fn identity<T: Serializable>(x: T) -> T {
+    return x
+}
+
+fn forwardIdentity<T: Serializable>(x: T) -> T {
+    return identity(x)
+}
+
+// =============================================================================
+// 15. Multiple independent forwarded calls in one function
+// =============================================================================
+fn op1<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn op2<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn op3<T: Serializable>(x: T) -> string {
+    return x.serialize()
+}
+
+fn multiForward<T: Serializable>(a: T, b: T, c: T) -> string {
+    let r1 = op1(a)
+    let r2 = op2(b)
+    let r3 = op3(c)
+    return r1
+}
+
+// =============================================================================
+// Class implementations for call-site verification
+// =============================================================================
+type JsonObj = class {
+    let data: string
+
+    fn init(data: string) {
+        this.data = data
+    }
+
+    fn serialize() -> string {
+        return this.data
+    }
+
+    fn toString() -> string {
+        return this.data
+    }
+
+    fn hash() -> u64 {
+        return 42u64
+    }
+
+    fn compare(other: JsonObj) -> i32 {
+        return 0i32
+    }
+
+    fn clone() -> JsonObj {
+        return new JsonObj(this.data)
+    }
+}
+
+type SimpleObj = class {
+    let name: string
+
+    fn init(name: string) {
+        this.name = name
+    }
+
+    fn toString() -> string {
+        return this.name
+    }
+}
+
+// =============================================================================
+// Main: call-site tests
+// =============================================================================
+fn main() {
+    let j1 = new JsonObj("data1")
+    let j2 = new JsonObj("data2")
+    let j3 = new JsonObj("data3")
+    let s1 = new SimpleObj("simple")
+
+    // --- 1. Basic forwarding ---
+    /// @Type(r1): string
+    let r1 = serializeObj(j1)
+
+    // --- 2. Expression-body forwarding ---
+    /// @Type(r2): string
+    let r2 = printOuter(j1)
+
+    /// @Type(r3): string
+    let r3 = printOuter(s1)
+
+    // --- 3. Three-level chain ---
+    /// @Type(r4): string
+    let r4 = level2Print(j1)
+
+    /// @Type(r5): string
+    let r5 = level2Print(s1)
+
+    // --- 4. Explicit type arg ---
+    /// @Type(r6): u64
+    let r6 = hashOuter(j1)
+
+    /// @Type(r7): u64
+    let r7 = hashOuter<JsonObj>(j1)
+
+    // --- 5. Superset forwarding ---
+    /// @Type(r8): string
+    let r8 = hasPrintableAndSerializable(j1)
+
+    // --- 6. Multiple callees from FullyFeatured ---
+    /// @Type(r9): string
+    let r9 = callBothFromFullyFeatured(j1)
+
+    // --- 7. Multiple type params ---
+    /// @Type(r10): string
+    let r10 = processBoth(j1, j2)
+
+    /// @Type(r11): string
+    let r11 = processBoth(s1, j1)
+
+    // --- 8. Mixed constrained + unconstrained ---
+    /// @Type(r12): string
+    let r12 = wrapFormat(j1)
+
+    // --- 9. Local function forwarding ---
+    /// @Type(r13): string
+    let r13 = outerWithLocal(j1)
+
+    // --- 10. Deep 4-level chain ---
+    /// @Type(r14): string
+    let r14 = deep3(j1)
+
+    // --- 11. Use + forward ---
+    /// @Type(r15): string
+    let r15 = useAndForward(j1, j2)
+
+    // --- 12. Array forwarding ---
+    let arr: JsonObj[] = [j1, j2]
+    /// @Type(r16): string
+    let r16 = forwardArray(arr)
+
+    let arr2: SimpleObj[] = [s1]
+    /// @Type(r17): string
+    let r17 = forwardArray(arr2)
+
+    // --- 13. Nullable forwarding ---
+    /// @Type(r18): string
+    let r18 = forwardNullable<JsonObj>(j1)
+
+    /// @Type(r19): string
+    let r19 = forwardNullable<JsonObj>(null)
+
+    // --- 14. Identity forwarding ---
+    /// @Type(r20): JsonObj
+    let r20 = forwardIdentity(j1)
+
+    // --- 15. Multiple independent calls ---
+    /// @Type(r21): string
+    let r21 = multiForward(j1, j2, j3)
+}

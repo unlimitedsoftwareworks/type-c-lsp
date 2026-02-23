@@ -5,6 +5,7 @@ import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import {
     FunctionTypeDescription,
+    GenericTypeDescription,
     isArrayType,
     isClassType,
     isCoroutineType,
@@ -2144,6 +2145,25 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 leftConcreteType = this.typeUtils.substituteGenerics(leftConcreteType, substitutions);
                 rightConcreteType = this.typeUtils.substituteGenerics(rightConcreteType, substitutions);
 
+                // If after substitution an operand is still generic, the caller is forwarding
+                // its own generic type parameter. Check if the caller's enclosing context
+                // already guarantees this operator constraint (via || or : syntax).
+                if (isGenericType(leftConcreteType) || isGenericType(rightConcreteType)) {
+                    const genericType = isGenericType(leftConcreteType) ? leftConcreteType : rightConcreteType as GenericTypeDescription;
+                    if (genericType.declaration) {
+                        // Check || syntax: enclosing function's operator constraints
+                        if (this.hasMatchingOperatorConstraint(constraint.op, leftConcreteType, rightConcreteType, genericType.declaration)) {
+                            continue;
+                        }
+                        // Check : syntax: interface constraint that defines this operator
+                        const genConstraint = genericType.constraint
+                            ?? (genericType.declaration.constraint ? this.typeProvider.getType(genericType.declaration.constraint) : undefined);
+                        if (genConstraint && this.constraintDefinesOperator(genConstraint, constraint.op)) {
+                            continue;
+                        }
+                    }
+                }
+
                 if (!this.isBinaryOperatorValid(constraint.op, leftConcreteType, rightConcreteType)) {
                     accept('error',
                         `Operator constraint not satisfied: Type '${leftConcreteType.toString()}' does not support binary operator '${constraint.op}' with '${rightConcreteType.toString()}'`,
@@ -2175,6 +2195,20 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 let operandConcreteType = this.typeProvider.getType(constraint.operandType);
 
                 operandConcreteType = this.typeUtils.substituteGenerics(operandConcreteType, substitutions);
+
+                // Same as binary: if the operand is still generic, check caller's context
+                if (isGenericType(operandConcreteType)) {
+                    if (operandConcreteType.declaration) {
+                        if (this.hasMatchingOperatorConstraint(constraint.op, operandConcreteType, undefined, operandConcreteType.declaration)) {
+                            continue;
+                        }
+                        const genConstraint = operandConcreteType.constraint
+                            ?? (operandConcreteType.declaration.constraint ? this.typeProvider.getType(operandConcreteType.declaration.constraint) : undefined);
+                        if (genConstraint && this.constraintDefinesOperator(genConstraint, constraint.op)) {
+                            continue;
+                        }
+                    }
+                }
 
                 if (!this.isUnaryOperatorValid(constraint.op, operandConcreteType)) {
                     accept('error',

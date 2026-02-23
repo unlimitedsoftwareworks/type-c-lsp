@@ -1,0 +1,609 @@
+from std.unit.test import TestUnit, UnitSet
+
+// ============================================================================
+// u8 narrowing tests
+// ============================================================================
+
+fn test_u8_add(rn: TestUnit) {
+    // basic overflow
+    let a: u8 = 255u8
+    rn.assert_eq<u8>(a + 1u8, 0u8)
+    rn.assert_eq<u8>(a + 2u8, 1u8)
+    rn.assert_eq<u8>(a + 255u8, 254u8)  // 510 & 0xFF = 254
+
+    // no overflow
+    rn.assert_eq<u8>(100u8 + 50u8, 150u8)
+    rn.assert_eq<u8>(0u8 + 0u8, 0u8)
+
+    // chained adds that overflow multiple times
+    let b: u8 = 200u8
+    let c: u8 = b + 100u8   // 300 -> 44
+    rn.assert_eq<u8>(c, 44u8)
+    let d: u8 = c + 220u8   // 264 -> 8
+    rn.assert_eq<u8>(d, 8u8)
+}
+
+fn test_u8_sub(rn: TestUnit) {
+    // basic underflow
+    let a: u8 = 0u8
+    rn.assert_eq<u8>(a - 1u8, 255u8)
+    rn.assert_eq<u8>(a - 2u8, 254u8)
+
+    // no underflow
+    rn.assert_eq<u8>(100u8 - 50u8, 50u8)
+    rn.assert_eq<u8>(255u8 - 255u8, 0u8)
+
+    // underflow chain
+    let b: u8 = 10u8
+    let c: u8 = b - 20u8   // -10 -> 246
+    rn.assert_eq<u8>(c, 246u8)
+}
+
+fn test_u8_mul(rn: TestUnit) {
+    rn.assert_eq<u8>(16u8 * 16u8, 0u8)     // 256 -> 0
+    rn.assert_eq<u8>(16u8 * 17u8, 16u8)    // 272 -> 16
+    rn.assert_eq<u8>(255u8 * 2u8, 254u8)   // 510 -> 254
+    rn.assert_eq<u8>(255u8 * 255u8, 1u8)   // 65025 & 0xFF = 1
+    rn.assert_eq<u8>(10u8 * 10u8, 100u8)   // no overflow
+}
+
+fn test_u8_shl(rn: TestUnit) {
+    rn.assert_eq<u8>(1u8 << 7u8, 128u8)
+    rn.assert_eq<u8>(1u8 << 8u8, 0u8)     // shifted out entirely
+    rn.assert_eq<u8>(3u8 << 7u8, 128u8)   // 0x180 -> 0x80
+    rn.assert_eq<u8>(255u8 << 1u8, 254u8) // 0x1FE -> 0xFE
+    rn.assert_eq<u8>(255u8 << 4u8, 240u8) // 0xFF0 -> 0xF0
+}
+
+fn test_u8_bnot(rn: TestUnit) {
+    rn.assert_eq<u8>(~0u8, 255u8)
+    rn.assert_eq<u8>(~255u8, 0u8)
+    rn.assert_eq<u8>(~1u8, 254u8)
+    rn.assert_eq<u8>(~128u8, 127u8)
+    rn.assert_eq<u8>(~0x0Fu8, 0xF0u8)
+}
+
+fn test_u8_inc_dec(rn: TestUnit) {
+    // prefix increment overflow (using expression context)
+    let a: u8 = 255u8
+    let a2: u8 = ++a
+    rn.assert_eq<u8>(a, 0u8)
+    rn.assert_eq<u8>(a2, 0u8)
+
+    let a3: u8 = ++a
+    rn.assert_eq<u8>(a, 1u8)
+    rn.assert_eq<u8>(a3, 1u8)
+
+    // prefix decrement underflow
+    let b: u8 = 0u8
+    let b2: u8 = --b
+    rn.assert_eq<u8>(b, 255u8)
+    rn.assert_eq<u8>(b2, 255u8)
+
+    let b3: u8 = --b
+    rn.assert_eq<u8>(b, 254u8)
+    rn.assert_eq<u8>(b3, 254u8)
+
+    // postfix increment overflow
+    let c: u8 = 255u8
+    let old_c: u8 = c++
+    rn.assert_eq<u8>(old_c, 255u8)  // returns old value
+    rn.assert_eq<u8>(c, 0u8)        // stored value wrapped
+
+    // postfix decrement underflow
+    let d: u8 = 0u8
+    let old_d: u8 = d--
+    rn.assert_eq<u8>(old_d, 0u8)
+    rn.assert_eq<u8>(d, 255u8)
+}
+
+fn test_u8_compound(rn: TestUnit) {
+    let a: u8 = 250u8
+    a += 10u8   // 260 -> 4
+    rn.assert_eq<u8>(a, 4u8)
+
+    let b: u8 = 5u8
+    b -= 10u8   // -5 -> 251
+    rn.assert_eq<u8>(b, 251u8)
+
+    let c: u8 = 20u8
+    c *= 15u8   // 300 -> 44
+    rn.assert_eq<u8>(c, 44u8)
+
+    let d: u8 = 1u8
+    d <<= 8u8   // 256 -> 0
+    rn.assert_eq<u8>(d, 0u8)
+}
+
+// ============================================================================
+// u16 narrowing tests
+// ============================================================================
+
+fn test_u16_add(rn: TestUnit) {
+    let a: u16 = 65535u16
+    rn.assert_eq<u16>(a + 1u16, 0u16)
+    rn.assert_eq<u16>(a + 2u16, 1u16)
+    rn.assert_eq<u16>(a + 65535u16, 65534u16)
+
+    // no overflow
+    rn.assert_eq<u16>(1000u16 + 2000u16, 3000u16)
+}
+
+fn test_u16_sub(rn: TestUnit) {
+    let a: u16 = 0u16
+    rn.assert_eq<u16>(a - 1u16, 65535u16)
+    rn.assert_eq<u16>(a - 2u16, 65534u16)
+    rn.assert_eq<u16>(100u16 - 200u16, 65436u16)
+}
+
+fn test_u16_mul(rn: TestUnit) {
+    rn.assert_eq<u16>(256u16 * 256u16, 0u16)       // 65536 -> 0
+    rn.assert_eq<u16>(256u16 * 257u16, 256u16)     // 65792 -> 256
+    rn.assert_eq<u16>(1000u16 * 100u16, 34464u16)  // 100000 & 0xFFFF
+}
+
+fn test_u16_shl(rn: TestUnit) {
+    rn.assert_eq<u16>(1u16 << 15u16, 32768u16)
+    rn.assert_eq<u16>(1u16 << 16u16, 0u16)
+    rn.assert_eq<u16>(0xFFu16 << 8u16, 0xFF00u16)
+}
+
+fn test_u16_bnot(rn: TestUnit) {
+    rn.assert_eq<u16>(~0u16, 65535u16)
+    rn.assert_eq<u16>(~65535u16, 0u16)
+    rn.assert_eq<u16>(~0x00FFu16, 0xFF00u16)
+    rn.assert_eq<u16>(~0xFF00u16, 0x00FFu16)
+}
+
+fn test_u16_compound_and_incdec(rn: TestUnit) {
+    let a: u16 = 65530u16
+    a += 10u16   // 65540 -> 4
+    rn.assert_eq<u16>(a, 4u16)
+
+    let b: u16 = 65535u16
+    let b2: u16 = ++b
+    rn.assert_eq<u16>(b, 0u16)
+    rn.assert_eq<u16>(b2, 0u16)
+
+    let c: u16 = 0u16
+    let c2: u16 = --c
+    rn.assert_eq<u16>(c, 65535u16)
+    rn.assert_eq<u16>(c2, 65535u16)
+
+    let d: u16 = 65535u16
+    let old_d: u16 = d++
+    rn.assert_eq<u16>(old_d, 65535u16)
+    rn.assert_eq<u16>(d, 0u16)
+
+    let e: u16 = 0u16
+    let old_e: u16 = e--
+    rn.assert_eq<u16>(old_e, 0u16)
+    rn.assert_eq<u16>(e, 65535u16)
+
+    let f: u16 = 1u16
+    f <<= 16u16  // 65536 -> 0
+    rn.assert_eq<u16>(f, 0u16)
+}
+
+// ============================================================================
+// u32 narrowing tests
+// ============================================================================
+
+fn test_u32_add(rn: TestUnit) {
+    let max: u32 = 4294967295u32
+    rn.assert_eq<u32>(max + 1u32, 0u32)
+    rn.assert_eq<u32>(max + 2u32, 1u32)
+
+    // half range
+    let half: u32 = 2147483648u32
+    rn.assert_eq<u32>(half + half, 0u32)
+}
+
+fn test_u32_sub(rn: TestUnit) {
+    rn.assert_eq<u32>(0u32 - 1u32, 4294967295u32)
+    rn.assert_eq<u32>(0u32 - 2u32, 4294967294u32)
+    rn.assert_eq<u32>(100u32 - 200u32, 4294967196u32)
+}
+
+fn test_u32_mul(rn: TestUnit) {
+    // 65536 * 65536 = 2^32 -> 0
+    rn.assert_eq<u32>(65536u32 * 65536u32, 0u32)
+    rn.assert_eq<u32>(65536u32 * 65537u32, 65536u32)
+}
+
+fn test_u32_shl(rn: TestUnit) {
+    rn.assert_eq<u32>(1u32 << 31u32, 2147483648u32)
+    rn.assert_eq<u32>(1u32 << 32u32, 0u32)
+}
+
+fn test_u32_bnot(rn: TestUnit) {
+    rn.assert_eq<u32>(~0u32, 4294967295u32)
+    rn.assert_eq<u32>(~4294967295u32, 0u32)
+    rn.assert_eq<u32>(~0x0000FFFFu32, 0xFFFF0000u32)
+}
+
+fn test_u32_compound_and_incdec(rn: TestUnit) {
+    let a: u32 = 4294967295u32
+    a += 1u32
+    rn.assert_eq<u32>(a, 0u32)
+
+    let b: u32 = 0u32
+    b -= 1u32
+    rn.assert_eq<u32>(b, 4294967295u32)
+
+    let c: u32 = 4294967295u32
+    let c2: u32 = ++c
+    rn.assert_eq<u32>(c, 0u32)
+    rn.assert_eq<u32>(c2, 0u32)
+
+    let d: u32 = 0u32
+    let d2: u32 = --d
+    rn.assert_eq<u32>(d, 4294967295u32)
+    rn.assert_eq<u32>(d2, 4294967295u32)
+
+    let e: u32 = 4294967295u32
+    let old_e: u32 = e++
+    rn.assert_eq<u32>(old_e, 4294967295u32)
+    rn.assert_eq<u32>(e, 0u32)
+
+    let f: u32 = 0u32
+    let old_f: u32 = f--
+    rn.assert_eq<u32>(old_f, 0u32)
+    rn.assert_eq<u32>(f, 4294967295u32)
+
+    let g: u32 = 1u32
+    g <<= 32u32  // 2^32 -> 0
+    rn.assert_eq<u32>(g, 0u32)
+}
+
+// ============================================================================
+// i8 narrowing tests
+// ============================================================================
+
+fn test_i8_add(rn: TestUnit) {
+    // positive overflow -> wraps to negative
+    let a: i8 = 127i8
+    rn.assert_eq<i8>(a + 1i8, -128i8)
+    rn.assert_eq<i8>(a + 2i8, -127i8)
+
+    // no overflow
+    rn.assert_eq<i8>(50i8 + 50i8, 100i8)
+    rn.assert_eq<i8>(-50i8 + -50i8, -100i8)
+}
+
+fn test_i8_sub(rn: TestUnit) {
+    // negative overflow -> wraps to positive
+    let a: i8 = -128i8
+    rn.assert_eq<i8>(a - 1i8, 127i8)
+    rn.assert_eq<i8>(a - 2i8, 126i8)
+
+    // no underflow
+    rn.assert_eq<i8>(50i8 - 100i8, -50i8)
+}
+
+fn test_i8_mul(rn: TestUnit) {
+    rn.assert_eq<i8>(64i8 * 2i8, -128i8)   // 128 -> -128 in i8
+    rn.assert_eq<i8>(127i8 * 2i8, -2i8)    // 254 -> -2 in i8
+    rn.assert_eq<i8>(-1i8 * -1i8, 1i8)     // no overflow
+}
+
+fn test_i8_shl(rn: TestUnit) {
+    rn.assert_eq<i8>(1i8 << 6i8, 64i8)
+    rn.assert_eq<i8>(1i8 << 7i8, -128i8)   // bit 7 is sign bit
+}
+
+fn test_i8_neg(rn: TestUnit) {
+    // -(-128) overflows: 128 -> -128 in i8
+    let a: i8 = -128i8
+    rn.assert_eq<i8>(-a, -128i8)
+
+    // normal negation
+    rn.assert_eq<i8>(-1i8, -1i8)
+    let b: i8 = 50i8
+    rn.assert_eq<i8>(-b, -50i8)
+    let c: i8 = 0i8
+    rn.assert_eq<i8>(-c, 0i8)
+}
+
+fn test_i8_bnot(rn: TestUnit) {
+    rn.assert_eq<i8>(~0i8, -1i8)
+    rn.assert_eq<i8>(~(-1i8), 0i8)
+    rn.assert_eq<i8>(~127i8, -128i8)
+    rn.assert_eq<i8>(~(-128i8), 127i8)
+}
+
+fn test_i8_inc_dec(rn: TestUnit) {
+    let a: i8 = 127i8
+    let a2: i8 = ++a
+    rn.assert_eq<i8>(a, -128i8)
+    rn.assert_eq<i8>(a2, -128i8)
+
+    let b: i8 = -128i8
+    let b2: i8 = --b
+    rn.assert_eq<i8>(b, 127i8)
+    rn.assert_eq<i8>(b2, 127i8)
+
+    let c: i8 = 127i8
+    let old_c: i8 = c++
+    rn.assert_eq<i8>(old_c, 127i8)
+    rn.assert_eq<i8>(c, -128i8)
+
+    let d: i8 = -128i8
+    let old_d: i8 = d--
+    rn.assert_eq<i8>(old_d, -128i8)
+    rn.assert_eq<i8>(d, 127i8)
+}
+
+fn test_i8_compound(rn: TestUnit) {
+    let a: i8 = 120i8
+    a += 20i8   // 140 -> -116 in i8
+    rn.assert_eq<i8>(a, -116i8)
+
+    let b: i8 = -120i8
+    b -= 20i8   // -140 -> 116 in i8
+    rn.assert_eq<i8>(b, 116i8)
+
+    let c: i8 = 100i8
+    c *= 2i8    // 200 -> -56 in i8
+    rn.assert_eq<i8>(c, -56i8)
+}
+
+// ============================================================================
+// i16 narrowing tests
+// ============================================================================
+
+fn test_i16_add(rn: TestUnit) {
+    let a: i16 = 32767i16
+    rn.assert_eq<i16>(a + 1i16, -32768i16)
+    rn.assert_eq<i16>(a + 2i16, -32767i16)
+
+    rn.assert_eq<i16>(1000i16 + 2000i16, 3000i16) // no overflow
+}
+
+fn test_i16_sub(rn: TestUnit) {
+    let a: i16 = -32768i16
+    rn.assert_eq<i16>(a - 1i16, 32767i16)
+    rn.assert_eq<i16>(a - 2i16, 32766i16)
+}
+
+fn test_i16_mul_shl(rn: TestUnit) {
+    rn.assert_eq<i16>(256i16 * 128i16, -32768i16)  // 32768 -> -32768
+    rn.assert_eq<i16>(1i16 << 15i16, -32768i16)
+}
+
+fn test_i16_neg(rn: TestUnit) {
+    let a: i16 = -32768i16
+    rn.assert_eq<i16>(-a, -32768i16)  // -MIN overflows back to MIN
+
+    let b: i16 = 1000i16
+    rn.assert_eq<i16>(-b, -1000i16)
+    let c: i16 = 0i16
+    rn.assert_eq<i16>(-c, 0i16)
+}
+
+fn test_i16_bnot(rn: TestUnit) {
+    rn.assert_eq<i16>(~0i16, -1i16)
+    rn.assert_eq<i16>(~(-1i16), 0i16)
+    rn.assert_eq<i16>(~32767i16, -32768i16)
+    rn.assert_eq<i16>(~(-32768i16), 32767i16)
+}
+
+fn test_i16_compound_and_incdec(rn: TestUnit) {
+    let a: i16 = 32767i16
+    a += 1i16
+    rn.assert_eq<i16>(a, -32768i16)
+
+    let b: i16 = -32768i16
+    b -= 1i16
+    rn.assert_eq<i16>(b, 32767i16)
+
+    let c: i16 = 32767i16
+    let c2: i16 = ++c
+    rn.assert_eq<i16>(c, -32768i16)
+    rn.assert_eq<i16>(c2, -32768i16)
+
+    let d: i16 = -32768i16
+    let d2: i16 = --d
+    rn.assert_eq<i16>(d, 32767i16)
+    rn.assert_eq<i16>(d2, 32767i16)
+
+    let e: i16 = 32767i16
+    let old_e: i16 = e++
+    rn.assert_eq<i16>(old_e, 32767i16)
+    rn.assert_eq<i16>(e, -32768i16)
+
+    let f: i16 = -32768i16
+    let old_f: i16 = f--
+    rn.assert_eq<i16>(old_f, -32768i16)
+    rn.assert_eq<i16>(f, 32767i16)
+
+    let g: i16 = 1i16
+    g <<= 15i16  // -> -32768
+    rn.assert_eq<i16>(g, -32768i16)
+}
+
+// ============================================================================
+// i32 narrowing tests
+// ============================================================================
+
+fn test_i32_add(rn: TestUnit) {
+    let a: i32 = 2147483647i32
+    rn.assert_eq<i32>(a + 1i32, -2147483648i32)
+    rn.assert_eq<i32>(a + 2i32, -2147483647i32)
+}
+
+fn test_i32_sub(rn: TestUnit) {
+    let a: i32 = -2147483648i32
+    rn.assert_eq<i32>(a - 1i32, 2147483647i32)
+    rn.assert_eq<i32>(a - 2i32, 2147483646i32)
+}
+
+fn test_i32_mul_shl(rn: TestUnit) {
+    rn.assert_eq<i32>(65536i32 * 32768i32, -2147483648i32) // 2^31 -> MIN_I32
+    rn.assert_eq<i32>(1i32 << 31i32, -2147483648i32)
+}
+
+fn test_i32_neg(rn: TestUnit) {
+    let a: i32 = -2147483648i32
+    rn.assert_eq<i32>(-a, -2147483648i32)  // -MIN overflows back to MIN
+
+    let b: i32 = 100000i32
+    rn.assert_eq<i32>(-b, -100000i32)
+    let c: i32 = 0i32
+    rn.assert_eq<i32>(-c, 0i32)
+}
+
+fn test_i32_bnot(rn: TestUnit) {
+    rn.assert_eq<i32>(~0i32, -1i32)
+    rn.assert_eq<i32>(~(-1i32), 0i32)
+    rn.assert_eq<i32>(~2147483647i32, -2147483648i32)
+    rn.assert_eq<i32>(~(-2147483648i32), 2147483647i32)
+}
+
+fn test_i32_compound_and_incdec(rn: TestUnit) {
+    let a: i32 = 2147483647i32
+    a += 1i32
+    rn.assert_eq<i32>(a, -2147483648i32)
+
+    let b: i32 = -2147483648i32
+    b -= 1i32
+    rn.assert_eq<i32>(b, 2147483647i32)
+
+    let c: i32 = 2147483647i32
+    let c2: i32 = ++c
+    rn.assert_eq<i32>(c, -2147483648i32)
+    rn.assert_eq<i32>(c2, -2147483648i32)
+
+    let d: i32 = -2147483648i32
+    let d2: i32 = --d
+    rn.assert_eq<i32>(d, 2147483647i32)
+    rn.assert_eq<i32>(d2, 2147483647i32)
+
+    let e: i32 = 2147483647i32
+    let old_e: i32 = e++
+    rn.assert_eq<i32>(old_e, 2147483647i32)
+    rn.assert_eq<i32>(e, -2147483648i32)
+
+    let f: i32 = -2147483648i32
+    let old_f: i32 = f--
+    rn.assert_eq<i32>(old_f, -2147483648i32)
+    rn.assert_eq<i32>(f, 2147483647i32)
+
+    let g: i32 = 1i32
+    g <<= 31i32  // -> -2147483648
+    rn.assert_eq<i32>(g, -2147483648i32)
+}
+
+// ============================================================================
+// Cross-operation chains: narrow result feeds into next operation
+// ============================================================================
+
+fn test_chained_operations(rn: TestUnit) {
+    // u8: chain of adds that each overflow
+    let a: u8 = 200u8
+    let b: u8 = a + 100u8  // 300 -> 44
+    let c: u8 = b + 200u8  // 244 -> 244 (no overflow)
+    let d: u8 = c + 20u8   // 264 -> 8
+    rn.assert_eq<u8>(b, 44u8)
+    rn.assert_eq<u8>(c, 244u8)
+    rn.assert_eq<u8>(d, 8u8)
+
+    // u8: mul then add
+    let e: u8 = 50u8 * 6u8   // 300 -> 44
+    let f: u8 = e + 212u8    // 256 -> 0
+    rn.assert_eq<u8>(e, 44u8)
+    rn.assert_eq<u8>(f, 0u8)
+
+    // i8: overflow then underflow
+    let g: i8 = 120i8 + 20i8   // 140 -> -116
+    let h: i8 = g - 20i8       // -136 -> 120
+    rn.assert_eq<i8>(g, -116i8)
+    rn.assert_eq<i8>(h, 120i8)
+
+    // u16: shl then add
+    let ii: u16 = 0xFFu16 << 8u16  // 0xFF00
+    let jj: u16 = ii + 0x100u16    // 0x10000 -> 0
+    rn.assert_eq<u16>(ii, 0xFF00u16)
+    rn.assert_eq<u16>(jj, 0u16)
+}
+
+// ============================================================================
+// Narrowing in loops: accumulator wrapping
+// ============================================================================
+
+fn test_loop_accumulator(rn: TestUnit) {
+    // u8: add 1 in a loop 256 times -> should wrap back to start
+    let acc: u8 = 0u8
+    foreach k: u32 in 0u32, 256u32, 1u32 {
+        acc += 1u8
+    }
+    rn.assert_eq<u8>(acc, 0u8)
+
+    // u8: add 1 in a loop 300 times -> 300 mod 256 = 44
+    let acc2: u8 = 0u8
+    foreach k: u32 in 0u32, 300u32, 1u32 {
+        acc2 += 1u8
+    }
+    rn.assert_eq<u8>(acc2, 44u8)
+
+    // i8: increment past MAX
+    let acc3: i8 = 100i8
+    foreach k: u32 in 0u32, 50u32, 1u32 {
+        acc3 += 1i8
+    }
+    // 100 + 50 = 150 -> -106 in i8 (150 - 256 = -106)
+    rn.assert_eq<i8>(acc3, -106i8)
+}
+
+// ============================================================================
+// Entry point
+// ============================================================================
+
+fn l0Narrowing() {
+    let tests = [
+        new TestUnit("u8 add overflow", "u8 addition with wrapping", test_u8_add),
+        new TestUnit("u8 sub underflow", "u8 subtraction with wrapping", test_u8_sub),
+        new TestUnit("u8 mul overflow", "u8 multiplication with wrapping", test_u8_mul),
+        new TestUnit("u8 shl overflow", "u8 left shift with wrapping", test_u8_shl),
+        new TestUnit("u8 bnot", "u8 bitwise NOT with narrowing", test_u8_bnot),
+        new TestUnit("u8 inc/dec", "u8 prefix/postfix inc/dec with wrapping", test_u8_inc_dec),
+        new TestUnit("u8 compound", "u8 compound assignments with wrapping", test_u8_compound),
+        new TestUnit("u16 add", "u16 addition with wrapping", test_u16_add),
+        new TestUnit("u16 sub", "u16 subtraction with wrapping", test_u16_sub),
+        new TestUnit("u16 mul", "u16 multiplication with wrapping", test_u16_mul),
+        new TestUnit("u16 shl", "u16 left shift with wrapping", test_u16_shl),
+        new TestUnit("u16 bnot", "u16 bitwise NOT with narrowing", test_u16_bnot),
+        new TestUnit("u16 compound/incdec", "u16 compound and inc/dec wrapping", test_u16_compound_and_incdec),
+        new TestUnit("u32 add", "u32 addition with wrapping", test_u32_add),
+        new TestUnit("u32 sub", "u32 subtraction with wrapping", test_u32_sub),
+        new TestUnit("u32 mul", "u32 multiplication with wrapping", test_u32_mul),
+        new TestUnit("u32 shl", "u32 left shift with wrapping", test_u32_shl),
+        new TestUnit("u32 bnot", "u32 bitwise NOT with narrowing", test_u32_bnot),
+        new TestUnit("u32 compound/incdec", "u32 compound and inc/dec wrapping", test_u32_compound_and_incdec),
+        new TestUnit("i8 add", "i8 signed overflow", test_i8_add),
+        new TestUnit("i8 sub", "i8 signed underflow", test_i8_sub),
+        new TestUnit("i8 mul", "i8 signed multiply overflow", test_i8_mul),
+        new TestUnit("i8 shl", "i8 signed left shift", test_i8_shl),
+        new TestUnit("i8 neg", "i8 negation overflow", test_i8_neg),
+        new TestUnit("i8 bnot", "i8 bitwise NOT", test_i8_bnot),
+        new TestUnit("i8 inc/dec", "i8 prefix/postfix inc/dec overflow", test_i8_inc_dec),
+        new TestUnit("i8 compound", "i8 compound assignment overflow", test_i8_compound),
+        new TestUnit("i16 add", "i16 signed overflow", test_i16_add),
+        new TestUnit("i16 sub", "i16 signed underflow", test_i16_sub),
+        new TestUnit("i16 mul/shl", "i16 multiply and shift overflow", test_i16_mul_shl),
+        new TestUnit("i16 neg", "i16 negation overflow", test_i16_neg),
+        new TestUnit("i16 bnot", "i16 bitwise NOT", test_i16_bnot),
+        new TestUnit("i16 compound/incdec", "i16 compound and inc/dec overflow", test_i16_compound_and_incdec),
+        new TestUnit("i32 add", "i32 signed overflow", test_i32_add),
+        new TestUnit("i32 sub", "i32 signed underflow", test_i32_sub),
+        new TestUnit("i32 mul/shl", "i32 multiply and shift overflow", test_i32_mul_shl),
+        new TestUnit("i32 neg", "i32 negation overflow", test_i32_neg),
+        new TestUnit("i32 bnot", "i32 bitwise NOT", test_i32_bnot),
+        new TestUnit("i32 compound/incdec", "i32 compound and inc/dec overflow", test_i32_compound_and_incdec),
+        new TestUnit("chained ops", "narrowing through operation chains", test_chained_operations),
+        new TestUnit("loop accumulator", "narrowing in loop accumulators", test_loop_accumulator)
+    ]
+
+    let set = new UnitSet("Narrowing Tests", "Sub-64-bit integer narrowing after arithmetic", tests)
+    return set.run()
+}

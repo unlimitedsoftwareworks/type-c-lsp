@@ -589,6 +589,21 @@ export class IRGenerator {
         return this.extractNumericType(irType, contextNode);
     }
 
+    /**
+     * Emit a narrow instruction if the result type is a sub-64-bit integer.
+     * The VM performs all arithmetic in 64-bit registers, so we must truncate
+     * the result to the correct width to get proper overflow/wrapping behavior.
+     */
+    private narrowIfSubWord(reg: VReg, irType: IRType): VReg {
+        if (irType.tag !== 'scalar') return reg;
+        const s = irType.scalar;
+        if (s === 'i64' || s === 'u64' || s === 'f32' || s === 'f64' || s === 'bool') return reg;
+        const narrowed = this.tmp();
+        const wideType: IntType = s.startsWith('i') ? 'i64' : 'u64';
+        this.func().narrow(narrowed, reg, wideType, s as IntType);
+        return narrowed;
+    }
+
     private coerceScalarExpression(value: ExpressionResult, targetType: IRType): ExpressionResult {
         if (!isScalar(value.type) || !isScalar(targetType)) {
             return value;
@@ -3044,7 +3059,8 @@ export class IRGenerator {
             const rightValue = this.coerceScalarExpression(right, operandType);
             const numType = this.extractNumericType(operandType, node);
             this.func().add(temp, leftValue.register, rightValue.register, numType);
-            return { register: temp, type: operandType };
+            const narrowed = this.narrowIfSubWord(temp, operandType);
+            return { register: narrowed, type: operandType };
         }
         if (op === '-') {
             const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
@@ -3052,7 +3068,8 @@ export class IRGenerator {
             const rightValue = this.coerceScalarExpression(right, operandType);
             const numType = this.extractNumericType(operandType, node);
             this.func().sub(temp, leftValue.register, rightValue.register, numType);
-            return { register: temp, type: operandType };
+            const narrowed = this.narrowIfSubWord(temp, operandType);
+            return { register: narrowed, type: operandType };
         }
         if (op === '*') {
             const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
@@ -3060,7 +3077,8 @@ export class IRGenerator {
             const rightValue = this.coerceScalarExpression(right, operandType);
             const numType = this.extractNumericType(operandType, node);
             this.func().mul(temp, leftValue.register, rightValue.register, numType);
-            return { register: temp, type: operandType };
+            const narrowed = this.narrowIfSubWord(temp, operandType);
+            return { register: narrowed, type: operandType };
         }
         if (op === '/') {
             const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
@@ -3082,7 +3100,8 @@ export class IRGenerator {
         // Bitwise
         if (op === '<<') {
             this.func().shl(temp, left.register, right.register);
-            return { register: temp, type: left.type };
+            const narrowed = this.narrowIfSubWord(temp, left.type);
+            return { register: narrowed, type: left.type };
         }
         if (op === '>>') {
             const signed = isSignedInt(left.type);
@@ -3267,6 +3286,7 @@ export class IRGenerator {
 
         const temp = this.tmp();
         const numType = this.extractNumericType(lhsResult.type, node);
+        let needsNarrow = false;
 
         switch (baseOp) {
             case '+':
@@ -3274,13 +3294,14 @@ export class IRGenerator {
                     f.strConcat(temp, lhsResult.register, rhsResult.register, rhsResult.type);
                 } else {
                     f.add(temp, lhsResult.register, rhsResult.register, numType);
+                    needsNarrow = true;
                 }
                 break;
-            case '-': f.sub(temp, lhsResult.register, rhsResult.register, numType); break;
-            case '*': f.mul(temp, lhsResult.register, rhsResult.register, numType); break;
+            case '-': f.sub(temp, lhsResult.register, rhsResult.register, numType); needsNarrow = true; break;
+            case '*': f.mul(temp, lhsResult.register, rhsResult.register, numType); needsNarrow = true; break;
             case '/': f.div(temp, lhsResult.register, rhsResult.register, numType); break;
             case '%': f.mod(temp, lhsResult.register, rhsResult.register, numType); break;
-            case '<<': f.shl(temp, lhsResult.register, rhsResult.register); break;
+            case '<<': f.shl(temp, lhsResult.register, rhsResult.register); needsNarrow = true; break;
             case '>>': f.shr(temp, lhsResult.register, rhsResult.register, isSignedInt(lhsResult.type)); break;
             case '&': f.band(temp, lhsResult.register, rhsResult.register); break;
             case '|': f.bor(temp, lhsResult.register, rhsResult.register); break;
@@ -3289,7 +3310,8 @@ export class IRGenerator {
                 f.undef(temp, lhsResult.type);
         }
 
-        const result: ExpressionResult = { register: temp, type: lhsResult.type };
+        const resultReg = needsNarrow ? this.narrowIfSubWord(temp, lhsResult.type) : temp;
+        const result: ExpressionResult = { register: resultReg, type: lhsResult.type };
         this.storeBack(lhs, result);
         return result;
     }
@@ -3399,7 +3421,8 @@ export class IRGenerator {
             case '-': {
                 const numType = this.extractNumericType(operand.type, node);
                 f.neg(temp, operand.register, numType);
-                return { register: temp, type: operand.type };
+                const narrowed = this.narrowIfSubWord(temp, operand.type);
+                return { register: narrowed, type: operand.type };
             }
             case '!': {
                 f.not(temp, operand.register);
@@ -3407,7 +3430,8 @@ export class IRGenerator {
             }
             case '~': {
                 f.bnot(temp, operand.register);
-                return { register: temp, type: operand.type };
+                const narrowed = this.narrowIfSubWord(temp, operand.type);
+                return { register: narrowed, type: operand.type };
             }
             case '+': {
                 // Identity
@@ -3420,8 +3444,9 @@ export class IRGenerator {
                 const oneReg = this.tmp();
                 f.constInt(oneReg, 1, numType as IntType);
                 f.add(temp, operand.register, oneReg, numType);
-                this.storeBack(node.expr, { register: temp, type: operand.type });
-                return { register: temp, type: operand.type };
+                const narrowed = this.narrowIfSubWord(temp, operand.type);
+                this.storeBack(node.expr, { register: narrowed, type: operand.type });
+                return { register: narrowed, type: operand.type };
             }
             case '--': {
                 // Prefix decrement
@@ -3429,8 +3454,9 @@ export class IRGenerator {
                 const oneReg = this.tmp();
                 f.constInt(oneReg, 1, numType as IntType);
                 f.sub(temp, operand.register, oneReg, numType);
-                this.storeBack(node.expr, { register: temp, type: operand.type });
-                return { register: temp, type: operand.type };
+                const narrowed = this.narrowIfSubWord(temp, operand.type);
+                this.storeBack(node.expr, { register: narrowed, type: operand.type });
+                return { register: narrowed, type: operand.type };
             }
             default: {
                 f.undef(temp, operand.type);
@@ -3475,7 +3501,8 @@ export class IRGenerator {
             f.sub(newVal, operand.register, oneReg, numType);
         }
 
-        this.storeBack(node.expr, { register: newVal, type: operand.type });
+        const narrowedNewVal = this.narrowIfSubWord(newVal, operand.type);
+        this.storeBack(node.expr, { register: narrowedNewVal, type: operand.type });
 
         // Return original value (postfix)
         return { register: temp, type: operand.type };

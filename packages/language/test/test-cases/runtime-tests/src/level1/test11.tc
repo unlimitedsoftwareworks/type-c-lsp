@@ -114,8 +114,8 @@ fn test_case_3(rn: TestUnit) {
     let x1 = 255u8
     let x2 = 255u8
 
-    rn.assert_eq(x1+1u8, 1) 
-    rn.assert_eq(x1+2u8, 2)
+    rn.assert_eq(x1+1u8, 0u8)
+    rn.assert_eq(x1+2u8, 1u8)
 
     let (ww, xx) = doStuff3<i64>(-100)  // Test underflow
     rn.assert_eq(ww, -99)

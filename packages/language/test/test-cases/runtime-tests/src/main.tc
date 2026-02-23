@@ -1,5 +1,7 @@
+from level0.l0 import l0
 from level1.l1 import l1
 
 fn main() {
+    l0()
     l1()
 }

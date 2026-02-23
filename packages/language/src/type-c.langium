@@ -451,7 +451,7 @@ StringLiteral:
  */
 
 Statement:
-    (ExpressionStatement| // TODO: remove this ; once we figure out the issue of consecutive expresison statements
+    STMT_END? (ExpressionStatement|
     BlockStatement |
     BreakStatement |
     ContinueStatement |
@@ -462,7 +462,7 @@ Statement:
     IfStatement |
     MatchStatement |
     ReturnStatement |
-    VariableDeclarationStatement<false> | 
+    VariableDeclarationStatement<false> |
     WhileStatement);
 
 
@@ -814,6 +814,7 @@ BuiltinSymbol:
 
  
 hidden terminal WS: /\s+/;
+terminal STMT_END: 'synthetic:stmt_end';
 
 // Lookahead to distinguish < as generic open from < as less-than operator
 // This pattern is more permissive to handle nested generics like Array<Array<u32>>

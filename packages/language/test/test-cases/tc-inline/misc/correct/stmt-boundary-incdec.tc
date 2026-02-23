@@ -1,0 +1,296 @@
+/**
+ * Comprehensive tests for cross-line statement boundary (STMT_END) injection.
+ *
+ * Rule: When ++, --, (, or [ appears on a NEW LINE after an expression-ending
+ * token, a statement boundary is inserted. The token is parsed as the start of
+ * a new statement, not as postfix/call/index on the previous expression.
+ *
+ * Expression-ending tokens: ) ] } ++ -- ! this null true false unreachable
+ *                           ID, numeric literals, STRING, BINARY_STRING
+ *
+ * Same-line usage is NOT affected — postfix, calls, and indexing work normally.
+ */
+
+// =========================================================================
+// Section A: ++ and -- across lines
+// =========================================================================
+
+// A1: Standalone ++a after a let (ID is expression ender)
+fn testIncAfterLet() {
+    let a: u32 = 0u32
+    let b: u32 = a + 1u32
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}
+
+// A2: Standalone --x after a let
+fn testDecAfterLet() {
+    let x: u32 = 5u32
+    let y: u32 = x
+    --x
+    /// @Type(x): u32
+    let _check = x
+}
+
+// A3: Postfix a++ on SAME line still works
+fn testPostfixSameLine() {
+    let a: u32 = 0u32
+    /// @Type(old): u32
+    let old = a++
+}
+
+// A4: Prefix ++a in expression context (same line)
+fn testPrefixInExpr() {
+    let a: u32 = 0u32
+    /// @Type(val): u32
+    let val = ++a
+}
+
+// A5: ++ after ) on new line (closing paren is expression ender)
+fn testIncAfterCloseParen() {
+    let a: u32 = 0u32
+    let b: u32 = (a + 1u32)
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}
+
+// A6: ++ after ] on new line (closing bracket is expression ender)
+fn testIncAfterCloseBracket() {
+    let arr: u32[] = [1u32, 2u32, 3u32]
+    let idx: u32 = 0u32
+    let _v = arr[idx]
+    ++idx
+    /// @Type(idx): u32
+    let _check = idx
+}
+
+// A7: ++ after postfix ++ on new line (++ is expression ender)
+fn testIncAfterPostfixInc() {
+    let a: u32 = 0u32
+    let b: u32 = 10u32
+    let _old = a++
+    ++b
+    /// @Type(b): u32
+    let _check = b
+}
+
+// A8: ++ after string literal on new line (STRING is expression ender)
+fn testIncAfterStringLiteral() {
+    let a: u32 = 0u32
+    let _s = "hello"
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}
+
+// A9: ++ after numeric literal on new line
+fn testIncAfterNumericLiteral() {
+    let a: u32 = 0u32
+    let _n = 42u32
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}
+
+// A10: Multiple standalone inc/dec in sequence
+fn testMultipleStandaloneIncDec() {
+    let a: u32 = 0u32
+    let b: u32 = 10u32
+    ++a
+    --b
+    ++a
+    --b
+    /// @Type(a): u32
+    let _checkA = a
+    /// @Type(b): u32
+    let _checkB = b
+}
+
+// A11: Postfix in for loop (same line, no STMT_END)
+fn testPostfixInForLoop() {
+    let sum: u32 = 0u32
+    for let i = 0u32; i < 10u32; i++ {
+        sum += i
+    }
+    /// @Type(sum): u32
+    let _check = sum
+}
+
+// A12: Multi-line expression: operator before ++ prevents STMT_END
+fn testMultiLineExprWithInc() {
+    let a: u32 = 5u32
+    let result: u32 = 1u32 +
+        ++a
+    /// @Type(result): u32
+    let _check = result
+}
+
+// A13: ++ after } on new line (closing brace is expression ender)
+fn testIncAfterBrace() {
+    let a: u32 = 0u32
+    let _arr: u32[] = [1u32]
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}
+
+// =========================================================================
+// Section B: ( across lines
+// =========================================================================
+
+// B1: ( on new line after ID — new statement, not function call
+fn testParenAfterID() {
+    let b: u32 = 5u32
+    let a: u32 = b
+    (a + 1u32)
+}
+
+// B2: ( on same line — still a function call
+fn helperFn(x: u32) -> u32 { return x }
+fn testParenSameLineIsCall() {
+    /// @Type(result): u32
+    let result = helperFn(42u32)
+}
+
+// B3: ( on new line after ) — new statement, not chained call
+fn getFortyTwo() -> u32 { return 42u32 }
+fn testParenAfterCloseParen() {
+    let _a = getFortyTwo()
+    (1u32 + 2u32)
+}
+
+// B4: ( on new line after ] — new statement, not call on indexed result
+fn testParenAfterCloseBracket() {
+    let arr: u32[] = [1u32, 2u32]
+    let _v = arr[0u32]
+    (1u32 + 2u32)
+}
+
+// B5: ( on new line after ++ — new statement, not call on postfix result
+fn testParenAfterPostfixInc() {
+    let a: u32 = 0u32
+    let _old = a++
+    (1u32 + 2u32)
+}
+
+// B6: ( on new line after numeric literal — new statement
+fn testParenAfterLiteral() {
+    let _n = 100u32
+    (1u32 + 2u32)
+}
+
+// B7: ( on new line after string — new statement
+fn testParenAfterString() {
+    let _s = "hello"
+    (1u32 + 2u32)
+}
+
+// B8: Multi-line expression: operator before ( prevents STMT_END
+fn testParenAfterOperator() {
+    let x: u32 = 1u32 +
+        (2u32 + 3u32)
+    /// @Type(x): u32
+    let _check = x
+}
+
+// B9: Multi-line assignment: = before ( prevents STMT_END (= is not expr ender)
+fn testParenAfterEquals() {
+    let x: u32 =
+        (2u32 + 3u32)
+    /// @Type(x): u32
+    let _check = x
+}
+
+// =========================================================================
+// Section C: [ across lines
+// =========================================================================
+
+// C1: [ on new line after ID — new statement (array literal), not index access
+fn testBracketAfterID() {
+    let arr: u32[] = [1u32, 2u32]
+    let b: u32 = arr[0u32]
+    [3u32, 4u32]
+}
+
+// C2: [ on same line — still index access
+fn testBracketSameLineIsIndex() {
+    let arr: u32[] = [1u32, 2u32, 3u32]
+    /// @Type(v): u32
+    let v = arr[1u32]
+}
+
+// C3: [ on new line after ) — new statement, not index on call result
+fn getArray() -> u32[] { return [10u32, 20u32] }
+fn testBracketAfterCloseParen() {
+    let _a = getArray()
+    [1u32]
+}
+
+// C4: [ on new line after ] — new statement, not index on indexed result
+fn testBracketAfterCloseBracket() {
+    let matrix: u32[][] = [[1u32, 2u32], [3u32, 4u32]]
+    let _row = matrix[0u32]
+    [5u32, 6u32]
+}
+
+// C5: Multi-line assignment: = before [ (= is not expr ender, no STMT_END)
+fn testBracketAfterEquals() {
+    let arr: u32[] =
+        [1u32, 2u32, 3u32]
+    /// @Type(arr): u32[]
+    let _check = arr
+}
+
+// =========================================================================
+// Section D: Mixed scenarios and stress tests
+// =========================================================================
+
+// D1: Alternating ++, (, [ across lines
+fn testMixedTokensAcrossLines() {
+    let a: u32 = 0u32
+    let b: u32 = 5u32
+    ++a
+    (b + 1u32)
+    --a
+    [1u32, 2u32]
+    ++b
+    /// @Type(a): u32
+    let _checkA = a
+    /// @Type(b): u32
+    let _checkB = b
+}
+
+// D2: Everything on SAME line still works normally
+fn addOne(x: u32) -> u32 { return x + 1u32 }
+fn testAllSameLine() {
+    let arr: u32[] = [1u32, 2u32, 3u32]
+    /// @Type(v): u32
+    let v = arr[0u32]
+    /// @Type(r): u32
+    let r = addOne(v)
+    let a: u32 = 0u32
+    /// @Type(old): u32
+    let old = a++
+    /// @Type(inc): u32
+    let inc = ++a
+}
+
+// D3: Deeply nested same-line chaining
+fn testDeepChainSameLine() {
+    let arr: u32[][] = [[10u32, 20u32], [30u32, 40u32]]
+    /// @Type(v): u32
+    let v = arr[0u32][1u32]
+}
+
+// D4: ++ after boolean literal on new line (true/false are expr enders)
+fn testIncAfterBool() {
+    let a: u32 = 0u32
+    let _flag = true
+    ++a
+    let _flag2 = false
+    ++a
+    /// @Type(a): u32
+    let _check = a
+}

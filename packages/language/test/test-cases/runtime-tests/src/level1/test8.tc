@@ -7,8 +7,9 @@ type User<T> = struct {
     age: i32,
 }
 
-type Iterable<T> = interface {
+type CompressionAlgo = "gzip" | "deflate" | "brotli"
 
+type Iterable<T> = interface {
     fn initIter()
     fn next() -> T
     fn hasNext() -> bool

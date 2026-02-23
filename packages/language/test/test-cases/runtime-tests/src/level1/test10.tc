@@ -12,16 +12,16 @@ type Data<T> = class {
         return this.data[index]
     }
 
-    fn []=(index: u64, index2: T, value: T){
+    fn []= (index: u64, index2: T, value: T){
         this.data[index] = value
         return value
     }
 
-    fn ()(x: u32) -> T {
+    fn () (x: u32) -> T {
         return this.data[x]
     }
 
-    fn +(y: Data<T>) -> Data<T> {
+    fn + (y: Data<T>) -> Data<T> {
         let z = new Data<T>()
         z.data = this.data
         return z

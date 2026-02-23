@@ -1,5 +1,7 @@
-import { DefaultLangiumProfiler, inject, type Module } from 'langium';
+import { DefaultLangiumProfiler, inject, type LangiumCoreServices, type Module } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
+import { TypeCTokenBuilder } from './parser/tc-token-builder.js';
+import { TypeCLexer } from './parser/tc-lexer.js';
 import { TypeCDocumentationProvider } from './documentation/tc-documentation-provider.js';
 import { TypeCHoverProvider } from './documentation/tc-hover-provider.js';
 import { TypeCGeneratedModule, TypeCGeneratedSharedModule } from './generated/module.js';
@@ -65,6 +67,10 @@ export type TypeCServices = LangiumServices & TypeCAddedServices
  * selected services, while the custom services must be fully specified.
  */
 export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAddedServices> = {
+    parser: {
+        TokenBuilder: () => new TypeCTokenBuilder(),
+        Lexer: (services: LangiumCoreServices) => new TypeCLexer(services),
+    },
     validation: {
         TypeSystemValidator: (services: TypeCServices) => new TypeCTypeSystemValidator(services),
         FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services),

@@ -15,7 +15,7 @@ import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
 import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
-import { isAssignmentOperator } from './operator-utils.js';
+import { isAssignmentOperator, computeBinaryResultType, computeUnaryResultType, computeBinaryResultTypeStrict, computeUnaryResultTypeStrict } from './operator-utils.js';
 import {
     ArrayTypeDescription,
     FunctionTypeDescription,
@@ -31,7 +31,6 @@ import {
     isFunctionType,
     isGenericType,
     isImplementationType,
-    isIntegerType,
     isJoinType,
     isMetaClassType,
     isMetaEnumType,
@@ -39,7 +38,6 @@ import {
     isMetaVariantType,
     isNamespaceType,
     isNeverType,
-    isNumericType,
     isNullableType,
     isPrototypeType,
     isReferenceType,
@@ -2691,36 +2689,10 @@ export class TypeCTypeProvider {
             if (constraintResult) return constraintResult;
         }
 
-        // Comparison operators return bool (primitive fallback)
-        if (['==', '!=', '<', '>', '<=', '>='].includes(node.op)) {
-            return this.typeFactory.createBoolType(node);
-        }
-
-        // Logical operators return bool (primitive fallback)
-        if (['&&', '||'].includes(node.op)) {
-            return this.typeFactory.createBoolType(node);
-        }
-
-        // Primitive fallback for '+' supports string concatenation.
-        if (node.op === '+') {
-            const leftIsString = isStringType(left) || isStringLiteralType(left) || isStringEnumType(left);
-            const rightIsString = isStringType(right) || isStringLiteralType(right) || isStringEnumType(right);
-            if (leftIsString || rightIsString) {
-                return this.typeFactory.createStringType(node);
-            }
-        }
-
-        // Arithmetic operators use common numeric type inference.
-        if (['+', '-', '*', '/', '%'].includes(node.op)) {
-            const resolvedLeft = this.typeUtils.resolveIfReference(left);
-            const resolvedRight = this.typeUtils.resolveIfReference(right);
-            if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
-                const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
-                if (!isErrorType(commonNumeric)) {
-                    return commonNumeric;
-                }
-            }
-        }
+        // Primitive fallback: comparison→bool, logical→bool, string concat→string,
+        // arithmetic→common numeric, bitwise→common numeric
+        const primitiveResult = computeBinaryResultType(node.op, left, right, this.typeUtils, this.typeFactory, node);
+        if (primitiveResult) return primitiveResult;
 
         return left;
     }
@@ -2742,28 +2714,9 @@ export class TypeCTypeProvider {
             if (constraintResult) return constraintResult;
         }
 
-        // Primitive fallback: ! returns bool
-        if (node.op === '!') {
-            return this.typeFactory.createBoolType(node);
-        }
-
-        // Check if unary minus is being applied to unsigned integer type
-        if (node.op === '-') {
-            // Resolve reference types to get the actual type
-            const resolvedType = this.typeUtils.resolveIfReference(exprType);
-
-            // Check if it's an unsigned integer type (u8, u16, u32, u64)
-            // Use the type guard properly to narrow the type
-            if (isIntegerType(resolvedType)) {
-                if (!resolvedType.signed) {
-                    return this.typeFactory.createErrorType(
-                        `Cannot apply unary minus to unsigned type '${resolvedType.toString()}'. Use explicit cast to signed type if negation is intended: -(x as i${resolvedType.bits})`,
-                        undefined,
-                        node
-                    );
-                }
-            }
-        }
+        // Primitive fallback: !→bool, unsigned negation→error, -/~→preserve type
+        const primitiveResult = computeUnaryResultType(node.op, exprType, this.typeUtils, this.typeFactory, node);
+        if (primitiveResult) return primitiveResult;
 
         // Other unary operators preserve the type
         return exprType;
@@ -2990,66 +2943,16 @@ export class TypeCTypeProvider {
             const overload = this.resolveOperatorOverload(leftType, operator, [rightType], node);
             if (overload) return overload;
 
-            // 2. Comparison operators → bool
-            if (['==', '!=', '<', '>', '<=', '>='].includes(operator)) {
-                return this.typeFactory.createBoolType(node);
-            }
-
-            // 3. String concatenation: string + <anything> or <anything> + string → string
-            if (operator === '+') {
-                const leftIsString = isStringType(leftType) || isStringLiteralType(leftType) || isStringEnumType(leftType);
-                const rightIsString = isStringType(rightType) || isStringLiteralType(rightType) || isStringEnumType(rightType);
-                if (leftIsString || rightIsString) {
-                    return this.typeFactory.createStringType(node);
-                }
-            }
-
-            // 4. Numeric arithmetic: common numeric type
-            if (['+', '-', '*', '/', '%'].includes(operator)) {
-                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
-                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
-                if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
-                    const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
-                    if (!isErrorType(commonNumeric)) return commonNumeric;
-                }
-            }
-
-            // 5. Bitwise operators: common numeric type
-            if (['&', '|', '^', '<<', '>>'].includes(operator)) {
-                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
-                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
-                if (isNumericType(resolvedLeft) && isNumericType(resolvedRight)) {
-                    const commonNumeric = this.typeUtils.getCommonType([resolvedLeft, resolvedRight]);
-                    if (!isErrorType(commonNumeric)) return commonNumeric;
-                }
-            }
-
-            // 6. Logical → bool (only valid on bool operands)
-            if (['&&', '||'].includes(operator)) {
-                const resolvedLeft = this.typeUtils.resolveIfReference(leftType);
-                const resolvedRight = this.typeUtils.resolveIfReference(rightType);
-                if (resolvedLeft.kind === TypeKind.Bool && resolvedRight.kind === TypeKind.Bool) {
-                    return this.typeFactory.createBoolType(node);
-                }
-            }
+            // 2-6. Primitive fallbacks (shared with inferBinaryExpression)
+            return computeBinaryResultTypeStrict(operator, leftType, rightType, this.typeUtils, this.typeFactory, node);
         } else {
             // Unary operator
             const overload = this.resolveOperatorOverload(leftType, operator, [], node);
             if (overload) return overload;
 
-            // ! is only valid on bool
-            if (operator === '!') {
-                const resolved = this.typeUtils.resolveIfReference(leftType);
-                if (resolved.kind === TypeKind.Bool) {
-                    return this.typeFactory.createBoolType(node);
-                }
-            }
-            if (operator === '-' || operator === '~') {
-                if (isNumericType(leftType)) return leftType;
-            }
+            // Primitive fallbacks (shared with inferUnaryExpression)
+            return computeUnaryResultTypeStrict(operator, leftType, this.typeUtils, this.typeFactory, node);
         }
-
-        return undefined;
     }
 
     /**

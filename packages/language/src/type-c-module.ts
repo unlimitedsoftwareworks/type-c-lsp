@@ -12,6 +12,9 @@ import { TypeCVariableUsageValidator } from './validations/variable-usage-valida
 import { TypeCVariableInitializerValidator } from './validations/variable-initializer-validation.js';
 import { DuplicateValidator } from './validations/duplicate-validations.js';
 import { TypeCControlFlowValidator } from './validations/control-flow-validation.js';
+import { TypeCStaticContextValidator } from './validations/static-context-validations.js';
+import { TypeCClassInterfaceValidator } from './validations/class-interface-validations.js';
+import { TypeCDeclarationValidator } from './validations/declaration-validations.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
@@ -40,7 +43,10 @@ export type TypeCAddedServices = {
         VariableUsageValidator: TypeCVariableUsageValidator,
         VariableInitializerValidator: TypeCVariableInitializerValidator,
         DuplicateValidator: DuplicateValidator,
-        ControlFlowValidator: TypeCControlFlowValidator
+        ControlFlowValidator: TypeCControlFlowValidator,
+        StaticContextValidator: TypeCStaticContextValidator,
+        ClassInterfaceValidator: TypeCClassInterfaceValidator,
+        DeclarationValidator: TypeCDeclarationValidator
     },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
@@ -65,7 +71,10 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         VariableUsageValidator: () => new TypeCVariableUsageValidator(),
         VariableInitializerValidator: () => new TypeCVariableInitializerValidator(),
         DuplicateValidator: (services: TypeCServices) => new DuplicateValidator(services),
-        ControlFlowValidator: () => new TypeCControlFlowValidator()
+        ControlFlowValidator: () => new TypeCControlFlowValidator(),
+        StaticContextValidator: (services: TypeCServices) => new TypeCStaticContextValidator(services),
+        ClassInterfaceValidator: (services: TypeCServices) => new TypeCClassInterfaceValidator(services),
+        DeclarationValidator: (services: TypeCServices) => new TypeCDeclarationValidator(services)
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),

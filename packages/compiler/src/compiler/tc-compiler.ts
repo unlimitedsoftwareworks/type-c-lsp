@@ -188,6 +188,13 @@ export class IRGenerator {
         return id;
     }
 
+    /**
+     * Maps AST MethodHeader → compiled function name for overloaded methods.
+     * Populated during generateClass to ensure consistent naming between
+     * class shape building (vtable), method compilation, and call sites.
+     */
+    private methodNodeToFuncName = new Map<ast.MethodHeader, string>();
+
     /** Maps class name string → sequential u16 UID for runtime type checks */
     private classNameToUid = new Map<string, number>();
     private classUidCounter = 0;
@@ -1326,6 +1333,10 @@ export class IRGenerator {
         }));
 
         const classMethods: ClassMethodShape[] = [];
+        // Track name occurrences to disambiguate overloaded method funcNames.
+        // methodId stays based on primaryName (for vtable coloring across classes).
+        // funcName is disambiguated (for binary function index resolution).
+        const nameOccurrences = new Map<string, number>();
         let methodIdx = 0;
         for (const method of classTd.methods) {
             // Generic methods are monomorphized per call site and do not have a
@@ -1335,11 +1346,20 @@ export class IRGenerator {
             }
 
             const primaryName = method.names[0] || `method_${methodIdx}`;
+            const occurrence = nameOccurrences.get(primaryName) ?? 0;
+            nameOccurrences.set(primaryName, occurrence + 1);
+            // Overloaded methods get unique suffix on funcName: init, init$1, etc.
+            const dispatchName = occurrence === 0 ? primaryName : `${primaryName}$${occurrence}`;
+            const funcName = this.monoMorph.mangleName(`${className}::${dispatchName}`);
             classMethods.push({
                 methodId: this.getOrCreateMethodNameId(primaryName),
                 name: primaryName,
-                funcName: this.monoMorph.mangleName(`${className}::${primaryName}`)
+                funcName: funcName
             });
+            // Store AST node → funcName mapping for use by generateMethod and call sites
+            if (method.node) {
+                this.methodNodeToFuncName.set(method.node, funcName);
+            }
             methodIdx++;
         }
 
@@ -1489,10 +1509,10 @@ export class IRGenerator {
             return;
         }
 
-        const fullMethodName = this.callableRegistry.getMethodNameForClass(
-            className,
-            methodHeader
-        );
+        // Use the pre-computed name from generateClass if available (handles overloads).
+        // Falls back to callableRegistry for methods not in the mapping.
+        const fullMethodName = this.methodNodeToFuncName.get(methodHeader)
+            ?? this.callableRegistry.getMethodNameForClass(className, methodHeader);
 
         this.debugIR(`  Generating method: ${fullMethodName}`);
 
@@ -3235,6 +3255,8 @@ export class IRGenerator {
         const rhsLabel = this.generateLabel('coalesce_rhs');
         const endLabel = this.generateLabel('coalesce_end');
 
+        // Default temp to lhs value; overwritten by rhs if lhs is null
+        f.mov(temp, left.register, left.type);
         f.isNull(nullCheckReg, left.register);
         f.br(nullCheckReg, rhsLabel, endLabel);
 
@@ -3246,8 +3268,6 @@ export class IRGenerator {
 
         // Left is not null, use left
         f.label(endLabel);
-        // We need phi here ideally, but for now use mov before branch
-        // Rewrite: emit mov before branches
         return { register: temp, type: left.type };
     }
 
@@ -3653,7 +3673,46 @@ export class IRGenerator {
             }
         }
 
-        // Evaluate arguments
+        // Optional chaining: obj?.method() — must short-circuit before arg evaluation
+        if (ast.isMemberAccess(node.expr)) {
+            const memberAccess = node.expr as ast.MemberAccess;
+            if (memberAccess.isNullable) {
+                const obj = this.visitExpression(memberAccess.expr, undefined);
+
+                const retTd = this.getType(node);
+                const retType = this.convertTypeDescriptionToIR(retTd);
+                const resultReg = this.tmp();
+                const nullCheckReg = this.tmp();
+                const callLabel = this.generateLabel('opt_call');
+                const endLabel = this.generateLabel('opt_end');
+
+                // Default result: null/zero (picked up by ?? as "null")
+                f.constNull(resultReg);
+                f.isNull(nullCheckReg, obj.register);
+                f.br(nullCheckReg, endLabel, callLabel);
+
+                // Non-null path: evaluate args, then call
+                f.label(callLabel);
+                const chainArgRegs: VReg[] = [];
+                const chainArgTypes: IRType[] = [];
+                if (node.args) {
+                    for (const arg of node.args) {
+                        const argResult = this.visitExpression(arg, undefined);
+                        chainArgRegs.push(argResult.register);
+                        chainArgTypes.push(argResult.type);
+                    }
+                }
+                this.expandDefaultArguments(node, chainArgRegs, chainArgTypes);
+                const callResult = this.visitMethodCall(node, chainArgRegs, chainArgTypes, obj);
+                f.mov(resultReg, callResult.register, callResult.type);
+                f.jmp(endLabel);
+
+                f.label(endLabel);
+                return { register: resultReg, type: retType };
+            }
+        }
+
+        // Evaluate arguments (shared path for non-optional-chaining calls)
         const argRegs: VReg[] = [];
         const argTypes: IRType[] = [];
         if (node.args) {
@@ -3704,8 +3763,32 @@ export class IRGenerator {
                 return { register: this.tmp(), type: voidType() };
             }
 
-            // Variable holding a closure
+            // Variable holding a closure or coroutine
             const varInfo = this.lookupVariable(this.getReferenceName(ref));
+            if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'coroutine') {
+                const retTd = this.getType(node);
+                const retTypes: IRType[] = [];
+                const dests: VReg[] = [];
+                if (isTupleType(retTd)) {
+                    for (const elemTd of retTd.elementTypes) {
+                        retTypes.push(this.convertTypeDescriptionToIR(elemTd));
+                        dests.push(this.tmp());
+                    }
+                } else {
+                    const retType = this.convertTypeDescriptionToIR(retTd);
+                    if (retType.tag !== 'void') {
+                        retTypes.push(retType);
+                        dests.push(this.tmp());
+                    }
+                }
+
+                f.coroCall(dests, varInfo.register, argRegs, argTypes, retTypes);
+
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
             if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
                 const retTd = this.getType(node);
                 const retType = this.convertTypeDescriptionToIR(retTd);
@@ -3742,7 +3825,9 @@ export class IRGenerator {
         const retTypes = retType.tag === 'void' ? [] : [retType];
         const dests = retType.tag === 'void' ? [] : [this.tmp()];
 
-        if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
+        if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'coroutine') {
+            f.coroCall(dests, funcExpr.register, argRegs, argTypes, retTypes);
+        } else if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
             f.callClosure(dests, funcExpr.register, argRegs, argTypes, retTypes);
         } else {
             // Fallback to direct call with register name
@@ -3758,11 +3843,12 @@ export class IRGenerator {
     private visitMethodCall(
         node: ast.FunctionCall,
         argRegs: VReg[],
-        argTypes: IRType[]
+        argTypes: IRType[],
+        preEvaluatedObj?: ExpressionResult
     ): ExpressionResult {
         const f = this.func();
         const memberAccess = node.expr as ast.MemberAccess;
-        const obj = this.visitExpression(memberAccess.expr, undefined);
+        const obj = preEvaluatedObj ?? this.visitExpression(memberAccess.expr, undefined);
         const memberRef = memberAccess.element?.ref;
 
         const retTd = this.getType(node);
@@ -3772,7 +3858,17 @@ export class IRGenerator {
 
         // Check if FFI call
         const objTd = this.getType(memberAccess.expr);
-        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        let resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+        // Unwrap nullable for method dispatch (handles obj?.method() calls)
+        if (isNullableType(resolvedObjTd)) {
+            resolvedObjTd = resolvedObjTd.baseType;
+            // Re-resolve references after unwrapping nullable
+            // (type may be NullableType<ReferenceType<ClassType>>)
+            if (isReferenceType(resolvedObjTd)) {
+                resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
+            }
+        }
 
         // Variant constructor via member access (e.g., AssertionResult.Ok())
         if (memberRef && ast.isVariantConstructor(memberRef)) {
@@ -3989,24 +4085,27 @@ export class IRGenerator {
     }
 
     /**
-     * Resolve the init method's AST parameters from a NewExpression node.
-     * Returns the FunctionParameter[] array from the init method, or undefined if not found.
+     * Resolve the init method's AST parameters and MethodHeader from a NewExpression node.
+     * Returns { params, methodHeader } or undefined if not found.
      */
-    private resolveInitMethodParams(node: ast.NewExpression): ast.FunctionParameter[] | undefined {
+    private resolveInitMethodParams(node: ast.NewExpression): { params: ast.FunctionParameter[], methodHeader: ast.MethodHeader, overloadIndex: number } | undefined {
         const refType = node.instanceType;
         if (refType && ast.isReferenceType(refType)) {
             const classDecl = refType.field?.ref;
             if (classDecl && ast.isTypeDeclaration(classDecl) && ast.isClassType(classDecl.definition)) {
                 const classDef = classDecl.definition;
-                const initMethods = classDef.methods.filter(m => m.method?.names?.includes('init'));
+                const initMethods = classDef.methods.filter(m => m.method?.names?.[0] === 'init');
                 const argCount = node.args?.length ?? 0;
                 // Find the overload whose arity range matches the provided argument count
-                const match = initMethods.find(m => {
+                const matchIndex = initMethods.findIndex(m => {
                     const params = m.method?.header?.args ?? [];
                     const minArity = params.filter(p => !p.defaultValue).length;
                     return argCount >= minArity && argCount <= params.length;
                 });
-                return match?.method?.header?.args;
+                const match = matchIndex >= 0 ? initMethods[matchIndex] : undefined;
+                if (match?.method) {
+                    return { params: match.method.header?.args ?? [], methodHeader: match.method, overloadIndex: matchIndex };
+                }
             }
         }
         return undefined;
@@ -4371,10 +4470,10 @@ export class IRGenerator {
         }
 
         // Expand default arguments for init method
-        const initParams = this.resolveInitMethodParams(node);
-        if (initParams && argRegs.length < initParams.length) {
-            for (let i = argRegs.length; i < initParams.length; i++) {
-                const defaultExpr = initParams[i].defaultValue;
+        const initResult = this.resolveInitMethodParams(node);
+        if (initResult && argRegs.length < initResult.params.length) {
+            for (let i = argRegs.length; i < initResult.params.length; i++) {
+                const defaultExpr = initResult.params[i].defaultValue;
                 if (!defaultExpr) break;
                 const result = this.visitExpression(defaultExpr, undefined);
                 argRegs.push(result.register);
@@ -4383,9 +4482,26 @@ export class IRGenerator {
         }
 
         // Call init method if the class has one (even with zero arguments)
-        if (initParams !== undefined) {
-            // Convention: init method ID is 0
-            f.callMethod([], temp, 0, argRegs, argTypes, []);
+        if (initResult !== undefined) {
+            // Use pre-computed function name from generateClass (handles overloads).
+            // This avoids vtable dispatch which can't distinguish overloads.
+            let funcName = this.methodNodeToFuncName.get(initResult.methodHeader);
+            if (!funcName) {
+                // Fallback: compute name directly (class may not be generated yet).
+                // NOTE: overloadIndex comes from AST classDef.methods ordering, while
+                // generateClass uses classTd.methods ordering. These must be consistent
+                // for the suffix to match. Safe in practice because both iterate the
+                // same declaration-order methods for non-inherited init overloads.
+                const className = this.getClassIRName(node);
+                if (className) {
+                    const suffix = initResult.overloadIndex === 0 ? 'init' : `init$${initResult.overloadIndex}`;
+                    funcName = this.monoMorph.mangleName(`${className}::${suffix}`);
+                }
+            }
+            if (!funcName) {
+                throw new Error(`Cannot resolve init method name for NewExpression`);
+            }
+            f.call([], funcName, [temp, ...argRegs], [ptrType('class'), ...argTypes], []);
         }
 
         return { register: temp, type: ptrType('class') };
@@ -5112,12 +5228,30 @@ export class IRGenerator {
     }
 
     private visitYieldExpression(node: ast.YieldExpression): ExpressionResult {
+        const isFinal = node.style === 'yield!';
+        const emit = isFinal
+            ? (values: VReg[], types: IRType[]) => this.func().coroRet(values, types)
+            : (values: VReg[], types: IRType[]) => this.func().coroYield(values, types);
+
         if (node.expr) {
-            const expr = this.visitExpression(node.expr, undefined);
-            this.func().coroYield([expr.register], [expr.type]);
+            // Tuple yield: expand elements (same pattern as visitReturnStatement)
+            if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of node.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                emit(values, types);
+            } else {
+                const expr = this.visitExpression(node.expr, undefined);
+                emit([expr.register], [expr.type]);
+            }
         } else {
-            this.func().coroYield([], []);
+            emit([], []);
         }
+
         // After yield, the coroutine resumes and the result comes back
         const temp = this.tmp();
         const resultType = this.getNodeIRType(node);
@@ -5745,13 +5879,16 @@ export class IRGenerator {
         return 0;
     }
 
-    private getClassShapeKey(node: ast.NewExpression): string {
+    /**
+     * Get the mangled IR class name from a NewExpression.
+     * Returns undefined if the class cannot be resolved.
+     */
+    private getClassIRName(node: ast.NewExpression): string | undefined {
         const refType = node.instanceType;
         if (refType && ast.isReferenceType(refType)) {
             const classDecl = refType.field?.ref;
             if (classDecl && ast.isTypeDeclaration(classDecl)) {
                 if (classDecl.genericParameters.length > 0 && refType.genericArgs.length > 0) {
-                    // Generic class: build the same mangled key as generateClass
                     const substitutions = new Map<string, TypeDescription>();
                     classDecl.genericParameters.forEach((param, index) => {
                         if (index < refType.genericArgs.length) {
@@ -5759,12 +5896,19 @@ export class IRGenerator {
                             substitutions.set(param.name, argType);
                         }
                     });
-                    const className = this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions));
-                    return `class_${className}`;
+                    return this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions));
                 } else {
-                    return `class_${classDecl.name}`;
+                    return classDecl.name;
                 }
             }
+        }
+        return undefined;
+    }
+
+    private getClassShapeKey(node: ast.NewExpression): string {
+        const className = this.getClassIRName(node);
+        if (className) {
+            return `class_${className}`;
         }
         // Should not happen for valid class references
         throw new Error(`Cannot resolve class shape key for NewExpression`);

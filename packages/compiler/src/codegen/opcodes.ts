@@ -172,6 +172,7 @@ export enum Op {
     CORO_RETURN,
     CORO_RESET,
     CORO_FINISH,
+    CORO_FN_ALLOC,
 
     // --- String ---
     STR_EALLOC,

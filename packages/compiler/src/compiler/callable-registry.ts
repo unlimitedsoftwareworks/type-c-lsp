@@ -143,11 +143,11 @@ export class CallableRegistry {
                 `Use getGenericMethodName with actual type arguments instead.`
             );
         }
-        
+
         // For non-generic methods, construct the name directly
         const methodName = methodDecl.names[0];
         const key = `${classKey}::${methodName}`;
-        
+
         // Mangle the key (this handles things like Array<u32>::map → Array<u32>.map)
         return this.monoRegistry.mangleName(key);
     }

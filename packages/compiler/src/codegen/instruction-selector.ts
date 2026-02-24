@@ -362,6 +362,31 @@ export function selectInstructions(
         return lo < values.length ? values[lo] : undefined;
     }
 
+    // Move return/yield values to registers 255, 254, ... (backward from end).
+    function emitReturnValueMoves(values: VReg[], types: IRType[]): void {
+        for (let j = 0; j < values.length; j++) {
+            const srcReg = r(regMap, values[j]);
+            const destReg = 255 - j;
+            if (srcReg !== destReg) {
+                const isPtr = isPointer(types[j]);
+                emit(makeABC(isPtr ? Op.MOV_PTR_RR : Op.MOV_RR, destReg, srcReg, 0));
+            }
+        }
+    }
+
+    // Emit a JMP to trueLabel unless it's the fall-through target.
+    // `nextIRIndex` is the index of the next IR instruction after the fused pair.
+    function emitTrueLabelJump(nextIRIndex: number, trueLabel: string): void {
+        if (nextIRIndex < instructions.length) {
+            const next = instructions[nextIRIndex];
+            if (next.kind !== 'label' || next.name !== trueLabel) {
+                emitJump(Op.JMP, 0, trueLabel);
+            }
+        } else {
+            emitJump(Op.JMP, 0, trueLabel);
+        }
+    }
+
     // Check if instruction at index `i` is a comparison whose result is only used by the
     // immediately following `br` instruction (for fusion).
     function canFuseWithBranch(i: number): boolean {
@@ -513,16 +538,7 @@ export function selectInstructions(
                     // Skip fires → skip next instruction (the JMP to false)
                     // So if skip fires (condition true), we fall through past the JMP
                     emitJump(Op.JMP, 0, br.falseLabel);
-                    // If true label isn't the immediate next, add another JMP
-                    // (label resolver will handle fall-through optimization later)
-                    if (i + 2 < instructions.length) {
-                        const nextNext = instructions[i + 2];
-                        if (nextNext.kind !== 'label' || nextNext.name !== br.trueLabel) {
-                            emitJump(Op.JMP, 0, br.trueLabel);
-                        }
-                    } else {
-                        emitJump(Op.JMP, 0, br.trueLabel);
-                    }
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++; // skip the br
                 } else {
                     // Boolean materialization: 3-instruction sequence
@@ -541,14 +557,7 @@ export function selectInstructions(
                     if (br.kind !== 'br') break;
                     emit(makeABC(Op.EQ_S, r(regMap, inst.lhs), r(regMap, inst.rhs), 0));
                     emitJump(Op.JMP, 0, br.falseLabel);
-                    if (i + 2 < instructions.length) {
-                        const nextNext = instructions[i + 2];
-                        if (nextNext.kind !== 'label' || nextNext.name !== br.trueLabel) {
-                            emitJump(Op.JMP, 0, br.trueLabel);
-                        }
-                    } else {
-                        emitJump(Op.JMP, 0, br.trueLabel);
-                    }
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++;
                 } else {
                     const dest = r(regMap, inst.dest);
@@ -565,14 +574,7 @@ export function selectInstructions(
                     if (br.kind !== 'br') break;
                     emit(makeABC(Op.NE_S, r(regMap, inst.lhs), r(regMap, inst.rhs), 0));
                     emitJump(Op.JMP, 0, br.falseLabel);
-                    if (i + 2 < instructions.length) {
-                        const nextNext = instructions[i + 2];
-                        if (nextNext.kind !== 'label' || nextNext.name !== br.trueLabel) {
-                            emitJump(Op.JMP, 0, br.trueLabel);
-                        }
-                    } else {
-                        emitJump(Op.JMP, 0, br.trueLabel);
-                    }
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++;
                 } else {
                     const dest = r(regMap, inst.dest);
@@ -589,6 +591,7 @@ export function selectInstructions(
                     if (br.kind !== 'br') break;
                     emit(makeABC(Op.ISNULL, r(regMap, inst.src), 0, 0));
                     emitJump(Op.JMP, 0, br.falseLabel);
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++;
                 } else {
                     const dest = r(regMap, inst.dest);
@@ -605,6 +608,7 @@ export function selectInstructions(
                     if (br.kind !== 'br') break;
                     emit(makeABC(Op.ISTRUE, r(regMap, inst.src), 0, 0));
                     emitJump(Op.JMP, 0, br.falseLabel);
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++;
                 } else {
                     const dest = r(regMap, inst.dest);
@@ -621,6 +625,7 @@ export function selectInstructions(
                     if (br.kind !== 'br') break;
                     emit(makeABC(Op.ISFALSE, r(regMap, inst.src), 0, 0));
                     emitJump(Op.JMP, 0, br.falseLabel);
+                    emitTrueLabelJump(i + 2, br.trueLabel);
                     i++;
                 } else {
                     const dest = r(regMap, inst.dest);
@@ -644,28 +649,11 @@ export function selectInstructions(
                 // Standalone br (not fused with a preceding comparison)
                 emit(makeABC(Op.ISTRUE, r(regMap, inst.condition), 0, 0));
                 emitJump(Op.JMP, 0, inst.falseLabel);
-                // Check if trueLabel is fall-through
-                if (i + 1 < instructions.length) {
-                    const next = instructions[i + 1];
-                    if (next.kind !== 'label' || next.name !== inst.trueLabel) {
-                        emitJump(Op.JMP, 0, inst.trueLabel);
-                    }
-                } else {
-                    emitJump(Op.JMP, 0, inst.trueLabel);
-                }
+                emitTrueLabelJump(i + 1, inst.trueLabel);
                 break;
 
             case 'ret': {
-                // Move return values to registers 255, 254, 253... (backward from end)
-                // This avoids collision with param registers at the front.
-                for (let j = 0; j < inst.values.length; j++) {
-                    const srcReg = r(regMap, inst.values[j]);
-                    const destReg = 255 - j;
-                    if (srcReg !== destReg) {
-                        const retIsPtr = isPointer(inst.types[j]);
-                        emit(makeABC(retIsPtr ? Op.MOV_PTR_RR : Op.MOV_RR, destReg, srcReg, 0));
-                    }
-                }
+                emitReturnValueMoves(inst.values, inst.types);
                 emit(makeABC(Op.FN_RETURN, 0, 0, 0));
                 break;
             }
@@ -943,14 +931,7 @@ export function selectInstructions(
                 break;
             }
             case 'closure_ret':
-                for (let j = 0; j < inst.values.length; j++) {
-                    const srcReg = r(regMap, inst.values[j]);
-                    const destReg = 255 - j;
-                    if (srcReg !== destReg) {
-                        const retIsPtr = isPointer(inst.types[j]);
-                        emit(makeABC(retIsPtr ? Op.MOV_PTR_RR : Op.MOV_RR, destReg, srcReg, 0));
-                    }
-                }
+                emitReturnValueMoves(inst.values, inst.types);
                 emit(makeABC(Op.CLOSURE_BACK, 0, 0, 0));
                 break;
 
@@ -968,32 +949,31 @@ export function selectInstructions(
                 emit(makeABC(Op.CORO_STATE, r(regMap, inst.dest), r(regMap, inst.coro), 0));
                 break;
             case 'coro_call': {
-                if (inst.args.length > 0 || inst.dests.length > 0) {
-                    throw new Error(
-                        `Unsupported coroutine value passing in '${functionName}': ` +
-                        `coro_call currently supports only zero args and zero returns.`
-                    );
-                }
                 const coroReg = r(regMap, inst.coro);
-                emit(makeABC(Op.CORO_CALL, coroReg, inst.args.length, inst.dests.length));
+                // Link coroutine frame for arg passing
+                if (inst.args.length > 0) {
+                    emit(makeABC(Op.CORO_FN_ALLOC, coroReg, 0, 0));
+                    for (let j = 0; j < inst.args.length; j++) {
+                        const argReg = r(regMap, inst.args[j]);
+                        const isPtr = isPointer(inst.argTypes[j]);
+                        emit(makeABC(isPtr ? Op.FN_SET_REG_PTR : Op.FN_SET_REG, j, argReg, 0));
+                    }
+                }
+                emit(makeABC(Op.CORO_CALL, coroReg, 0, 0));
+                // Read return values from coroutine frame (regs 255, 254, ...)
+                for (let j = 0; j < inst.dests.length; j++) {
+                    const destReg = r(regMap, inst.dests[j]);
+                    const isPtr = isPointer(inst.retTypes[j]);
+                    emit(makeABC(isPtr ? Op.FN_GET_RET_PTR_R : Op.FN_GET_RET_R, destReg, 255 - j, 0));
+                }
                 break;
             }
             case 'coro_yield':
-                if (inst.values.length > 0) {
-                    throw new Error(
-                        `Unsupported coroutine yield values in '${functionName}': ` +
-                        `coro_yield currently supports zero yielded values only.`
-                    );
-                }
+                emitReturnValueMoves(inst.values, inst.types);
                 emit(makeABC(Op.CORO_YIELD, 0, 0, 0));
                 break;
             case 'coro_ret':
-                if (inst.values.length > 0) {
-                    throw new Error(
-                        `Unsupported coroutine return values in '${functionName}': ` +
-                        `coro_ret currently supports zero return values only.`
-                    );
-                }
+                emitReturnValueMoves(inst.values, inst.types);
                 emit(makeABC(Op.CORO_RETURN, 0, 0, 0));
                 break;
             case 'coro_reset':

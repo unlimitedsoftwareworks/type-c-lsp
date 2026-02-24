@@ -1,0 +1,296 @@
+// Comprehensive test cases for contextual type propagation through nullable types and lambdas
+// All tests in this file must produce zero diagnostics
+
+// ===================================================================
+// Shared types
+// ===================================================================
+
+type User = struct {
+    name: string,
+    age: u32
+}
+
+type Config = struct {
+    width: u32,
+    height: u32,
+    scale: f32
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+type Color = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+}
+
+type Entity = struct {
+    position: Point,
+    health: u16,
+    speed: f32
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+// ===================================================================
+// 1. Struct construction with nullable target
+// ===================================================================
+
+fn test_nullable_struct_basic() {
+    // Integer literal 20 should adopt u32 from User.age (not default to i32)
+    let s: User? = {name: "John", age: 20}
+}
+
+fn test_nullable_struct_multiple_numeric_fields() {
+    // All literals should adopt u32/f32 from Config fields
+    let c: Config? = {width: 800, height: 600, scale: 1.0}
+}
+
+fn test_nullable_struct_u8_fields() {
+    // Integer literals should adopt u8 from Color fields
+    let c: Color? = {r: 255, g: 128, b: 0, a: 255}
+}
+
+fn test_nullable_struct_u16_fields() {
+    // u16 and f32 fields through nullable
+    let e: Entity? = {
+        position: {x: 10.0f, y: 20.0f},
+        health: 100,
+        speed: 5.0
+    }
+}
+
+fn test_nullable_struct_nested() {
+    // Nested struct construction through nullable outer type
+    let e: Entity? = {
+        position: {x: 1.0, y: 2.0},
+        health: 50,
+        speed: 3.0
+    }
+}
+
+fn test_nullable_struct_null_assignment() {
+    // null is valid for nullable struct
+    let s: User? = null
+}
+
+// ===================================================================
+// 2. Lambda block body with explicit return type
+// ===================================================================
+
+fn test_lambda_block_return_u32() {
+    // Literal 10 inside return adopts u32 from lambda return type
+    let f: fn() -> u32 = fn() -> u32 { return 10 }
+}
+
+fn test_lambda_block_return_u16() {
+    let f: fn() -> u16 = fn() -> u16 { return 42 }
+}
+
+fn test_lambda_block_return_u64() {
+    let f: fn() -> u64 = fn() -> u64 { return 999 }
+}
+
+fn test_lambda_block_return_i8() {
+    let f: fn() -> i8 = fn() -> i8 { return 5 }
+}
+
+fn test_lambda_block_return_f32() {
+    // Float literal adopts f32 from lambda return type
+    let f: fn() -> f32 = fn() -> f32 { return 3.14 }
+}
+
+fn test_lambda_block_return_with_params() {
+    // Lambda with parameters and block body
+    let f: fn(u32) -> u32 = fn(x: u32) -> u32 { return x + 1 }
+}
+
+fn test_lambda_block_return_multi_statement() {
+    // Lambda with multiple statements and return
+    let f: fn(u32) -> u32 = fn(x: u32) -> u32 {
+        let y = x + 1
+        return y
+    }
+}
+
+// ===================================================================
+// 3. Nullable function types
+// ===================================================================
+
+fn test_nullable_fn_type_basic() {
+    // Lambda assigned to nullable function type - literal adopts u32
+    let f: (fn() -> u32)? = fn() -> u32 { return 1 }
+}
+
+fn test_nullable_fn_type_f32_return() {
+    let f: (fn() -> f32)? = fn() -> f32 { return 2.5 }
+}
+
+fn test_nullable_fn_type_null() {
+    // null is valid for nullable function type
+    let f: (fn() -> u32)? = null
+}
+
+fn test_nullable_fn_type_with_params() {
+    let f: (fn(u32, u32) -> u32)? = fn(a: u32, b: u32) -> u32 { return a + b }
+}
+
+fn test_nullable_fn_type_struct_return() {
+    // Lambda returning struct through nullable function type
+    let f: (fn() -> Point)? = fn() = {x: 1.0f, y: 2.0f}
+}
+
+// ===================================================================
+// 4. Lambda parameter inference through nullable function type
+// ===================================================================
+
+fn test_nullable_lambda_param_inference_basic() {
+    // Parameter x should be inferred as u32 from nullable fn type
+    let f: (fn(u32) -> u32)? = fn(x) = x + 1
+}
+
+fn test_nullable_lambda_param_inference_two_params() {
+    // Both params inferred through nullable
+    let f: (fn(u32, f32) -> f32)? = fn(x, y) = y
+}
+
+fn test_nullable_lambda_param_inference_struct_param() {
+    // Struct param inferred through nullable
+    let f: (fn(Point) -> f32)? = fn(p) = p.x + p.y
+}
+
+// ===================================================================
+// 5. Lambda expression body through nullable
+// ===================================================================
+
+fn test_nullable_lambda_expr_body_basic() {
+    // Expression result adopts u32 return type through nullable
+    let f: (fn(u32) -> u32)? = fn(x) = x * 2
+}
+
+fn test_nullable_lambda_expr_body_f32() {
+    let f: (fn(f32) -> f32)? = fn(x) = x * 2.0f
+}
+
+// ===================================================================
+// 6. Non-nullable lambda with return statement (baseline)
+// ===================================================================
+
+fn test_non_nullable_lambda_return() {
+    // Verify baseline still works - non-nullable lambda with block body
+    let f: fn() -> u32 = fn() -> u32 { return 42 }
+}
+
+fn test_non_nullable_lambda_expr() {
+    // Verify baseline - expression body
+    let f: fn(u32) -> u32 = fn(x) = x + 1
+}
+
+// ===================================================================
+// 7. Lambda return type from enclosing function (not lambda)
+// ===================================================================
+
+fn returns_u32() -> u32 {
+    // Literal 42 adopts u32 from enclosing function return type
+    return 42
+}
+
+fn returns_u16() -> u16 {
+    return 100
+}
+
+fn returns_f32() -> f32 {
+    return 3.14
+}
+
+// ===================================================================
+// 8. Complex: nullable function type in struct field
+// ===================================================================
+
+type Callback = struct {
+    handler: (fn(u32) -> u32)?,
+    label: string
+}
+
+fn test_nullable_fn_in_struct() {
+    let cb: Callback = {
+        handler: fn(x) = x * 2,
+        label: "double"
+    }
+
+    let cb2: Callback = {
+        handler: null,
+        label: "none"
+    }
+}
+
+// ===================================================================
+// 9. Nullable struct in variant context
+// ===================================================================
+
+fn test_nullable_struct_in_variant() {
+    let r: Result<User?, string> = Result.Ok({name: "Alice", age: 30})
+    let r2: Result<User?, string> = Result.Ok(null)
+}
+
+// ===================================================================
+// 10. Array of nullable structs
+// ===================================================================
+
+fn test_nullable_struct_array() {
+    let users: User?[] = [{name: "Alice", age: 25}, null, {name: "Bob", age: 30}]
+}
+
+// ===================================================================
+// 11. Multiple return paths in lambda block body
+// ===================================================================
+
+fn test_lambda_block_conditional_return() {
+    let f: fn(u32) -> u32 = fn(x: u32) -> u32 {
+        if x > 10u32 {
+            return 100
+        }
+        return 0
+    }
+}
+
+// ===================================================================
+// 12. Nullable function type in array
+// ===================================================================
+
+fn test_nullable_fn_array() {
+    let fns: (fn() -> u32)?[] = [fn() -> u32 { return 1 }, null, fn() -> u32 { return 3 }]
+}
+
+// ===================================================================
+// 13. Lambda inside lambda - inner has explicit return type
+// ===================================================================
+
+fn test_nested_lambda_return_type() {
+    let f: fn() -> fn() -> u32 = fn() = fn() -> u32 { return 42 }
+}
+
+// ===================================================================
+// 14. Anonymous struct construction through nullable
+// ===================================================================
+
+type Pair = struct {
+    x: u32,
+    y: u32
+}
+
+fn test_nullable_anonymous_struct() {
+    let p: Pair? = {10, 20}
+}

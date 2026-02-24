@@ -281,7 +281,10 @@ export class TypeCTypeProvider {
             if (header && ast.isFunctionHeader(header)) {
                 const lambda = header.$container;
                 if (lambda && ast.isLambdaExpression(lambda)) {
-                    const expectedLambdaType = this.getExpectedType(lambda);
+                    let expectedLambdaType = this.getExpectedType(lambda);
+                    if (expectedLambdaType && isNullableType(expectedLambdaType)) {
+                        expectedLambdaType = expectedLambdaType.baseType;
+                    }
                     if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
                         // Find parameter index
                         const paramIndex = header.args?.findIndex(arg => arg === node);
@@ -500,6 +503,18 @@ export class TypeCTypeProvider {
                 return undefined;
             }
 
+            // Check for lambda expressions first (innermost function-like container)
+            // Must come before FunctionDeclaration check because getContainerOfType
+            // for FunctionDeclaration walks past lambdas to the outer function
+            const lambda = AstUtils.getContainerOfType(parent, ast.isLambdaExpression);
+            if (lambda) {
+                if (lambda.header?.returnType) {
+                    return this.getType(lambda.header.returnType);
+                }
+                // Lambda without explicit return type -- no contextual type
+                return undefined;
+            }
+
             // Find the containing function
             const fn = AstUtils.getContainerOfType(parent, ast.isFunctionDeclaration);
             if (fn && fn.header.returnType) {
@@ -627,10 +642,17 @@ export class TypeCTypeProvider {
             if (ast.isNamedStructConstructionExpression(structExpr)) {
                 const expectedStructType = this.getExpectedType(structExpr);
                 if (expectedStructType) {
-                    // Resolve reference types
-                    const resolvedExpected = isReferenceType(expectedStructType)
-                        ? this.resolveReference(expectedStructType)
-                        : expectedStructType;
+                    // Unwrap nullable and resolve reference types
+                    let resolvedExpected = expectedStructType;
+                    if (isNullableType(resolvedExpected)) {
+                        resolvedExpected = resolvedExpected.baseType;
+                    }
+                    if (isReferenceType(resolvedExpected)) {
+                        resolvedExpected = this.resolveReference(resolvedExpected);
+                    }
+                    if (isNullableType(resolvedExpected)) {
+                        resolvedExpected = resolvedExpected.baseType;
+                    }
 
                     // Get the struct type (handles both direct structs and join types)
                     const structType = this.typeUtils.asStructType(resolvedExpected);
@@ -650,10 +672,17 @@ export class TypeCTypeProvider {
         if (parent && ast.isAnonymousStructConstructionExpression(parent)) {
             const expectedStructType = this.getExpectedType(parent);
             if (expectedStructType) {
-                // Resolve reference types
-                const resolvedExpected = isReferenceType(expectedStructType)
-                    ? this.resolveReference(expectedStructType)
-                    : expectedStructType;
+                // Unwrap nullable and resolve reference types
+                let resolvedExpected = expectedStructType;
+                if (isNullableType(resolvedExpected)) {
+                    resolvedExpected = resolvedExpected.baseType;
+                }
+                if (isReferenceType(resolvedExpected)) {
+                    resolvedExpected = this.resolveReference(resolvedExpected);
+                }
+                if (isNullableType(resolvedExpected)) {
+                    resolvedExpected = resolvedExpected.baseType;
+                }
 
                 // Get the struct type
                 const structType = this.typeUtils.asStructType(resolvedExpected);
@@ -753,7 +782,10 @@ export class TypeCTypeProvider {
         // Lambda parameter inference: fn(x) -> ... where lambda is expected to have type fn(T) -> U
         // If the lambda is passed to a function expecting a specific function type, use that
         if (parent && ast.isLambdaExpression(parent)) {
-            const expectedLambdaType = this.getExpectedType(parent);
+            let expectedLambdaType = this.getExpectedType(parent);
+            if (expectedLambdaType && isNullableType(expectedLambdaType)) {
+                expectedLambdaType = expectedLambdaType.baseType;
+            }
             if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
                 // Check if this node is one of the lambda's parameters
                 const paramIndex = parent.header.args?.findIndex(arg => arg === node);
@@ -766,7 +798,10 @@ export class TypeCTypeProvider {
         // Lambda body expression: fn(x) = expr where lambda is expected to have return type U
         // If the lambda has an expected function type, propagate return type to body expression
         if (parent && ast.isLambdaExpression(parent) && parent.expr === node) {
-            const expectedLambdaType = this.getExpectedType(parent);
+            let expectedLambdaType = this.getExpectedType(parent);
+            if (expectedLambdaType && isNullableType(expectedLambdaType)) {
+                expectedLambdaType = expectedLambdaType.baseType;
+            }
             if (expectedLambdaType && isFunctionType(expectedLambdaType)) {
                 // Return the expected return type for the lambda's body expression
                 return expectedLambdaType.returnType;
@@ -2478,6 +2513,9 @@ export class TypeCTypeProvider {
         if (expectedType && isReferenceType(expectedType)) {
             expectedType = this.resolveReference(expectedType);
         }
+        if (expectedType && isNullableType(expectedType)) {
+            expectedType = expectedType.baseType;
+        }
         if (expectedType && this.isIntegerType(expectedType)) {
             // Use the expected integer type
             return expectedType;
@@ -2527,6 +2565,9 @@ export class TypeCTypeProvider {
         // Resolve reference types (e.g., type aliases like `type float = f32`)
         if (expectedType && isReferenceType(expectedType)) {
             expectedType = this.resolveReference(expectedType);
+        }
+        if (expectedType && isNullableType(expectedType)) {
+            expectedType = expectedType.baseType;
         }
         if (expectedType && this.isFloatType(expectedType)) {
             // Use the expected float type (f32 or f64)
@@ -4431,10 +4472,16 @@ export class TypeCTypeProvider {
         // Get the expected type from context
         const expectedType = this.getExpectedType(node);
 
-        // Resolve reference types if needed
+        // Unwrap nullable and resolve reference types
         let resolvedExpectedType = expectedType;
-        if (expectedType && isReferenceType(expectedType)) {
-            resolvedExpectedType = this.resolveReference(expectedType);
+        if (resolvedExpectedType && isNullableType(resolvedExpectedType)) {
+            resolvedExpectedType = resolvedExpectedType.baseType;
+        }
+        if (resolvedExpectedType && isReferenceType(resolvedExpectedType)) {
+            resolvedExpectedType = this.resolveReference(resolvedExpectedType);
+        }
+        if (resolvedExpectedType && isNullableType(resolvedExpectedType)) {
+            resolvedExpectedType = resolvedExpectedType.baseType;
         }
 
         // Check if expected type is a struct (could be a struct or join type resolving to struct)
@@ -4571,7 +4618,10 @@ export class TypeCTypeProvider {
 
     private inferLambdaExpression(node: ast.LambdaExpression): TypeDescription {
         // Get expected lambda type for parameter inference
-        const expectedLambdaType = this.getExpectedType(node);
+        let expectedLambdaType = this.getExpectedType(node);
+        if (expectedLambdaType && isNullableType(expectedLambdaType)) {
+            expectedLambdaType = expectedLambdaType.baseType;
+        }
         const expectedFnType = expectedLambdaType && isFunctionType(expectedLambdaType) ? expectedLambdaType : undefined;
 
         const params = node.header.args?.map((arg, index) => {

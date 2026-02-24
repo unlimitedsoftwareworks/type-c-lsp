@@ -1,0 +1,193 @@
+// Comprehensive negative test cases for contextual type propagation through nullable types and lambdas
+// All tests in this file must have matching @Error annotations
+
+// ===================================================================
+// Shared types
+// ===================================================================
+
+type User = struct {
+    name: string,
+    age: u32
+}
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+type Color = struct {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+}
+
+type Entity = struct {
+    position: Point,
+    health: u16
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+// ===================================================================
+// 1. Struct field type mismatch through nullable
+// ===================================================================
+
+fn test_nullable_struct_wrong_field_type() {
+    /// @Error(TCE006): Variable 's' type mismatch
+    let s: User? = {name: "John", age: "twenty"}
+}
+
+fn test_nullable_struct_missing_field() {
+    /// @Error(TCE006): Variable 's' type mismatch
+    let s: User? = {name: "John"}
+}
+
+fn test_nullable_struct_wrong_color_field() {
+    /// @Error(TCE006): Variable 'c' type mismatch
+    let c: Color? = {r: 255, g: 128, b: "blue", a: 255}
+}
+
+// ===================================================================
+// 2. Lambda return type mismatch through nullable function type
+// ===================================================================
+
+fn test_nullable_fn_return_type_mismatch() {
+    let f: (fn() -> u32)? = fn() -> u32 {
+        /// @Error(TCE031): Return type mismatch
+        return "hello"
+    }
+}
+
+fn test_nullable_fn_return_type_mismatch_expr() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn() -> Point)? = fn() = {x: "hello", y: 2.0f}
+}
+
+// ===================================================================
+// 3. Lambda parameter count mismatch through nullable function type
+// ===================================================================
+
+fn test_nullable_fn_param_count_mismatch() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn(u32, u32) -> u32)? = fn(x: u32) = x
+}
+
+// ===================================================================
+// 4. Non-function assigned to nullable function variable
+// ===================================================================
+
+fn test_nullable_fn_non_function_assignment() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn() -> u32)? = 42
+}
+
+fn test_nullable_fn_string_assignment() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn() -> u32)? = "not a function"
+}
+
+// ===================================================================
+// 5. Lambda wrong parameter type through nullable
+// ===================================================================
+
+fn test_nullable_fn_param_type_mismatch() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn(u32) -> u32)? = fn(x: string) = 1
+}
+
+fn test_nullable_fn_param_type_mismatch_multi() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn(u32, f32) -> f32)? = fn(x: string, y: i32) = 1.0f
+}
+
+// ===================================================================
+// 6. Anonymous struct wrong count through nullable
+// ===================================================================
+
+fn test_nullable_anon_struct_wrong_count() {
+    /// @Error(TCE120): Anonymous struct has 3 value(s)
+    let p: Point? = {1.0f, 2.0f, 3.0f}
+}
+
+fn test_nullable_anon_struct_too_few() {
+    /// @Error(TCE120): Anonymous struct has 1 value(s)
+    let p: Point? = {1.0f}
+}
+
+// ===================================================================
+// 7. Lambda return statement in block body - return type from lambda
+// ===================================================================
+
+fn test_lambda_block_return_type_mismatch() {
+    /// @Error(TCE031): Return type mismatch
+    let f: fn() -> u32 = fn() -> u32 { return "wrong" }
+}
+
+fn test_lambda_block_return_type_mismatch_f32() {
+    /// @Error(TCE031): Return type mismatch
+    let f: fn() -> f32 = fn() -> f32 { return "wrong" }
+}
+
+// ===================================================================
+// 8. Non-nullable lambda (baseline negative tests still work)
+// ===================================================================
+
+fn test_non_nullable_lambda_wrong_return() {
+    let f: fn() -> u32 = fn() -> u32 {
+        /// @Error(TCE031): Return type mismatch
+        return "hello"
+    }
+}
+
+fn test_non_nullable_lambda_param_mismatch() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: fn(u32) -> u32 = fn(x: string) = 1
+}
+
+// ===================================================================
+// 9. Nested struct field mismatch through nullable
+// ===================================================================
+
+fn test_nullable_nested_struct_mismatch() {
+    /// @Error(TCE006): Variable 'e' type mismatch
+    let e: Entity? = {
+        position: {x: "not a float", y: 2.0f},
+        health: 100
+    }
+}
+
+// ===================================================================
+// 10. Lambda without context - param inference fails
+// ===================================================================
+
+fn test_lambda_no_context_param_inference() {
+    /// @Error: Parameter 'x' requires type annotation
+    let f = fn(x) = x + 1
+}
+
+// ===================================================================
+// 11. Nullable struct assigned wrong type entirely
+// ===================================================================
+
+fn test_nullable_struct_string_assignment() {
+    /// @Error(TCE006): Variable 's' type mismatch
+    let s: User? = "not a struct"
+}
+
+fn test_nullable_struct_int_assignment() {
+    /// @Error(TCE006): Variable 's' type mismatch
+    let s: User? = 42
+}
+
+// ===================================================================
+// 12. Lambda returning wrong struct fields through nullable fn type
+// ===================================================================
+
+fn test_nullable_fn_lambda_wrong_struct_return() {
+    /// @Error(TCE006): Variable 'f' type mismatch
+    let f: (fn() -> User)? = fn() = {name: 42, age: 20}
+}

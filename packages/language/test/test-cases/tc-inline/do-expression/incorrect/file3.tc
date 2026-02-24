@@ -1,0 +1,29 @@
+// Stress tests: lambda with do-expression body - type mismatch errors
+
+// === Test 1: Returning f64 when u32 expected ===
+let t1 = fn () -> u32 =
+    /// @Error(TCE041): Lambda return type mismatch
+    do {
+        return 1.5
+    }
+
+// === Test 2: Returning bool when i32 expected ===
+let t2 = fn () -> i32 =
+    /// @Error(TCE041): Lambda return type mismatch
+    do {
+        return true
+    }
+
+// === Test 3: Returning string when f32 expected ===
+let t3 = fn () -> f32 =
+    /// @Error(TCE041): Lambda return type mismatch
+    do {
+        return "hello"
+    }
+
+// === Test 4: Returning string when bool expected ===
+let t4 = fn () -> bool =
+    /// @Error(TCE041): Lambda return type mismatch
+    do {
+        return "true"
+    }

@@ -1,0 +1,7 @@
+// ❌ Error: lambda with do-expression returning wrong type
+
+let a = fn (x: u32) -> u32 =
+    /// @Error(TCE041): Lambda return type mismatch: string is not assignable to u32
+    do {
+        return "hello"
+    }

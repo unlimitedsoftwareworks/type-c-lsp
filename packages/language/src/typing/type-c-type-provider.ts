@@ -806,6 +806,10 @@ export class TypeCTypeProvider {
                 // Return the expected return type for the lambda's body expression
                 return expectedLambdaType.returnType;
             }
+            // If no expected type from outer context, check lambda's explicit return type
+            if (parent.header?.returnType) {
+                return this.getType(parent.header.returnType);
+            }
         }
 
         // Yield expression: yield expr in coroutine

@@ -1,0 +1,27 @@
+// ✅ Valid: lambda with do-expression and explicit return type - integer literal contextually typed
+
+let a = fn (x: u32, y: u32) -> u32 =
+    do {
+        return 0
+    }
+
+// ✅ Valid: lambda with do-expression, if/else branches contextually typed
+let b = fn (x: u32) -> u32 =
+    do {
+        return if x > 10 => 1 else 0
+    }
+
+// ✅ Valid: lambda with do-expression returning f32
+let c = fn (x: f32) -> f32 =
+    do {
+        return 0.0
+    }
+
+// ✅ Valid: function returning result of lambda-with-do-expression
+fn testLambdaDo() -> u32 {
+    let f = fn (x: u32) -> u32 =
+        do {
+            return x
+        }
+    return f(42)
+}

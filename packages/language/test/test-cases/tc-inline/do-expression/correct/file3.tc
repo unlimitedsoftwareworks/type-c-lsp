@@ -1,0 +1,172 @@
+// Stress tests: lambda with do-expression body and explicit return type
+// All cases must produce zero diagnostics
+
+// === Test 1: All integer types contextually typed from lambda return ===
+
+let t1_u8 = fn () -> u8 =
+    do {
+        return 0
+    }
+
+let t1_u16 = fn () -> u16 =
+    do {
+        return 0
+    }
+
+let t1_u32 = fn () -> u32 =
+    do {
+        return 0
+    }
+
+let t1_u64 = fn () -> u64 =
+    do {
+        return 0
+    }
+
+let t1_i8 = fn () -> i8 =
+    do {
+        return 0
+    }
+
+let t1_i16 = fn () -> i16 =
+    do {
+        return 0
+    }
+
+let t1_i32 = fn () -> i32 =
+    do {
+        return 0
+    }
+
+let t1_i64 = fn () -> i64 =
+    do {
+        return 0
+    }
+
+// === Test 2: Float types contextually typed ===
+
+let t2_f32 = fn () -> f32 =
+    do {
+        return 0.0
+    }
+
+let t2_f64 = fn () -> f64 =
+    do {
+        return 0.0
+    }
+
+// === Test 3: Multiple return paths, all contextually typed ===
+
+let t3 = fn (x: u32) -> u32 =
+    do {
+        if x > 100 {
+            return 1
+        }
+        if x > 50 {
+            return 2
+        }
+        return 0
+    }
+
+// === Test 4: Conditional expression inside do-expression ===
+
+let t4 = fn (a: u32, b: u32) -> u32 =
+    do {
+        return if a > b => a else b
+    }
+
+// === Test 5: Lambda with explicit params and return type, do body with local vars ===
+
+let t5 = fn (x: u32) -> u32 =
+    do {
+        let doubled = x * 2
+        let offset = 10u32
+        return doubled + offset
+    }
+
+// === Test 6: Lambda assigned to explicitly typed variable (two sources of context) ===
+
+let t6: fn(x: u32) -> u32 = fn (x: u32) -> u32 =
+    do {
+        return x + 1
+    }
+
+// === Test 7: Lambda with do-expression passed as function argument ===
+
+fn applyOp(f: fn(x: u32) -> u32, val: u32) -> u32 {
+    return f(val)
+}
+
+fn test7() {
+    let result = applyOp(fn (x: u32) -> u32 = do { return x * 2 }, 5)
+}
+
+// === Test 8: Lambda with bool return type and do-expression ===
+
+let t8 = fn (x: u32) -> bool =
+    do {
+        return x > 10
+    }
+
+// === Test 9: Lambda with string return type and do-expression ===
+
+let t9 = fn (x: u32) -> string =
+    do {
+        return if x > 10 => "big" else "small"
+    }
+
+// === Test 10: Lambda with do-expression returning parameter directly ===
+
+let t10 = fn (x: u64) -> u64 =
+    do {
+        return x
+    }
+
+// === Test 11: Suffixed literal matching return type (no contextual needed) ===
+
+let t11 = fn () -> u32 =
+    do {
+        return 42u32
+    }
+
+// === Test 12: Lambda with do-expression and explicit return type used in function ===
+
+fn computeSum(a: u32, b: u32) -> u32 {
+    let add = fn (x: u32, y: u32) -> u32 =
+        do {
+            return x + y
+        }
+    return add(a, b)
+}
+
+// === Test 13: Multiple lambdas with do-expressions, different return types ===
+
+fn test13() {
+    let toU32 = fn (x: u32) -> u32 = do { return x }
+    let toI32 = fn (x: i32) -> i32 = do { return x }
+    let toF64 = fn (x: f64) -> f64 = do { return x }
+    let toBool = fn (x: u32) -> bool = do { return x > 0 }
+}
+
+// === Test 14: Lambda returning from nested if/else chains inside do ===
+
+let t14 = fn (x: i32) -> i32 =
+    do {
+        if x > 0 {
+            if x > 100 {
+                return 100
+            } else {
+                return x
+            }
+        } else {
+            return 0
+        }
+    }
+
+// === Test 15: Lambda with do-expression where return type is explicitly f32 ===
+// Tests that float literal 1.0 (default f64) is contextually typed to f32
+
+let t15 = fn (x: f32) -> f32 =
+    do {
+        return x + 1.0
+    }

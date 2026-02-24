@@ -4357,55 +4357,69 @@ export class IRGenerator {
             elemType = this.convertTypeDescriptionToIR((arrayTd as ArrayTypeDescription).elementType);
         }
 
-        // Allocate array
         const values = node.values ?? [];
-        const sizeReg = this.tmp();
-        f.constInt(sizeReg, values.length, 'u64');
-        f.arrayAlloc(temp, elemType, sizeReg);
+        const hasSpreads = values.some(v => ast.isArraySpreadExpression(v));
 
-        // Set elements
-        for (let i = 0; i < values.length; i++) {
-            const elem = values[i];
-            if (ast.isArraySpreadExpression(elem)) {
-                // Spread: extend array with source elements
-                const srcArray = this.visitExpression(elem.expr, undefined);
-                const srcLen = this.tmp();
-                f.arrayLength(srcLen, srcArray.register);
-                f.arrayExtend(temp, srcLen);
+        if (!hasSpreads) {
+            // === No-spread path: constant indices, zero overhead ===
+            const sizeReg = this.tmp();
+            f.constInt(sizeReg, values.length, 'u64');
+            f.arrayAlloc(temp, elemType, sizeReg);
 
-                // Copy elements from source array
-                // Generate a loop: for j = 0; j < srcLen; j++ { arr[destIdx++] = src[j] }
-                const loopStart = this.generateLabel('spread_loop');
-                const loopEnd = this.generateLabel('spread_end');
-                const jReg = this.tmp();
-                const destIdxReg = this.tmp();
-                const cmpReg = this.tmp();
+            for (let i = 0; i < values.length; i++) {
+                const elem = values[i];
+                if (ast.isExpressionElement(elem)) {
+                    const elemResult = this.visitExpression(elem.expr, undefined);
+                    const idxReg = this.tmp();
+                    f.constInt(idxReg, i, 'u64');
+                    f.arraySet(temp, idxReg, elemResult.register, elemType);
+                }
+            }
+        } else {
+            // === Spread path: evaluate spreads first, compute exact size, allocate once ===
 
-                f.constInt(jReg, 0, 'u64');
-                f.constInt(destIdxReg, i, 'u64'); // Start dest index at current position
+            // Phase 1: Evaluate all spread expressions upfront, store registers + lengths
+            const spreadInfos: { register: VReg, length: VReg }[] = [];
+            let staticCount = 0;
+            for (const v of values) {
+                if (ast.isArraySpreadExpression(v)) {
+                    const srcArray = this.visitExpression(v.expr, undefined);
+                    const srcLen = this.tmp();
+                    f.arrayLength(srcLen, srcArray.register);
+                    spreadInfos.push({ register: srcArray.register, length: srcLen });
+                } else {
+                    staticCount++;
+                }
+            }
 
-                f.label(loopStart);
-                f.cmpLt(cmpReg, jReg, srcLen, 'u64');
-                const loopBody = this.generateLabel('spread_body');
-                f.br(cmpReg, loopBody, loopEnd);
+            // Phase 2: Compute total size = staticCount + sum of all spread lengths
+            const totalSize = this.tmp();
+            f.constInt(totalSize, staticCount, 'u64');
+            for (const info of spreadInfos) {
+                f.add(totalSize, totalSize, info.length, 'u64');
+            }
 
-                f.label(loopBody);
-                const srcElem = this.tmp();
-                f.arrayGet(srcElem, srcArray.register, jReg, elemType);
-                f.arraySet(temp, destIdxReg, srcElem, elemType);
+            // Phase 3: Allocate array with exact total size (no realloc needed)
+            f.arrayAlloc(temp, elemType, totalSize);
 
-                const oneReg = this.tmp();
-                f.constInt(oneReg, 1, 'u64');
-                f.add(jReg, jReg, oneReg, 'u64');
-                f.add(destIdxReg, destIdxReg, oneReg, 'u64');
-                f.jmp(loopStart);
+            // Phase 4: Fill left-to-right using destIdx
+            const destIdx = this.tmp();
+            f.constInt(destIdx, 0, 'u64');
+            const oneReg = this.tmp();
+            f.constInt(oneReg, 1, 'u64');
 
-                f.label(loopEnd);
-            } else if (ast.isExpressionElement(elem)) {
-                const elemResult = this.visitExpression(elem.expr, undefined);
-                const idxReg = this.tmp();
-                f.constInt(idxReg, i, 'u64');
-                f.arraySet(temp, idxReg, elemResult.register, elemType);
+            let spreadIdx = 0;
+            for (let i = 0; i < values.length; i++) {
+                const elem = values[i];
+                if (ast.isArraySpreadExpression(elem)) {
+                    const info = spreadInfos[spreadIdx++];
+                    f.arrayExtendFrom(temp, info.register, destIdx);
+                    f.add(destIdx, destIdx, info.length, 'u64');
+                } else if (ast.isExpressionElement(elem)) {
+                    const elemResult = this.visitExpression(elem.expr, undefined);
+                    f.arraySet(temp, destIdx, elemResult.register, elemType);
+                    f.add(destIdx, destIdx, oneReg, 'u64');
+                }
             }
         }
 

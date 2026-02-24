@@ -883,6 +883,9 @@ export function selectInstructions(
             case 'array_extend':
                 emit(makeABC(Op.ARRAY_EXTEND_R, r(regMap, inst.array), r(regMap, inst.newSize), 0));
                 break;
+            case 'array_extend_from':
+                emit(makeABC(Op.ARRAY_EXTEND_FROM, r(regMap, inst.dest), r(regMap, inst.src), r(regMap, inst.startIdx)));
+                break;
             case 'array_slice': {
                 const startReg = r(regMap, inst.start);
                 const endReg = r(regMap, inst.end);

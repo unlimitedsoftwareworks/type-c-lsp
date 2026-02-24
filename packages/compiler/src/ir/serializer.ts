@@ -186,6 +186,8 @@ function serializeInstruction(inst: IRInstruction): string {
             return `    ${inst.dest}: u64 = array_length ${inst.array}`;
         case 'array_extend':
             return `    array_extend ${inst.array} ${inst.newSize}`;
+        case 'array_extend_from':
+            return `    array_extend_from ${inst.dest} ${inst.src} ${inst.startIdx}`;
         case 'array_slice':
             return `    ${inst.dest}: ptr.array = array_slice ${inst.array} ${inst.start} ${inst.end}`;
 

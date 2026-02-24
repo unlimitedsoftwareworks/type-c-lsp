@@ -179,6 +179,8 @@ function getUsedVRegs(inst: IRInstruction): VReg[] {
             return [inst.array];
         case 'array_extend':
             return [inst.array, inst.newSize];
+        case 'array_extend_from':
+            return [inst.dest, inst.src, inst.startIdx];
         case 'array_slice':
             return [inst.array, inst.start, inst.end];
         case 'str_concat':

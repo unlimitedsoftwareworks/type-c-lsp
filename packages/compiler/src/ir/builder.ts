@@ -448,6 +448,11 @@ export class IRFunction {
         return this;
     }
 
+    arrayExtendFrom(dest: VReg, src: VReg, startIdx: VReg): this {
+        this.instructions.push({ kind: 'array_extend_from', dest, src, startIdx });
+        return this;
+    }
+
     arraySlice(dest: VReg, array: VReg, start: VReg, end: VReg): this {
         this.instructions.push({ kind: 'array_slice', dest, array, start, end });
         return this;

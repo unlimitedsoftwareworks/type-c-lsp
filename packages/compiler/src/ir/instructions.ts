@@ -467,6 +467,13 @@ export interface ArrayExtendInstruction extends Instruction {
     readonly newSize: VReg;
 }
 
+export interface ArrayExtendFromInstruction extends Instruction {
+    readonly kind: 'array_extend_from';
+    readonly dest: VReg;
+    readonly src: VReg;
+    readonly startIdx: VReg;
+}
+
 export interface ArraySliceInstruction extends Instruction {
     readonly kind: 'array_slice';
     readonly dest: VReg;
@@ -735,6 +742,7 @@ export type IRInstruction =
     | ArraySetInstruction
     | ArrayLengthInstruction
     | ArrayExtendInstruction
+    | ArrayExtendFromInstruction
     | ArraySliceInstruction
     // String
     | StrConstInstruction

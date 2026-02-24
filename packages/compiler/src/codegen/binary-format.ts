@@ -76,7 +76,7 @@ import type { IRType } from '../ir/types.js';
 // === Magic and Version ===
 
 export const BINARY_MAGIC = 0x54564243;  // "TVBC" in ASCII
-export const BINARY_VERSION = 4;
+export const BINARY_VERSION = 5;
 
 // === Type Tag Encoding ===
 

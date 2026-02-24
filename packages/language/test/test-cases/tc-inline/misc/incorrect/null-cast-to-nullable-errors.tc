@@ -1,0 +1,57 @@
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Dog = class Animal {
+    fn speak() -> string {
+        return "woof"
+    }
+}
+
+type Cat = class Animal {
+    fn speak() -> string {
+        return "meow"
+    }
+}
+
+fn main() {
+    // ===== NEGATIVE: null as non-nullable class (should error) =====
+
+    /// @Error(TCE160): Invalid cast
+    let a = null as Dog
+
+    /// @Error(TCE160): Invalid cast
+    let b = null as Cat
+
+    // ===== NEGATIVE: null as non-nullable array (should error) =====
+
+    /// @Error(TCE160): Invalid cast
+    let c = null as u32[]
+
+    // ===== NEGATIVE: null as non-nullable interface (should error) =====
+
+    /// @Error(TCE160): Invalid cast
+    let d = null as Animal
+
+    // ===== NEGATIVE: null as! T? should warn (unnecessary force cast) =====
+    // Since null is trivially castable to T?, as! is overkill
+
+    /// @Warning(TCW011): Unnecessary forced cast
+    let e = null as! Dog?
+
+    /// @Warning(TCW011): Unnecessary forced cast
+    let f = null as! u32[]?
+
+    /// @Warning(TCW011): Unnecessary forced cast
+    let g = null as! Animal?
+
+    // ===== NEGATIVE: completely unrelated types (should error for as) =====
+
+    let dog = new Dog()
+
+    /// @Error(TCE160): Invalid cast
+    let h = dog as u32[]
+
+    /// @Error(TCE160): Invalid cast
+    let i = dog as string
+}

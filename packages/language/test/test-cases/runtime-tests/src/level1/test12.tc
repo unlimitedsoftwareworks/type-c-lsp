@@ -371,7 +371,7 @@ fn test_case_nullable_function_calls(rn: TestUnit) {
 
 
     let length1 = (new StdArray<u32>([1,2,3,4])).length() ?? 10
-    let length2 = (null as! StdArray<u32>?)?.length() ?? 10
+    let length2 = (null as StdArray<u32>?)?.length() ?? 10
 
     rn.assert_eq(length1, 4)
     rn.assert_eq(length2, 10)

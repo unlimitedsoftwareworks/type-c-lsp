@@ -1673,6 +1673,11 @@ export class TypeCTypeUtils {
             return success();
         }
 
+        // Null can always be cast to any nullable type
+        if (resolvedFrom.kind === TypeKind.Null && isNullableType(resolvedTo)) {
+            return success();
+        }
+
         // Nullable types: can cast T to T? and T? to T
         if (isNullableType(resolvedFrom) && !isNullableType(resolvedTo)) {
             // T? to T - allowed (unsafe, but that's why we have as!)

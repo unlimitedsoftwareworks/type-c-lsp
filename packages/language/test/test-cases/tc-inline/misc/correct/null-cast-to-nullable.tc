@@ -1,0 +1,61 @@
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Dog = class Animal {
+    fn speak() -> string {
+        return "woof"
+    }
+}
+
+type Cat = class Animal {
+    fn speak() -> string {
+        return "meow"
+    }
+}
+
+type Wrapper<T> = class {
+    let value: T
+}
+
+fn main() {
+    // ===== POSITIVE: null as T? with regular cast =====
+
+    // null -> class?
+    let a = null as Dog?
+    let b = null as Cat?
+
+    // null -> array?
+    let c = null as u32[]?
+
+    // null -> generic class?
+    let d = null as Wrapper<u32>?
+
+    // null -> interface?
+    let e = null as Animal?
+
+    // ===== POSITIVE: null as! T? (force cast, but unnecessary - should warn) =====
+    // These are tested in the incorrect file via @Warning annotations
+
+    // ===== POSITIVE: non-null value -> nullable via cast =====
+
+    let dog = new Dog()
+    let f = dog as Dog?
+
+    let arr: u32[] = [1, 2, 3]
+    let g = arr as u32[]?
+
+    // ===== POSITIVE: nullable -> non-nullable via force cast =====
+
+    let h: Dog? = new Dog()
+    
+    /// @Warning(TCW011): Unnecessary forced cast
+    let i = h as! Dog
+    // Should not produce warning diagnostic since this is a regular cast, and should succeed
+    let ii = h as Dog
+
+    // ===== POSITIVE: nullable -> nullable cast =====
+
+    let j: Dog? = null
+    let k = j as Cat?
+}

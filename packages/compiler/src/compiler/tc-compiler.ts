@@ -93,6 +93,7 @@ interface GenerationContext {
     tempCounter: number;
     labelCounter: number;
     loopStack: Array<{ breakLabel: string; continueLabel: string }>;
+    doExprStack: Array<{ resultRegs: VReg[]; resultTypes: IRType[]; exitLabel: string }>;
     scopeDepth: number;
     /** Stack of variable scopes for cleanup on scope exit */
     scopeVarStack: string[][];
@@ -998,6 +999,7 @@ export class IRGenerator {
             tempCounter: 0,
             labelCounter: 0,
             loopStack: [],
+            doExprStack: [],
             scopeDepth: 0,
             scopeVarStack: []
         };
@@ -1051,6 +1053,18 @@ export class IRGenerator {
 
     private currentLoop(): { breakLabel: string; continueLabel: string } | undefined {
         return this.context.loopStack[this.context.loopStack.length - 1];
+    }
+
+    private pushDoExpr(resultRegs: VReg[], resultTypes: IRType[], exitLabel: string): void {
+        this.context.doExprStack.push({ resultRegs, resultTypes, exitLabel });
+    }
+
+    private popDoExpr(): void {
+        this.context.doExprStack.pop();
+    }
+
+    private currentDoExpr(): { resultRegs: VReg[]; resultTypes: IRType[]; exitLabel: string } | undefined {
+        return this.context.doExprStack[this.context.doExprStack.length - 1];
     }
 
     private parseIntegerLiteral(value: string): bigint {
@@ -1202,12 +1216,15 @@ export class IRGenerator {
 
                     // Generate initializer in global func
                     const prevFunc = this.context.currentFunction;
+                    const prevDoExprStack = this.context.doExprStack;
                     this.context.currentFunction = this.globalFunc;
+                    this.context.doExprStack = [];
 
                     const exprResult = this.visitExpression(variable.initializer!, undefined);
                     this.globalFunc.globalStore(globalId, exprResult.register, exprResult.type);
 
                     this.context.currentFunction = prevFunc;
+                    this.context.doExprStack = prevDoExprStack;
                 } else if (ast.isVariableDeclTupleDestructuring(variable) && variable.initializer) {
                     // Tuple destructuring in globals: each element becomes a separate global
                     const initTd = this.getType(variable.initializer);
@@ -1230,7 +1247,9 @@ export class IRGenerator {
 
                     // Generate initializer in global func
                     const prevFunc = this.context.currentFunction;
+                    const prevDoExprStack2 = this.context.doExprStack;
                     this.context.currentFunction = this.globalFunc;
+                    this.context.doExprStack = [];
 
                     // Evaluate tuple-returning expression
                     const result = this.visitExpression(variable.initializer, undefined);
@@ -1242,6 +1261,7 @@ export class IRGenerator {
                     }
 
                     this.context.currentFunction = prevFunc;
+                    this.context.doExprStack = prevDoExprStack2;
                 }
             }
         }
@@ -1557,12 +1577,14 @@ export class IRGenerator {
         const prevTemp = this.context.tempCounter;
         const prevLabel = this.context.labelCounter;
         const prevScope = this.context.scopeDepth;
+        const prevDoExprStack = this.context.doExprStack;
 
         this.context.currentFunction = lirFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
+        this.context.doExprStack = [];
 
         // Map 'this' parameter (only for instance methods)
         if (!classMethod.isStatic) {
@@ -1611,6 +1633,7 @@ export class IRGenerator {
         this.context.tempCounter = prevTemp;
         this.context.labelCounter = prevLabel;
         this.context.scopeDepth = prevScope;
+        this.context.doExprStack = prevDoExprStack;
     }
 
     /**
@@ -1666,12 +1689,14 @@ export class IRGenerator {
         const prevTemp = this.context.tempCounter;
         const prevLabel = this.context.labelCounter;
         const prevScope = this.context.scopeDepth;
+        const prevDoExprStack = this.context.doExprStack;
 
         this.context.currentFunction = lirFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
+        this.context.doExprStack = [];
 
         // Map 'this' parameter (only for instance methods)
         if (!classMethod.isStatic) {
@@ -1720,6 +1745,7 @@ export class IRGenerator {
         this.context.tempCounter = prevTemp;
         this.context.labelCounter = prevLabel;
         this.context.scopeDepth = prevScope;
+        this.context.doExprStack = prevDoExprStack;
     }
 
     // ============================================================================
@@ -1832,12 +1858,14 @@ export class IRGenerator {
         const prevTemp = this.context.tempCounter;
         const prevLabel = this.context.labelCounter;
         const prevScope = this.context.scopeDepth;
+        const prevDoExprStack = this.context.doExprStack;
 
         this.context.currentFunction = lirFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
+        this.context.doExprStack = [];
 
         // Map parameters to registers
         for (const param of node.header.args) {
@@ -1881,6 +1909,7 @@ export class IRGenerator {
         this.context.tempCounter = prevTemp;
         this.context.labelCounter = prevLabel;
         this.context.scopeDepth = prevScope;
+        this.context.doExprStack = prevDoExprStack;
     }
 
     // ============================================================================
@@ -2149,6 +2178,35 @@ export class IRGenerator {
                     f.mov(varReg, dests[i], varType);
                 }
             }
+        } else if (ast.isDoExpression(init)) {
+            // Do-expression returning a tuple: let (a, b) = do { ... return (x, y) }
+            // Create result registers for each tuple element, push do-context,
+            // compile body, then map results to variables.
+            const resultRegs: VReg[] = elementTypes.map(() => this.tmp());
+            for (let i = 0; i < resultRegs.length; i++) {
+                f.undef(resultRegs[i], elementTypes[i]);
+            }
+            const exitLabel = this.generateLabel('do_exit');
+
+            this.pushDoExpr(resultRegs, elementTypes, exitLabel);
+            this.enterScope();
+            const stmts = init.body.statements;
+            for (const stmt of stmts) {
+                this.visitStatement(stmt);
+            }
+            this.exitScope();
+            this.popDoExpr();
+            f.label(exitLabel);
+
+            // Map result registers to variables
+            for (let i = 0; i < elements.length && i < resultRegs.length; i++) {
+                const elem = elements[i];
+                if (elem.name) {
+                    const varType = i < elementTypes.length ? elementTypes[i] : voidType();
+                    const varReg = this.allocateVariable(elem.name, varType);
+                    f.mov(varReg, resultRegs[i], varType);
+                }
+            }
         } else {
             // Initializer is not a function call — evaluate and try to unpack
             // (This shouldn't normally happen since tuples are only for returns)
@@ -2282,6 +2340,29 @@ export class IRGenerator {
     // ---- Return ----
 
     private visitReturnStatement(node: ast.ReturnStatement): void {
+        const doCtx = this.currentDoExpr();
+        if (doCtx) {
+            // Inside a do-expression: assign to result register(s) and jump to exit
+            if (node.expr) {
+                // Tuple expression: return (a, b)
+                if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+                    for (let i = 0; i < node.expr.expressions.length && i < doCtx.resultRegs.length; i++) {
+                        const r = this.visitExpression(node.expr.expressions[i], undefined);
+                        this.func().mov(doCtx.resultRegs[i], r.register, doCtx.resultTypes[i]);
+                    }
+                } else if (ast.isFunctionCall(node.expr) && isTupleType(this.getType(node.expr)) && doCtx.resultRegs.length > 1) {
+                    // Function call returning tuple into multiple do-expr result regs
+                    this.visitTupleReturningCallIntoDests(node.expr, doCtx.resultRegs, doCtx.resultTypes);
+                } else {
+                    // Scalar
+                    const result = this.visitExpression(node.expr, undefined);
+                    this.func().mov(doCtx.resultRegs[0], result.register, doCtx.resultTypes[0]);
+                }
+            }
+            this.func().jmp(doCtx.exitLabel);
+            return;
+        }
+
         if (node.expr) {
             // Check if returning a tuple expression directly
             if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
@@ -2443,6 +2524,109 @@ export class IRGenerator {
         }
 
         f.ret(dests, retTypes);
+    }
+
+    /**
+     * Handle a function call that returns a tuple, writing results into
+     * caller-provided destination registers (used by do-expression returns).
+     */
+    private visitTupleReturningCallIntoDests(
+        callNode: ast.FunctionCall,
+        destRegs: VReg[],
+        destTypes: IRType[]
+    ): void {
+        const f = this.func();
+
+        // Evaluate arguments
+        const argRegs: VReg[] = [];
+        const argTypes: IRType[] = [];
+        if (callNode.args) {
+            for (const arg of callNode.args) {
+                const argResult = this.visitExpression(arg, undefined);
+                argRegs.push(argResult.register);
+                argTypes.push(argResult.type);
+            }
+        }
+
+        this.expandDefaultArguments(callNode, argRegs, argTypes);
+
+        // Call directly into the caller-provided destination registers
+        if (ast.isMemberAccess(callNode.expr)) {
+            const memberAccess = callNode.expr;
+            const obj = this.visitExpression(memberAccess.expr, undefined);
+            const memberRef = memberAccess.element?.ref;
+            const objTd = this.getType(memberAccess.expr);
+            const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+
+            if (isMetaClassType(resolvedObjTd) && memberRef) {
+                const baseClass = resolvedObjTd.baseClass;
+                const classNode = baseClass.node;
+                let classDecl: ast.TypeDeclaration | undefined;
+                if (classNode && ast.isClassType(classNode) && classNode.$container && ast.isTypeDeclaration(classNode.$container)) {
+                    classDecl = classNode.$container;
+                } else if (classNode && ast.isTypeDeclaration(classNode)) {
+                    classDecl = classNode;
+                }
+                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                if (className) {
+                    const methodName = this.getReferenceName(memberRef);
+                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    f.call(destRegs, funcName, argRegs, argTypes, destTypes);
+                }
+            } else if (isClassType(resolvedObjTd) && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const classNode = resolvedObjTd.node;
+                const className = classNode && ast.isTypeDeclaration(classNode)
+                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    : undefined;
+                if (className) {
+                    const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
+                    f.call(destRegs, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], destTypes);
+                } else {
+                    const methodId = this.getMethodId(resolvedObjTd, methodName);
+                    f.callMethod(destRegs, obj.register, methodId, argRegs, argTypes, destTypes);
+                }
+            } else if (isInterfaceType(resolvedObjTd) && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const methodId = this.getMethodId(resolvedObjTd, methodName);
+                f.callMethod(destRegs, obj.register, methodId, argRegs, argTypes, destTypes);
+            }
+        } else if (ast.isQualifiedReference(callNode.expr)) {
+            const ref = callNode.expr.reference?.ref;
+            if (ref && ast.isFunctionDeclaration(ref)) {
+                let funcName = this.C(ref);
+                if (ref.genericParameters && ref.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(callNode.expr);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    let parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                    let inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, ref.genericParameters, parameterTypes);
+                    if (!inferredTypeArgs) {
+                        const declParamTypes = (ref.header?.args || []).map(p => this.typeProvider.getType(p));
+                        if (declParamTypes.some(t => isGenericType(t))) {
+                            inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, ref.genericParameters, declParamTypes);
+                        }
+                    }
+                    if (inferredTypeArgs) {
+                        funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
+                    }
+                }
+                f.call(destRegs, funcName, argRegs, argTypes, destTypes);
+            } else {
+                const varInfo = this.lookupVariable(this.getReferenceName(ref));
+                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                    f.callClosure(destRegs, varInfo.register, argRegs, argTypes, destTypes);
+                }
+            }
+        } else {
+            const funcExpr = this.visitExpression(callNode.expr, undefined);
+            if (funcExpr.type.tag === 'ptr' && funcExpr.type.kind === 'closure') {
+                f.callClosure(destRegs, funcExpr.register, argRegs, argTypes, destTypes);
+            } else {
+                f.call(destRegs, funcExpr.register, argRegs, argTypes, destTypes);
+            }
+        }
     }
 
     // ---- Control Flow Statements ----
@@ -4567,12 +4751,14 @@ export class IRGenerator {
         const prevTemp = this.context.tempCounter;
         const prevLabel = this.context.labelCounter;
         const prevScope = this.context.scopeDepth;
+        const prevDoExprStack = this.context.doExprStack;
 
         this.context.currentFunction = closureFunc;
         this.context.variables.clear();
         this.context.tempCounter = 0;
         this.context.labelCounter = 0;
         this.context.scopeDepth = 0;
+        this.context.doExprStack = [];
 
         // Map env params to variables
         for (const uv of upvalues) {
@@ -4613,6 +4799,7 @@ export class IRGenerator {
         this.context.tempCounter = prevTemp;
         this.context.labelCounter = prevLabel;
         this.context.scopeDepth = prevScope;
+        this.context.doExprStack = prevDoExprStack;
 
         // 3. Generate closure_alloc + push_env in enclosing function
         const closureReg = this.tmp();
@@ -5199,11 +5386,15 @@ export class IRGenerator {
     }
 
     private visitDoExpression(node: ast.DoExpression): ExpressionResult {
-        // Execute block, last expression statement's value is the result
+        // Execute block, last expression statement's value is the result.
+        // A `return` inside the do-block should yield the value and jump to
+        // the exit label instead of returning from the enclosing function.
         const resultType = this.getNodeIRType(node);
         const resultReg = this.tmp();
         this.func().undef(resultReg, resultType);
+        const exitLabel = this.generateLabel('do_exit');
 
+        this.pushDoExpr([resultReg], [resultType], exitLabel);
         this.enterScope();
         const stmts = node.body.statements;
         for (let i = 0; i < stmts.length; i++) {
@@ -5217,6 +5408,8 @@ export class IRGenerator {
             }
         }
         this.exitScope();
+        this.popDoExpr();
+        this.func().label(exitLabel);
 
         return { register: resultReg, type: resultType };
     }

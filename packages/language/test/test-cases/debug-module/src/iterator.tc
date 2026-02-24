@@ -1,0 +1,34 @@
+from array import Array
+
+type Iterable<U, V> = interface  {
+    fn next | () () -> (U, V)
+    fn hasNext() -> bool
+}
+
+type ArrayIterator<T> = class Iterable<u64, T> {
+    let const arr: Array<T>
+    let index: u64
+
+    // Constructor to initialize with an array
+    fn init(arr: Array<T>) {
+        this.arr = arr
+        this.index = 0 // Start at the beginning
+    }
+
+    // Return the next element and its index
+    fn next | () () -> (u64, T) {
+        if this.index < this.arr.length() {
+            let const value = this.arr[this.index]
+            let currentIndex = this.index
+            this.index = this.index + 1 // Move to the next element
+            return (currentIndex, value)
+        }
+        // If out of bounds, indicate end with a null value
+        unreachable
+    }
+
+    // Check if there are more elements
+    fn hasNext() -> bool {
+        return this.index < this.arr.length()
+    }
+}

@@ -2245,9 +2245,9 @@ export class TypeCTypeProvider {
         const returns: ast.ReturnStatement[] = [];
 
         const visit = (node: AstNode) => {
-            // Stop if we hit a nested function - don't collect its returns!
-            if (ast.isFunctionDeclaration(node)) {
-                return; // Don't traverse into nested functions
+            // Stop if we hit a nested function or lambda (fn/cfn) - don't collect its returns!
+            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node)) {
+                return; // Don't traverse into nested functions/lambdas
             }
 
             // Stop if we hit a do expression - it has its own return scope
@@ -2281,9 +2281,9 @@ export class TypeCTypeProvider {
         const yields: ast.YieldExpression[] = [];
 
         const visit = (node: AstNode) => {
-            // Stop if we hit a nested function/coroutine - don't collect its yields!
-            if (ast.isFunctionDeclaration(node)) {
-                return; // Don't traverse into nested functions
+            // Stop if we hit a nested function or lambda (fn/cfn) - don't collect its yields!
+            if (ast.isFunctionDeclaration(node) || ast.isLambdaExpression(node)) {
+                return; // Don't traverse into nested functions/lambdas
             }
 
             // Stop if we hit a do expression - it has its own scope

@@ -63,10 +63,13 @@ describe('TC Inline Tests - Comprehensive', () => {
                 );
                 await setup.services.shared.workspace.DocumentBuilder.build([doc], { validation: true });
                 const diagnostics = doc.diagnostics ?? [];
-                const errors = diagnostics.filter(d => d.severity === 1);
+                const errors = (diagnostics ?? []).filter(d => d.severity === 1).map(
+                    (d, i) => `Diagnostic #${i}: `+d.message + 
+                        `(in file: ${d.source ?? 'unknown'} Start (line:col) ${d.range.start.line + 1}, ${d.range.start.character}), end: ${d.range.end.line + 1}, ${d.range.end.character})`
+                );
                 
                 // Assert: no errors in correct files
-                expect(errors).toHaveLength(0);
+                expect(errors, `Found errors in correct file: ${filePath}\n${errors.join('\n')}`).toHaveLength(0);
                 
                 // If there are annotations, they should all pass
                 if (result.totalAnnotations > 0 && result.failed > 0) {

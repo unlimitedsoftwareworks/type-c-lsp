@@ -1,0 +1,117 @@
+/**
+ * @file array.ts
+ * @brief Default array interface
+ */
+
+from iterator import ArrayIterator
+ 
+type NullableResult<T> = variant {
+    Ok(value: T),
+    Null()
+}
+
+/**
+ * @brief Abstract array interface
+ * Any Custom array class should implement this interface
+ * @template T
+ */
+type Array<T> = interface {
+    /**
+     * @brief Returns the element at the given index
+     */
+    fn [] (i: u64) -> T
+
+    /**
+     * @brief Sets the element at the given index
+     */
+    fn []= (i: u64, v: T) -> T
+
+    /**
+     * @brief Returns the element at the given index from the end of the array
+     */
+    fn [-] (i: u64) -> T
+
+    /**
+     * @brief Sets the element at the given index from the end of the array
+     */
+    fn [-]= (i: u64, v: T) -> T
+
+    /**
+     * @brief Returns the length of the array
+     */
+    fn length() -> u64
+
+    /**
+     * @brief Pushes an element to the end of the array
+     */
+    fn push(v: T) -> void
+
+    /**
+     * @brief Pops an element from the end of the array
+     */
+    fn pop() -> T
+
+    /**
+     * @brief Returns a shallow copy of the array
+     */
+    fn clone() -> Array<T>
+
+    /**
+     * @brief Returns an iterable instance to iterate over the array
+     */
+    fn getIterable() -> ArrayIterator<T>
+
+    /**
+     * @brief Clears the array removing all elements
+     * Must not keep any reference to the elements, so they can be garbage collected
+     */
+    fn clear() 
+
+    /**
+     * @brief checks if the array is empty
+     * return true if the array is empty, false otherwise
+     */
+    fn isEmpty() -> bool
+
+    /**
+     * @brief checks if the array contains the element e
+     * return true if the element is found, false otherwise
+     */
+    fn contains(e: T) -> bool
+
+    /**
+     * @brief returns an array of elements that match the predicate f
+     * return an array of elements that match the predicate f
+     */
+    fn some(f: fn(x: T) -> bool) -> bool
+
+    /**
+     * @brief returns true if all elements match the predicate f
+     * return true if all elements match the predicate f, false otherwise
+     */
+    fn every(f: fn(x: T) -> bool) -> bool
+
+    /**
+     * @brief returns the first element that matches the predicate f
+     * return the first element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn find(f: fn(x: T) -> bool) -> NullableResult<T>
+
+    /**
+     * @brief returns the index of the first element that matches the predicate f
+     * return the index of the first element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findIndex(f: fn(x: T) -> bool) -> NullableResult<u64>
+
+    /**
+     * @brief returns the last element that matches the predicate f
+     * return the last element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findLast(f: fn(x: T) -> bool) -> NullableResult<T>
+
+    /**
+     * @brief returns the index of the last element that matches the predicate f
+     * return the index of the last element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findLastIndex(f: fn(x: T) -> bool) -> NullableResult<u64>
+}

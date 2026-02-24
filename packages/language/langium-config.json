@@ -1,5 +1,6 @@
 {
     "projectName": "TypeC",
+    "mode": "production",
     "languages": [
         {
             "id": "type-c",

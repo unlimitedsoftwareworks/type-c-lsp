@@ -486,6 +486,19 @@ export type TypeCAddedServices = {
 - Remember: constructors are subtypes of variants
 - `Result.Ok<T, never>` is assignable to `Result<T, E>` for any E
 
+### 5. Chevrotain Parser Ambiguity Warnings (Suppressed)
+- The grammar has several **benign** Chevrotain ambiguity warnings that are intentionally suppressed
+- Suppressed via `"mode": "production"` in `langium-config.json`, which sets `skipValidations: true` on the Chevrotain parser (disables grammar validation logging at parser construction time)
+- This does NOT affect runtime parsing behavior, error recovery, or correctness
+- **Affected rules and why they're safe:**
+  - **FnParam** (alt 0 vs 2): `name: Type` prefix shared between explicit-type and optional-type alternatives. Greedy first-match (alt 0) is correct.
+  - **IfExpression**: `else if` repetition vs final `else` both start with `else`. Standard dangling-else resolved by greedy MANY loop.
+  - **FunctionType** (FnTypeHeader vs FnHeader): Both start with `(`. First alternative (FnTypeHeader) is tried first, correct for type annotations.
+  - **PostfixExpression** (ReverseIndexSet/Access vs IndexSet/Access): Both start with `[`. Reverse index alternatives (`[-expr]`) are tried before normal index, disambiguated by `-` token.
+  - **MatchCasePattern**: Various pattern alternatives share identifier prefixes. First-match ordering resolves correctly.
+  - **QualifiedName**: `array.` could be keyword or identifier. Resolved by ordering.
+- If you modify the grammar and need to see ambiguity warnings during development, temporarily remove `"mode": "production"` from `langium-config.json` and re-run `npm run langium:generate`
+
 ---
 
 ## When Making Changes

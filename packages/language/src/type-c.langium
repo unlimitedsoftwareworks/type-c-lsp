@@ -811,6 +811,9 @@ BuiltinSymbol:
     {infer BuiltinSymbolID} name=ID ':' type=DataType<false> |
     {infer BuiltinSymbolFn} 'fn' MethodNames GenericDecl? '(' ((args+=FnParam<true>) (',' args+=FnParam<true>)*)? ')' '->' returnType=DataType<true>;
 
+ID returns string: 
+    IDENTIFIER | 'array'
+;
 
  
 hidden terminal WS: /\s+/;
@@ -854,7 +857,7 @@ terminal BINARY_STRING: /b"[^"]*"/;
 // regular string: "hello", treated as std interface/class
 terminal STRING: /"[^"]*"/;
 
-terminal ID: /(_[a-zA-Z0-9_]+|[a-zA-Z][a-zA-Z0-9_]*)/;
+terminal IDENTIFIER: /(_[a-zA-Z0-9_]+|[a-zA-Z][a-zA-Z0-9_]*)/;
 terminal WILDCARD: '_';
 
 /**

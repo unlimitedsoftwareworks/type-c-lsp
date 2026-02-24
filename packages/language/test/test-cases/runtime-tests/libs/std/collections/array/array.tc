@@ -1,0 +1,384 @@
+/**
+ * @file array.ts
+ * @brief Default array interface
+ */
+
+from std.collections.array.iterator import ArrayIterator
+ 
+type NullableResult<T> = variant {
+    Ok(value: T),
+    Null()
+}
+
+/**
+ * @brief Abstract array interface
+ * Any Custom array class should implement this interface
+ * @template T
+ */
+type Array<T> = interface {
+    /**
+     * @brief Returns the element at the given index
+     */
+    fn [] (i: u64) -> T
+
+    /**
+     * @brief Sets the element at the given index
+     */
+    fn []= (i: u64, v: T) -> T
+
+    /**
+     * @brief Returns the element at the given index from the end of the array
+     */
+    fn [-] (i: u64) -> T
+
+    /**
+     * @brief Sets the element at the given index from the end of the array
+     */
+    fn [-]= (i: u64, v: T) -> T
+
+    /**
+     * @brief Returns the length of the array
+     */
+    fn length() -> u64
+
+    /**
+     * @brief Pushes an element to the end of the array
+     */
+    fn push(v: T) -> void
+
+    /**
+     * @brief Pops an element from the end of the array
+     */
+    fn pop() -> T
+
+    /**
+     * @brief Returns a shallow copy of the array
+     */
+    fn clone() -> Array<T>
+
+    /**
+     * @brief Returns an iterable instance to iterate over the array
+     */
+    fn getIterable() -> ArrayIterator<T>
+
+    /**
+     * @brief Clears the array removing all elements
+     * Must not keep any reference to the elements, so they can be garbage collected
+     */
+    fn clear() 
+
+    /**
+     * @brief checks if the array is empty
+     * return true if the array is empty, false otherwise
+     */
+    fn isEmpty() -> bool
+
+    /**
+     * @brief checks if the array contains the element e
+     * return true if the element is found, false otherwise
+     */
+    fn contains(e: T) -> bool
+
+    /**
+     * @brief returns an array of elements that match the predicate f
+     * return an array of elements that match the predicate f
+     */
+    fn some(f: fn(x: T) -> bool) -> bool
+
+    /**
+     * @brief returns true if all elements match the predicate f
+     * return true if all elements match the predicate f, false otherwise
+     */
+    fn every(f: fn(x: T) -> bool) -> bool
+
+    /**
+     * @brief returns the first element that matches the predicate f
+     * return the first element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn find(f: fn(x: T) -> bool) -> NullableResult<T>
+
+    /**
+     * @brief returns the index of the first element that matches the predicate f
+     * return the index of the first element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findIndex(f: fn(x: T) -> bool) -> NullableResult<u64>
+
+    /**
+     * @brief returns the last element that matches the predicate f
+     * return the last element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findLast(f: fn(x: T) -> bool) -> NullableResult<T>
+
+    /**
+     * @brief returns the index of the last element that matches the predicate f
+     * return the index of the last element that matches the predicate f, null if no element matches the predicate f
+     */
+    fn findLastIndex(f: fn(x: T) -> bool) -> NullableResult<u64>
+}
+
+
+/**
+ * Standard Generic Array Implementation
+ */
+type StdArray<T> = class Array<T> {
+    let data: T[]
+    let len: u64
+    let capacity: u64
+
+    fn init(mut data: T[]) {
+        this.data = data
+        this.len = data.length
+        this.capacity = this.len
+    }
+
+    fn init() {
+        this.{data: [], len: 0, capacity: 0}
+    }
+
+    fn length() -> u64 {
+        return this.len
+    }
+
+    fn extend() {
+        this.capacity = this.capacity * 2 + 1
+        this.data.resize(this.capacity)
+    }
+
+    fn extendIfNeeded(size: u64) {
+        let const requiredSize = this.len + size
+        while requiredSize >= this.capacity {
+            this.extend()
+        }
+    }
+
+    fn push(v: T) -> void {
+        this.extendIfNeeded(1)
+        this.data[this.len] = v
+        this.len = this.len + 1
+    }
+
+    fn push(array: T[]) -> void {
+        this.extendIfNeeded(array.length)
+        foreach v in array {
+            this.push(v)
+        }
+    }
+
+    fn push(array: Array<T>) {
+        this.extendIfNeeded(array.length())
+        //foreach v in array {
+        //    this.push(v)
+        //}
+    }
+ 
+    /**
+     * Pops the first element of the array
+     * Throws an exception if the array is 
+     * empty
+     */
+    fn pop() -> T {
+        if this.len == 0 {
+            throw "Cannot pop an empty array"
+        }
+
+        this.len = this.len - 1
+        return this.data[this.len]
+    }
+
+    fn [] (i: u64) -> T {
+        if i >= this.len {
+            throw "Out of bounds index access, requested index "+i+" on an array of size "+this.len
+        }
+        return this.data[i]
+    }
+
+    fn []=(i: u64, v: T) -> T {
+        this.data[i] = v
+        return v
+    }
+
+    fn [-] (i: u64) -> T {
+        // cannot use this.data[-i] here
+        // because this.data array has its own length
+        // which may not be in sync with this.len
+        return this.data[this.len - i]
+    }
+
+    fn [-]= (i: u64, v: T) -> T {
+        this.data[this.len - i] = v
+        return v
+    }
+
+    /**
+     * @brief Returns a coiterator to iterate over the array
+     * retruns null if the array is empty
+     */
+    fn getCoIterator() -> coroutine<cfn() -> (T, bool)>? {
+        let iterator = cfn() -> (T, bool) {
+            let counter: u64 = 0
+            
+            for let i: u64 = 0; i < this.len-1; i = i + 1 {
+                let value = this.data[i]
+                yield (value, false)
+            }
+
+            let value = this.data[this.len-1]
+            yield! (value, true)
+        }
+
+        if this.isEmpty() {
+            return null
+        }
+        return coroutine iterator
+    }
+
+    fn getIterable() = new ArrayIterator<T>(this)
+
+    fn clear() {
+        // reset array to dereference all elements
+        this.{data: [], len: 0, capacity: 0}
+    }
+
+    fn isEmpty() -> bool {
+        return this.len == 0
+    }
+
+    fn getCapacity() -> u64 {
+        return this.capacity
+    }
+
+    fn clone() -> Array<T> {
+        return new StdArray<T>(this.data)
+    }
+
+    fn contains(e: T) {
+        for let i: u64 = 0; i < this.len; i += 1 {
+            if(this[i] == e) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    fn map<Z>(f: fn (x: T) -> Z) -> Array<Z> {
+        let result1 = new StdArray<Z>([])
+        for let i: u64 = 0; i < this.len; i += 1 {
+            result1.push(f(this.data[i]))
+        }
+
+        return result1
+    }
+
+    fn filter(f: fn (x: T) -> bool) -> Array<T> {
+        let result2 = new StdArray<T>([])
+        
+        for let i: u64 = 0; i < this.len; i = i + 1 {
+            if f(this.data[i]) {
+                result2.push(this.data[i])
+            }
+        }
+        return result2
+    }
+
+    fn reduce(f: fn (x: T, y: T) -> T) -> T {
+        let result3 = this.data[0]
+        for let i: u64 = 1; i < this.len; i = i + 1 {
+            result3 = f(result3, this.data[i])
+        }
+        return result3
+    }
+
+    fn forEach<U>(f: fn (i: u64, x: T) -> U) -> void {
+        for let i: u64 = 0; i < this.len; i = i + 1 {
+            f(i, this.data[i])
+        }
+    }
+
+    fn some(f: fn(x: T) -> bool) {
+        for let i: u64 = 0; i < this.len; i += 1 {
+            if f(this[i]) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    fn every(f: fn(x: T) -> bool) {
+        for let i: u64 = 0; i < this.len; i += 1 {
+            if !f(this[i]) {
+                return false
+            }
+        }
+
+        return true
+    }
+
+
+    fn find(f: fn(x: T) -> bool) -> NullableResult<T> {
+        for let i: u64 = 0; i < this.len; i += 1 {
+            let value = this[i]
+            if f(value) {
+                return NullableResult.Ok<T>(value)
+            }
+        }
+
+        return NullableResult.Null<T>()
+    }
+
+    fn findIndex(f: fn(x: T) -> bool) -> NullableResult<u64> {
+        for let i: u64 = 0; i < this.len; i += 1 {
+            let value = this[i]
+            if f(value) {
+                return NullableResult.Ok<u64>(i)
+            }
+        }
+
+        return NullableResult.Null<u64>()
+    }
+
+    fn findLast(f: fn(x: T) -> bool) -> NullableResult<T> {
+        if this.length() == 0 {
+            return NullableResult.Null<T>()
+        }
+        let foundValue: T = this[0]
+        let found = false
+
+        for let i: u64 = 0; i < this.len; i += 1 {
+            let value = this[i]
+            if f(value) {
+                foundValue = value
+                found = true
+            }
+        }
+
+        if found {
+            return NullableResult.Ok<T>(foundValue)
+        }
+
+        return NullableResult.Null<T>()
+    }
+
+    fn findLastIndex(f: fn(x: T) -> bool) -> NullableResult<u64> {
+        if this.length() == 0 {
+            return NullableResult.Null<u64>()
+        }
+        let foundIndex: u64 = 0
+        let found = false
+
+        for let i: u64 = 0; i < this.len; i += 1 {
+            let value = this[i]
+            if f(value) {
+                foundIndex = i
+                found = true
+            }
+        }
+
+        if found {
+            return NullableResult.Ok<u64>(foundIndex)
+        }
+
+        return NullableResult.Null<u64>()
+    }
+}

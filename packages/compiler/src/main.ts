@@ -9,6 +9,7 @@ import { buildWorkspace } from './compiler/module-loader.js';
 import { IRGenerator } from './compiler/tc-compiler.js';
 import { serializeProgram } from './ir/serializer.js';
 import { generateBytecode } from './codegen/index.js';
+
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
     const services = createTypeCServices(NodeFileSystem).TypeC;
     const {documents} = await buildWorkspace(fileName, services);
@@ -18,11 +19,15 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
         console.log(chalk.green(`All documents are valid!.`));
     }
     else {
-        console.log(chalk.red("Some fails contain errors"))
-        let failed = documents.filter(e => (e.diagnostics ?? [])?.filter(e => e.severity === 1).length > 0);
-        const failedPaths = failed.map(e => e.uri.path).join(", ");
-        console.log(chalk.red(failedPaths))
-        throw new Error(`Compilation failed: errors in ${failedPaths}`);
+        const combinedDiagnostics = documents.flatMap(d => d.diagnostics?.map(diag => ({...diag, file: d.uri})) ?? []);
+        const errors = (combinedDiagnostics ?? []).filter(d => d.severity === 1).map(
+            (d, i) => `Diagnostic #${i}: `+d.message + 
+                `(in file: ${d.file ?? 'unknown'} Start (line:col) ${d.range.start.line + 1}, ${d.range.start.character}), end: ${d.range.end.line + 1}, ${d.range.end.character})`
+        );
+
+        console.log(chalk.red(`Compilation failed:\n${errors.join('\n')}`));
+        
+        throw new Error(`Compilation failed:\n ${errors.join('\n')}`);
     }
 
     let generator = new IRGenerator(services);

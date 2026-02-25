@@ -76,6 +76,9 @@ export class TypeCTypeProvider {
     private readonly patternValidationErrorCache: DocumentCache<AstNode, { message: string } | undefined>;
     private overloadResolutionDepth = 0;
 
+    /** Guard against re-entrant getExpectedType calls for the same node */
+    private readonly expectedTypeInProgress = new Set<AstNode>();
+
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
 
@@ -270,10 +273,20 @@ export class TypeCTypeProvider {
             return undefined;
         }
 
+        // Guard against re-entrant calls (e.g., inferExpression → getExpectedType → computeExpectedType → inferExpression → getExpectedType for same node)
+        if (this.expectedTypeInProgress.has(node)) {
+            return undefined;
+        }
+
         const documentUri = AstUtils.getDocument(node).uri;
 
         // Get from cache or compute if not cached
-        return this.expectedTypeCache.get(documentUri, node, () => this.computeExpectedType(node));
+        this.expectedTypeInProgress.add(node);
+        try {
+            return this.expectedTypeCache.get(documentUri, node, () => this.computeExpectedType(node));
+        } finally {
+            this.expectedTypeInProgress.delete(node);
+        }
     }
 
     /**

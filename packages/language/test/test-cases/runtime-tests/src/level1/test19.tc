@@ -5,9 +5,13 @@ type Callable<T> = interface {
     fn __call__() -> T
 }
 
-type DefaultCallBehavior<T> = impl(
+type GetX =interface {
+    fn getX() -> u32
+}
+
+type DefaultCallBehavior<T || (T + u32) -> T> = impl GetX (
     value: T
-) for interface { getX() -> u32 } {
+) {
     fn () ()-> T {
         return this.value + this.getX()
     }

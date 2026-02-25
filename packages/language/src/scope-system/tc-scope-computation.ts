@@ -29,7 +29,7 @@ export class TypeCScopeComputation extends DefaultScopeComputation {
             }
         
             if(ast.isVariableDeclarationStatement(node)) {
-                return !node.declarations.isLocal;
+                return !node.declarations.variables.some(v => v.isLocal);
             }
         
             if(ast.isFunctionDeclaration(node)) {

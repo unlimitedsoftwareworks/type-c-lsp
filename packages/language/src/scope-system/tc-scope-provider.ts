@@ -292,13 +292,33 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             return [];
         }
 
-        const importName = subModule.alias ?? this.nameProvider.getName(importedRef);
+        // Navigate through nested namespace path (e.g., engine.graphics)
+        let targetNode: AstNode = importedRef;
+        if (subModule.nestedPath.length > 0) {
+            for (const segment of subModule.nestedPath) {
+                if (!ast.isNamespaceDecl(targetNode)) {
+                    return []; // Can only navigate into namespaces
+                }
+                const found = targetNode.definitions?.find(
+                    def => ast.isNamespaceDecl(def) && def.name === segment
+                );
+                if (!found) {
+                    return []; // Nested namespace not found
+                }
+                targetNode = found;
+            }
+        }
+
+        // Import name: alias > last nested segment > reference name
+        const importName = subModule.alias
+            ?? (subModule.nestedPath.length > 0 ? subModule.nestedPath[subModule.nestedPath.length - 1] : null)
+            ?? this.nameProvider.getName(importedRef);
         if (!importName) {
             return [];
         }
 
-        const defaultImportRef = this.descriptions.createDescription(importedRef, importName);
-        if (!ast.isFunctionDeclaration(importedRef)) {
+        const defaultImportRef = this.descriptions.createDescription(targetNode, importName);
+        if (!ast.isFunctionDeclaration(targetNode)) {
             return [defaultImportRef];
         }
 
@@ -307,6 +327,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             return [defaultImportRef];
         }
 
+        const targetFn = targetNode;
         const nodes = this.indexManager
             .allElements(ast.IdentifiableReference.$type, new Set([uri]))
             .toArray()
@@ -315,7 +336,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
 
         const matchingOverloads = nodes.filter((node): node is ast.FunctionDeclaration =>
             ast.isFunctionDeclaration(node) &&
-            node.name === importedRef.name
+            node.name === targetFn.name
         );
 
         if (matchingOverloads.length === 0) {

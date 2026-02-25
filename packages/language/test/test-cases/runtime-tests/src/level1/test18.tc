@@ -2,8 +2,8 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 from level1.test18folder.api import publicAPI /*, privateAPI << will crash (as it should) */
-from level.test18folder.api2 import engine, engine.graphics
-from level.test18folder.api2_clone import engine.graphics as gfx, engine as leEngine
+from level1.test18folder.api2 import engine, engine.graphics
+from level1.test18folder.api2_clone import engine.graphics as gfx, engine as leEngine
 
 type User = class {
     fn init() {
@@ -21,11 +21,11 @@ namespace Main {
     }
 
     fn clear<T>(x: T) {
-        println("Cleared ".cat(x).cat("!")).cat(Main.PI)
+        println("Cleared " + x + "!" + Main.PI)
     }
 
-    let local const PI: f32 = 3.14f
-    let local const J4: String = "haha"
+    let const PI: f32 = 3.14f
+    let local const J4 = "haha"
     let const F = Main.f()
 
     fn f() -> String {

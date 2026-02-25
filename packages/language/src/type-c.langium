@@ -29,7 +29,7 @@ fragment SubImports:
     modules+=SubModule (',' modules+=SubModule)*;
 
 SubModule:
-    reference=[IdentifiableReference:ID] ('as' alias=ID)?;
+    reference=[IdentifiableReference:ID] ('.' nestedPath+=ID)* ('as' alias=ID)?;
 
 fragment GlobalDefinition:
     definitions+=(NamespaceDecl | FnDecl<true> | CFnDecl<true> | TypeDecl<true> | VariableDeclarationStatement<true> | ExternFFIDecl | BuiltinDefinition) ;
@@ -180,19 +180,20 @@ interface VariablesDeclarations {
     variables: VariableDeclaration[];
 }
 VariablesDecls<allowLocal>:
-    (<allowLocal>isLocal?='local')? 'let' (variables+=VariableDecl (',' variables+=VariableDecl)*);
+    'let' (variables+=VariableDecl<allowLocal> (',' variables+=VariableDecl<allowLocal>)*);
 
 interface VariableDeclaration {
+    isLocal?: boolean;
     isConst: boolean;
     name: string;
     annotation?: DataType;
     initializer?: Expression;
 }
-VariableDecl returns VariableDeclaration:
-    VariableDeclSingle |
-    VariableDeclArrayDestructuring |
-    VariableDeclStructDestructuring |
-    VariableDeclTupleDestructuring {
+VariableDecl<allowLocal> returns VariableDeclaration:
+    VariableDeclSingle<allowLocal> |
+    VariableDeclArrayDestructuring<allowLocal> |
+    VariableDeclStructDestructuring<allowLocal> |
+    VariableDeclTupleDestructuring<allowLocal> {
         infer VariableDefinition
     };
 
@@ -213,17 +214,17 @@ the local variables .. hence we make the initializers optional but make a valida
 
  ```
  */
-VariableDeclSingle:
-    (isConst?='const')? name=ID ((':' annotation=DataType<false>) | (isNullable?='?'))? '=' (initializer=Expression)?;
+VariableDeclSingle<allowLocal>:
+     (<allowLocal>isLocal?='local')? (isConst?='const')? name=ID ((':' annotation=DataType<false>) | (isNullable?='?'))? '=' (initializer=Expression)?;
 
-VariableDeclArrayDestructuring:
-    (isConst?='const')? '[' elements+=DestructuringElement<true, false> (',' elements+=DestructuringElement<true, false>)* ']' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
+VariableDeclArrayDestructuring<allowLocal>:
+     (<allowLocal>isLocal?='local')? (isConst?='const')? '[' elements+=DestructuringElement<true, false> (',' elements+=DestructuringElement<true, false>)* ']' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
-VariableDeclStructDestructuring:
-    (isConst?='const')? '{' elements+=DestructuringElement<true, true> (',' elements+=DestructuringElement<true, true>)* '}' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
+VariableDeclStructDestructuring<allowLocal>:
+     (<allowLocal>isLocal?='local')? (isConst?='const')? '{' elements+=DestructuringElement<true, true> (',' elements+=DestructuringElement<true, true>)* '}' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
-VariableDeclTupleDestructuring:
-    (isConst?='const')? '(' elements+=DestructuringElement<false, false> (',' elements+=DestructuringElement<false, false>)* ')' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
+VariableDeclTupleDestructuring<allowLocal>:
+     (<allowLocal>isLocal?='local')? (isConst?='const')? '(' elements+=DestructuringElement<false, false> (',' elements+=DestructuringElement<false, false>)* ')' (':' annotation=DataType<false>)? '=' (initializer=Expression)?;
 
 DestructuringElement<allowDestructuring, allowNameOverride>:
     (<allowDestructuring>(isSpread?='...')?) (<allowNameOverride> (originalName=ID ':')?) name=ID isNullable?='?'? |
@@ -260,7 +261,7 @@ MatchCaseExpression:
 
 // Let-in expression
 LetInExpression infers Expression:
-    { infer LetInExpression } 'let' (vars+=VariableDecl (',' vars+=VariableDecl)*)? 'in' expr=Expression;
+    { infer LetInExpression } 'let' (vars+=VariableDecl<false> (',' vars+=VariableDecl<false>)*)? 'in' expr=Expression;
 
 AssignmentExpression infers Expression:
     ConditionalExpression (

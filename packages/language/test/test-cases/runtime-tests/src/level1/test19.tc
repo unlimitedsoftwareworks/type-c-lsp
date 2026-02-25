@@ -188,14 +188,14 @@ fn test_generic_container(rn: TestUnit) {
     container.setValue(200)
     rn.assert_eq(container.getValue(), 200)
 
-    let strContainer = new GenericContainer<String>("Hello")
-    rn.assert_obj_eq(strContainer.getValue(), "Hello")
+    let strContainer = new GenericContainer<string>("Hello")
+    rn.assert_eq(strContainer.getValue(), "Hello")
 
     strContainer.setValue("World")
-    rn.assert_obj_eq(strContainer.getValue(), "World")
+    rn.assert_eq(strContainer.getValue(), "World")
 }
 
-type GenericMath<T> = impl (
+type GenericMath<T || (T+T) -> T> = impl (
     value1: T,
     value2: T
 ) {
@@ -240,7 +240,7 @@ fn test_static_mesh(rn: TestUnit) {
     rn.assert_obj_eq(worldPos, expectedWorldPos)
 }
 
-fn main() -> u32 {
+fn test19() -> u32 {
     let test_1 = new TestUnit("test callable placeholder", "Tests callable behavior with generics", test_callable_placeholder)
     let test_2 = new TestUnit("test static mesh", "Tests composable 3D object properties", test_static_mesh)
     let test_3 = new TestUnit("test generic container", "Tests generic implementation with set and get", test_generic_container)

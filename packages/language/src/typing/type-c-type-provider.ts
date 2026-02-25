@@ -3630,7 +3630,7 @@ export class TypeCTypeProvider {
             if (ast.isClassMethod(targetRef) && isClassType(baseType)) {
                 const methodNode = targetRef;
                 const implTypeNode = methodNode.$container;
-                
+
                 // Check if this method is from an impl block (not directly in a class)
                 if (implTypeNode && ast.isImplementationType(implTypeNode)) {
                     const classNode = baseType.node;
@@ -3638,21 +3638,31 @@ export class TypeCTypeProvider {
                         // Find the ClassImplementationMethodDecl that references this impl
                         for (const implDecl of classNode.implementations ?? []) {
                             const implRefType = this.getType(implDecl.type);
-                            
+
                             // Check if this impl reference points to our impl type
                             if (isReferenceType(implRefType)) {
                                 const resolvedImplType = this.resolveReference(implRefType);
                                 if (isImplementationType(resolvedImplType) && resolvedImplType.node === implTypeNode) {
                                     // Found the matching impl declaration in the class!
-                                    // Build substitutions from the impl's generic arguments
-                                    const implSubstitutions = this.buildGenericSubstitutions(implRefType);
-                                    
+                                    // The impl reference may have generic args that are still
+                                    // class-level generics (e.g., DefaultGenericImpl<T> where T
+                                    // is the class's generic param). Apply class-level substitutions
+                                    // to the impl reference first so the args become concrete
+                                    // (e.g., DefaultGenericImpl<u32>), then build impl substitutions.
+                                    let effectiveImplRef = implRefType;
+                                    if (genericSubstitutions && genericSubstitutions.size > 0) {
+                                        const substituted = this.typeUtils.substituteGenerics(implRefType, genericSubstitutions);
+                                        if (isReferenceType(substituted)) {
+                                            effectiveImplRef = substituted;
+                                        }
+                                    }
+                                    const implSubstitutions = this.buildGenericSubstitutions(effectiveImplRef);
+
                                     // Merge impl substitutions with existing substitutions
                                     if (implSubstitutions && implSubstitutions.size > 0) {
                                         if (!genericSubstitutions) {
                                             genericSubstitutions = implSubstitutions;
                                         } else {
-                                            // Merge the maps - impl substitutions take precedence
                                             for (const [key, value] of implSubstitutions) {
                                                 genericSubstitutions.set(key, value);
                                             }

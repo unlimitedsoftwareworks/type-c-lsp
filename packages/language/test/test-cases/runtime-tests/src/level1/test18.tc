@@ -28,7 +28,7 @@ namespace Main {
     let local const J4 = "haha"
     let const F = Main.f()
 
-    fn f() -> String {
+    fn f() -> string {
         return "f".cat(J4) // i.e Main.J4
     }
 
@@ -39,9 +39,9 @@ namespace Main {
 
 fn test_case_1(rn: TestUnit) {
     let value = Main.f()
-    rn.assert_obj_eq(value, "fhaha")
+    rn.assert_eq(value, "fhaha")
     rn.assert_f32_eq_pre(Main.getPI(), 3.14f, 0.00001f)
-    rn.assert_obj_eq(Main.F, "fhaha")
+    rn.assert_eq(Main.F, "fhaha")
 
     let d = new Main.Data<u32>(1, 0)
     rn.assert_eq(d.pos.x, 1)

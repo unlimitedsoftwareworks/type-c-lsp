@@ -11,9 +11,7 @@
  * - Integration with Langium: uses Langium's linking and scoping
  */
 
-import { performance } from 'perf_hooks';
 import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
-import { profiler } from '../profiling.js';
 import { ArrayPrototypeBuiltin, CoroutinePrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
@@ -44,6 +42,7 @@ import {
     isPrototypeType,
     isReferenceType,
     isStringEnumType,
+    isStructType,
     isStringLiteralType,
     isStringType,
     isTupleType,
@@ -188,16 +187,7 @@ export class TypeCTypeProvider {
 
         const documentUri = AstUtils.getDocument(node).uri;
 
-        // Get from cache or compute if not cached, with profiling
-        const startMs = performance.now();
-        let wasCacheMiss = false;
-        const result = this.typeCache.get(documentUri, node, () => {
-            wasCacheMiss = true;
-            return this.computeType(node);
-        });
-        const durationMs = performance.now() - startMs;
-        profiler.recordGetTypeCall(wasCacheMiss, durationMs);
-        return result;
+        return this.typeCache.get(documentUri, node, () => this.computeType(node));
     }
 
     /**
@@ -3490,6 +3480,26 @@ export class TypeCTypeProvider {
                         }
                     }
                 }
+            }
+        }
+
+        // When the base is a struct type (e.g., from a substituted generic field like `d.pos`
+        // where `pos: {x: T, y: T}` was substituted to `{x: u32, y: u32}`), look up fields
+        // directly from the struct type. Langium's linker would resolve to the ORIGINAL
+        // StructField AST node (with type T), losing the generic substitution.
+        if (isStructType(baseType)) {
+            const field = baseType.fields.find(f => f.name === memberName);
+            if (field) {
+                let fieldType = field.type;
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    fieldType = this.typeUtils.substituteGenerics(fieldType, genericSubstitutions);
+                }
+                if (node.isNullable || baseIsNullable) {
+                    if (!this.typeUtils.isTypeBasic(fieldType)) {
+                        fieldType = this.typeFactory.createNullableType(fieldType, node);
+                    }
+                }
+                return fieldType;
             }
         }
 

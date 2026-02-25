@@ -106,10 +106,7 @@ export const TypeCSharedModule = {
         WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)
     },
     profilers:  {
-        /**
-         * Empty for now
-         */
-        LangiumProfiler: () => new DefaultLangiumProfiler(new Set([]))
+        LangiumProfiler: () => new DefaultLangiumProfiler(new Set(['validating']))
     }
 };
 

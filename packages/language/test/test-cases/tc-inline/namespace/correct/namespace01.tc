@@ -2,7 +2,6 @@
 local namespace privateAPI {
     let value: u32 = 1
 }
-/*
 namespace publicAPI {
     fn getValue() = privateAPI.value
 
@@ -20,5 +19,68 @@ namespace publicAPI {
             return this.pos
         }
     }
+
+    let const z = publicAPI.f()
+    fn f() = 0u32
+
 }
-*/
+
+
+type User = class {
+    fn init() {
+        
+    }
+}
+
+
+type Data<T> = class {
+    let pos: {x: T, y: T}
+    fn init(x: T, y: T) {
+        this.pos = {x, y}
+    }
+}
+
+namespace Main {
+    
+    type Data<T> = class {
+        let pos: {x: T, y: T}
+        fn init(x: T, y: T) {
+            this.pos = {x, y}
+        }
+    }
+
+    fn clear<T>(x: T) {
+        
+    }
+
+    let const PI: f32 = 3.14f
+    let local const J4 = "haha"
+    let const F = Main.f()
+
+    fn f() -> string {
+        return "f".cat(J4) // i.e Main.J4
+    }
+
+    fn getPI(){
+        return PI
+    }
+}
+
+fn test_case_1() {
+    let value = Main.f()
+
+    let d2 = new Data<u32>(1, 0)
+    /// @Type(xx): u32
+    let xx = d2.pos.x
+
+    /// @Type(yy): u32
+    let yy = d2.pos.y
+
+    let d = new Main.Data<u32>(1, 0)
+
+    /// @Type(xxx): u32
+    let xxx = d.pos.x
+
+    /// @Type(yyy): u32
+    let yyy = d.pos.y
+}

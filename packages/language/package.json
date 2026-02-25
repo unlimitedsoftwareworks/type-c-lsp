@@ -29,10 +29,6 @@
         "./services": {
             "types": "./out/services.d.ts",
             "default": "./out/services.js"
-        },
-        "./profiling": {
-            "types": "./out/profiling.d.ts",
-            "default": "./out/profiling.js"
         }
     },
     "typesVersions": {
@@ -48,9 +44,6 @@
             ],
             "services": [
                 "out/services"
-            ],
-            "profiling": [
-                "out/profiling"
             ]
         }
     },

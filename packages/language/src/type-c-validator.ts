@@ -18,6 +18,7 @@ export function registerValidationChecks(services: TypeCServices) {
         services.validation.DeclarationValidator,
     ]
     for (const validation of validations) {
-        registry.register(validation.getChecks(), validation);
+        const checks = validation.getChecks();
+        registry.register(checks, validation);
     }
 }

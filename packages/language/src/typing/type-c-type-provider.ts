@@ -14,7 +14,7 @@
 import { performance } from 'perf_hooks';
 import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
 import { profiler } from '../profiling.js';
-import { ArrayPrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
+import { ArrayPrototypeBuiltin, CoroutinePrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
 import { isAssignmentOperator, computeBinaryResultType, computeUnaryResultType, computeBinaryResultTypeStrict, computeUnaryResultTypeStrict } from './operator-utils.js';
@@ -994,6 +994,23 @@ export class TypeCTypeProvider {
             const prototypeType = isArrayType(type) ? this.getArrayPrototype() : this.getStringPrototype();
             if (prototypeType.node && ast.isBuiltinDefinition(prototypeType.node)) {
                 // check if attribute or method
+                for (const symbol of prototypeType.node.symbols) {
+                    if (ast.isBuiltinSymbolID(symbol)) {
+                        nodes.push(symbol);
+                    } else if (ast.isBuiltinSymbolFn(symbol)) {
+                        for (const name of symbol.names) {
+                            // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+                            nodes.push({ name, ...symbol } as AstNode);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Coroutine types - get prototype methods (alive, state, reset, finish)
+        if (isCoroutineType(type)) {
+            const prototypeType = this.getCoroutinePrototype();
+            if (prototypeType.node && ast.isBuiltinDefinition(prototypeType.node)) {
                 for (const symbol of prototypeType.node.symbols) {
                     if (ast.isBuiltinSymbolID(symbol)) {
                         nodes.push(symbol);
@@ -5662,10 +5679,34 @@ export class TypeCTypeProvider {
         return this.typeFactory.createPrototypeType('array', [], []);
     }
 
+    private getCoroutinePrototype(): TypeDescription {
+        if (this.builtinPrototypes.has('coroutine')) {
+            return this.builtinPrototypes.get('coroutine')!;
+        }
+
+        const document = this.services.shared.workspace.LangiumDocuments.getDocument(URI.parse(CoroutinePrototypeBuiltin));
+        if (document) {
+            const parseResult = document.parseResult.value;
+            if (!ast.isModule(parseResult)) {
+                return this.typeFactory.createPrototypeType('coroutine', [], []);
+            }
+            const firstDef = parseResult.definitions[0];
+            if (!ast.isBuiltinDefinition(firstDef)) {
+                return this.typeFactory.createPrototypeType('coroutine', [], []);
+            }
+            const prototype = firstDef;
+            this.builtinPrototypes.set('coroutine', this.getType(prototype));
+            return this.builtinPrototypes.get('coroutine')!;
+        }
+
+        // Return empty prototype if not found
+        return this.typeFactory.createPrototypeType('coroutine', [], []);
+    }
+
     /**
      * Returns the indexes of all valid targets for a function call
-     * @param args 
-     * @param functions 
+     * @param args
+     * @param functions
      * @returns The indexes of all valid targets for a function call
      */
     resolveFunctionCall(args: ast.Expression[], functions: FunctionTypeDescription[]): number[] {

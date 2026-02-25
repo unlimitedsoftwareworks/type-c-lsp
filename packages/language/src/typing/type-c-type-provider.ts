@@ -2935,12 +2935,53 @@ export class TypeCTypeProvider {
         }
 
         // Collect all methods with the operator name
+        // Track per-method impl substitutions for generic impl operator methods
         const methods: MethodType[] = [];
+        const methodImplSubstitutions: Map<MethodType, Map<string, TypeDescription>> = new Map();
 
         if (classType) {
             for (const method of classType.methods) {
                 if (method.names.includes(operator)) {
                     methods.push(method);
+                }
+            }
+
+            // Also check methods from impl blocks
+            for (const implTypeDesc of classType.implementations) {
+                let implRef = implTypeDesc;
+                let resolvedImpl = implTypeDesc;
+
+                if (isReferenceType(implRef)) {
+                    resolvedImpl = this.resolveReference(implRef);
+                }
+
+                if (isImplementationType(resolvedImpl)) {
+                    for (const method of resolvedImpl.methods) {
+                        if (method.names.includes(operator)) {
+                            methods.push(method);
+
+                            // Build impl-level generic substitutions
+                            // The impl reference may have generic args (e.g., DefaultCallBehavior<T>)
+                            // that need class-level substitution applied first
+                            if (isReferenceType(implRef) && implRef.genericArgs && implRef.genericArgs.length > 0) {
+                                const implSubs = new Map<string, TypeDescription>();
+                                const implRefSubstituted = genericSubstitutions && genericSubstitutions.size > 0
+                                    ? this.typeUtils.substituteGenerics(implRef, genericSubstitutions)
+                                    : implRef;
+                                if (isReferenceType(implRefSubstituted)) {
+                                    const subs = this.buildGenericSubstitutions(implRefSubstituted);
+                                    if (subs) {
+                                        for (const [k, v] of subs) {
+                                            implSubs.set(k, v);
+                                        }
+                                    }
+                                }
+                                if (implSubs.size > 0) {
+                                    methodImplSubstitutions.set(method, implSubs);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2966,44 +3007,37 @@ export class TypeCTypeProvider {
             return undefined;
         }
 
-        if (argBasedCandidates.length === 1) {
-            const selectedMethod = argBasedCandidates[0];
-            let returnType = selectedMethod.returnType;
-
-            // Apply generic substitutions if we have them
+        // Helper to apply both class-level and impl-level generic substitutions to a method's return type
+        const applySubstitutions = (method: MethodType): TypeDescription => {
+            let returnType = method.returnType;
+            // Apply impl-level substitutions first (e.g., impl's T → u32)
+            const implSubs = methodImplSubstitutions.get(method);
+            if (implSubs && implSubs.size > 0) {
+                returnType = this.typeUtils.substituteGenerics(returnType, implSubs);
+            }
+            // Then apply class-level substitutions
             if (genericSubstitutions && genericSubstitutions.size > 0) {
                 returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
             }
-
             return returnType;
+        };
+
+        if (argBasedCandidates.length === 1) {
+            return applySubstitutions(argBasedCandidates[0]);
         }
 
         // Multiple candidates - find best match
         // First try exact match
         for (const method of argBasedCandidates) {
             if (method.parameters.every((param, index) => this.typeUtils.areTypesEqual(rhsTypes[index], param.type).success)) {
-                let returnType = method.returnType;
-
-                // Apply generic substitutions if we have them
-                if (genericSubstitutions && genericSubstitutions.size > 0) {
-                    returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
-                }
-
-                return returnType;
+                return applySubstitutions(method);
             }
         }
 
         // Then try assignable match
         for (const method of argBasedCandidates) {
             if (method.parameters.every((param, index) => this.typeUtils.isAssignable(rhsTypes[index], param.type).success)) {
-                let returnType = method.returnType;
-
-                // Apply generic substitutions if we have them
-                if (genericSubstitutions && genericSubstitutions.size > 0) {
-                    returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
-                }
-
-                return returnType;
+                return applySubstitutions(method);
             }
         }
 

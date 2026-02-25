@@ -61,19 +61,19 @@ fn test_case_2(rn: TestUnit) {
 
 fn test_case_3(rn: TestUnit) {
     let version = engine.getVersion()
-    rn.assert_obj_eq(version, "1.0.0")
+    rn.assert_eq(version, "1.0.0")
 
     let color = engine.graphics.getColorPreset()
-    rn.assert_obj_eq(color, "dark")
+    rn.assert_eq(color, "dark")
 
     let const renderer = engine.graphics.renderer
-    rn.assert_obj_eq(renderer, "OpenGL")
+    rn.assert_eq(renderer, "OpenGL")
 
     let volume = engine.audio.getVolume()
     rn.assert_f32_eq_pre(volume, 0.5f, 0.00001f)
 
     let const audioEngine = engine.audio.audioEngine
-    rn.assert_obj_eq(audioEngine, "OpenAL")
+    rn.assert_eq(audioEngine, "OpenAL")
 
     let maxFPS = engine.config.MAX_FPS
     rn.assert_eq(maxFPS, 60)
@@ -100,21 +100,21 @@ fn test_case_3(rn: TestUnit) {
 
 fn test_case_4(rn: TestUnit) {
     let version = engine.getVersion()
-    rn.assert_obj_eq(version, "1.0.0")
+    rn.assert_eq(version, "1.0.0")
 
 
 
     let color = engine.graphics.getColorPreset()
-    rn.assert_obj_eq(color, "dark")
+    rn.assert_eq(color, "dark")
 
     let const renderer = engine.graphics.renderer
-    rn.assert_obj_eq(renderer, "OpenGL")
+    rn.assert_eq(renderer, "OpenGL")
 
     let volume = engine.audio.getVolume()
     rn.assert_f32_eq_pre(volume, 0.5f, 0.00001f)
 
     let const audioEngine = engine.audio.audioEngine
-    rn.assert_obj_eq(audioEngine, "OpenAL")
+    rn.assert_eq(audioEngine, "OpenAL")
 
     let maxFPS = engine.config.MAX_FPS
     rn.assert_eq(maxFPS, 60)
@@ -129,10 +129,10 @@ fn test_case_4(rn: TestUnit) {
 
 
     let color2 = gfx.getColorPreset()
-    rn.assert_obj_eq(color2, "dark")
+    rn.assert_eq(color2, "dark")
 
     let const renderer_2 = gfx.renderer
-    rn.assert_obj_eq(renderer+2, "DirectX")
+    rn.assert_eq(renderer+2, "DirectX")
 
     let (dim_1_2, dim_2_2) = engine.config.window.getDims()
     rn.assert_eq(dim_1_2, 1920)
@@ -143,7 +143,7 @@ fn test_case_4(rn: TestUnit) {
     rn.assert_f32_eq_pre(volume2, 1.0f, 0.00001f)
 
     let const audioEngine2 = leEngine.audio.audioEngine
-    rn.assert_obj_eq(audioEngine2, "FMOD")
+    rn.assert_eq(audioEngine2, "FMOD")
 
     let maxFPS2 = leEngine.config.MAX_FPS
     rn.assert_eq(maxFPS2, 120)
@@ -151,7 +151,7 @@ fn test_case_4(rn: TestUnit) {
 }
 
 
-fn main() -> u32 {
+fn test18() -> u32 {
     let test_1 = new TestUnit("test 1", "Tests local namespaces", test_case_1)
     let test_2 = new TestUnit("test 2", "Tests external namespaces", test_case_2)
     let test_3 = new TestUnit("test 3", "Tests external nested namespaces", test_case_3)

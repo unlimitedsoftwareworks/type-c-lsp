@@ -2,7 +2,7 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 type Callable<T> = interface {
-    fn __call__() -> T
+    fn () () -> T
 }
 
 type GetX =interface {
@@ -22,6 +22,10 @@ type Placeholder<T> = class {
     
     fn init(mut v: T) {
         this.v = v
+    }
+
+    fn getX() -> u32 {
+        return 0
     }
 
     impl DefaultCallBehavior<T>(v)
@@ -48,11 +52,11 @@ type Vec3 = class {
         this.z = z
     }
 
-    fn __add__ (v: Vec3) -> Vec3 {
+    fn + (v: Vec3) -> Vec3 {
         return new Vec3(this.x + v.x, this.y + v.y, this.z + v.z)
     }
 
-    fn __mul__ (v: Vec3) -> Vec3 {
+    fn * (v: Vec3) -> Vec3 {
         return new Vec3(this.x * v.x, this.y * v.y, this.z * v.z)
     }
     
@@ -79,36 +83,36 @@ type Object3D = interface {
 }
 
 namespace traits {
-type Default3DPropsAccessTrait = impl (
-    pos: Vec3,
-    rot: Vec3,
-    slx: Vec3
-) {
-    fn getRotation() -> Vec3 = this.rot
-    fn getPosition() -> Vec3 = this.pos
-    fn getScale() -> Vec3 = this.slx
+    type Default3DPropsAccessTrait = impl (
+        pos: Vec3,
+        rot: Vec3,
+        slx: Vec3
+    ) {
+        fn getRotation() -> Vec3 = this.rot
+        fn getPosition() -> Vec3 = this.pos
+        fn getScale() -> Vec3 = this.slx
 
-    fn setRotation(mut rot: Vec3) -> void {
-        this.rot = rot
+        fn setRotation(mut rot: Vec3) -> void {
+            this.rot = rot
+        }
+
+        fn setPosition(mut pos: Vec3) -> void {
+            this.pos = pos
+        }
+
+        fn setScale(mut scale: Vec3) -> void {
+            this.slx = scale
+        }
     }
 
-    fn setPosition(mut pos: Vec3) -> void {
-        this.pos = pos
-    }
-
-    fn setScale(mut scale: Vec3) -> void {
-        this.slx = scale
-    }
-}
-
-    type DefaultWorldTrait = impl for interface {
+    type SpacialObj = interface {
         fn getPosition() -> Vec3
         fn getRotation() -> Vec3
         fn getScale() -> Vec3
         fn getParent() -> Object3D?
-    } (
-        
-    ) {
+    }
+
+    type DefaultWorldTrait = impl SpacialObj () {
         fn getWorldPosition() -> Vec3 {
             if(this.getParent() == null){
                 return this.getPosition()
@@ -150,7 +154,7 @@ type StaticMesh = class {
 
     fn getParent() -> Object3D? = this.obj_parent
 
-    fn override getWorldPosition() -> Vec3 {
+    override fn getWorldPosition() -> Vec3 {
         return this.getPosition() + this.getParent()!.getWorldPosition()
     }
 }

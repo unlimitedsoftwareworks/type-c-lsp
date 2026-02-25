@@ -1,0 +1,38 @@
+
+type Callable<T> = interface {
+    fn () () -> T
+}
+
+type GetX =interface {
+    fn getX() -> u32
+}
+
+type DefaultCallBehavior<T || (T + u32) -> T> = impl GetX (
+    value: T
+) {
+    fn () ()-> T {
+        return this.value + this.getX()
+    }
+}
+
+type Placeholder<T> = class {
+    let v: T  
+    
+    fn init(mut v: T) {
+        this.v = v
+    }
+
+    fn getX() -> u32 {
+        return 0
+    }
+
+    impl DefaultCallBehavior<T>(v)
+}
+
+fn test_callable_placeholder() {
+    let p = new Placeholder<u32>(42)
+    let v = p()
+
+    let p2 = new Placeholder<string>("Haha")
+    let v2 = p2()
+}

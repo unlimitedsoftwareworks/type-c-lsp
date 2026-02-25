@@ -152,7 +152,7 @@ fn test_case_5(rn: TestUnit) {
     rn.assert_eq<u8>(res, 3)
 }
 
-fn main() -> u32 {
+fn test17() -> u32 {
     let test_1 = new TestUnit("test 1", "Tests regular coroutines", test_case_1)
     let test_2 = new TestUnit("test 2", "Tests coroutine generator", test_case_2)
     let test_3 = new TestUnit("test 3", "Tests coroutine array", test_case_3)

@@ -239,7 +239,7 @@ fn test_case_10(rn: TestUnit) {
     
 }
 
-fn main() -> u32 {
+fn test16() -> u32 {
     let test_1 = new TestUnit("test 1", "Tests lambda expressions", test_case_1)
     let test_2 = new TestUnit("test 2", "Tests both lambda and regular functions", test_case_2)
     let test_3 = new TestUnit("test 3", "Tests generic functions", test_case_3)

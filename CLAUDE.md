@@ -264,16 +264,24 @@ type-c-langium/
 │   ├── language/
 │   │   └── src/
 │   │       ├── typing/
-│   │       │   ├── type-c-types.ts           # Type definitions (~600 lines)
-│   │       │   ├── type-factory.ts           # Factory functions (~700 lines)
-│   │       │   ├── type-utils.ts             # Type operations (~600 lines)
-│   │       │   ├── type-c-type-provider.ts   # Type inference engine (~900 lines)
-│   │       │   ├── type-c-type-system.ts     # High-level facade (~100 lines)
-│   │       │   ├── builtin-type-utils.ts     # Built-in prototypes (~60 lines)
-│   │       │   └── TYPE_SYSTEM.md            # Type system docs (~500 lines)
+│   │       │   ├── type-c-types.ts           # Type definitions (34 TypeKind enum + all type interfaces)
+│   │       │   ├── type-factory.ts           # Factory functions (always use these to create types)
+│   │       │   ├── type-utils.ts             # areTypesEqual, isAssignableTo, substituteGenerics
+│   │       │   ├── type-c-type-provider.ts   # Type inference + validation engine (validation is a side effect of inference)
+│   │       │   ├── type-c-type-system.ts     # High-level facade
+│   │       │   ├── builtin-type-utils.ts     # Built-in prototypes
+│   │       │   └── diagnostics/             # StoredDiagnostic type only (sub-collectors removed)
+│   │       ├── validations/                  # Langium validators (non-type-dependent only)
+│   │       │   ├── type-diagnostics-validator.ts  # Thin validator: triggers inference, replays diagnostics
+│   │       │   ├── static-context-validation.ts   # Static context checks (no getType calls)
+│   │       │   ├── function-overload-validation.ts # Overload checks
+│   │       │   ├── variable-usage-validation.ts   # Variable usage checks
+│   │       │   ├── duplicate-validations.ts       # Duplicate name checks
+│   │       │   ├── control-flow-validation.ts     # Control flow checks
+│   │       │   └── variable-initializer-validation.ts
 │   │       ├── type-c.langium                # Grammar definition
-│   │       ├── type-c-scope-provider.ts      # Scope and completions
-│   │       ├── type-c-validator.ts           # Validation rules
+│   │       ├── scope-system/                 # Scope and completions
+│   │       ├── type-c-validator.ts           # Validation registration
 │   │       └── ...
 │   └── ...
 └── ...
@@ -288,7 +296,7 @@ type-c-langium/
 1. **type-c-types.ts**: Type definitions (34 type kinds in 7 categories)
 2. **type-factory.ts**: Factory functions for creating types
 3. **type-utils.ts**: Type comparison, assignability, subtyping
-4. **type-c-type-provider.ts**: Main type inference engine
+4. **type-c-type-provider.ts**: Type inference engine + type-dependent validation (validation runs as a side effect of inference, diagnostics stored in a per-document cache)
 5. **type-c-type-system.ts**: High-level public API
 6. **builtin-type-utils.ts**: Built-in prototype methods
 
@@ -549,17 +557,10 @@ Before making a change, ask:
 - [x] Structural and nominal typing
 - [x] Built-in prototypes
 - [x] Langium LSP integration
+- [x] Validation as side effect of inference (type-dependent validation runs during type computation, stored in diagnostic cache)
 
-### 🎯 Current Priorities
-- [ ] Fix type compatibility issues
-- [ ] Ensure tests pass
-- [ ] Maintain backward compatibility
-- [ ] Improve error messages
-
-### ⚠️ Known Issues
-- Type system had breaking changes in the past
-- Need better handling of partial generic inference
-- Test coverage needs improvement
+### Validation Architecture
+Type-dependent validation (type mismatches, constraint checks, etc.) is a **side effect of type inference** — when `infer*()` methods compute types, they also detect errors and store diagnostics. A thin Langium validator (`TypeDiagnosticsValidator`) triggers inference by walking the AST, then replays stored diagnostics. Non-type-dependent validation (static context, variable usage, duplicates, control flow, overloads) runs as standard Langium validators.
 
 ---
 

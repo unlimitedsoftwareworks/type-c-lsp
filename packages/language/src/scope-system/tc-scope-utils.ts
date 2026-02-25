@@ -248,20 +248,23 @@ export function getVariableDeclarations(block: ast.BlockStatement): Referencable
 
 export function getNamespaceDeclarations(namespace: ast.NamespaceDecl): ReferencableSymbol[] {
     const declarations: ReferencableSymbol[] = [];
-    
+
     // Get all definitions in the namespace
     for (const def of namespace.definitions ?? []) {
-        if (ast.isVariableDeclaration(def)) {
-            declarations.push(def);
+        if (ast.isVariableDeclarationStatement(def)) {
+            // Unwrap VariableDeclarationStatement to get individual VariableDeclaration nodes
+            declarations.push(...def.declarations.variables);
         } else if (ast.isFunctionDeclaration(def)) {
             declarations.push(def);
         } else if (ast.isTypeDeclaration(def)) {
             declarations.push(def);
         } else if (ast.isExternFFIDecl(def)) {
             declarations.push(def);
+        } else if (ast.isNamespaceDecl(def)) {
+            declarations.push(def);
         }
     }
-    
+
     return declarations;
 }
 

@@ -730,12 +730,13 @@ function createFFIType(
 // Meta Types
 // ============================================================================
 
-function createErrorType(message: string, cause?: unknown, node?: AstNode): ErrorTypeDescription {
+function createErrorType(message: string, cause?: unknown, node?: AstNode, reportable: boolean = true): ErrorTypeDescription {
     return {
         kind: TypeKind.Error,
         message,
         cause,
         node,
+        reportable,
         toString: () => `<error: ${message}>`
     };
 }

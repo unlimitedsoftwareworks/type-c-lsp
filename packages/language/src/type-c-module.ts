@@ -8,19 +8,21 @@ import { TypeCGeneratedModule, TypeCGeneratedSharedModule } from './generated/mo
 import { TypeCScopeComputation } from './scope-system/tc-scope-computation.js';
 import { TypeCScopeProvider } from './scope-system/tc-scope-provider.js';
 import { TypeCTypeProvider } from './typing/type-c-type-provider.js';
+import { TypeCTypeSystemValidator } from './validations/type-system-validations.js';
+import { FunctionOverloadValidator } from './validations/function-overload-validations.js';
 import { TypeCVariableUsageValidator } from './validations/variable-usage-validation.js';
 import { TypeCVariableInitializerValidator } from './validations/variable-initializer-validation.js';
 import { DuplicateValidator } from './validations/duplicate-validations.js';
 import { TypeCControlFlowValidator } from './validations/control-flow-validation.js';
+import { TypeCStaticContextValidator } from './validations/static-context-validations.js';
+import { TypeCClassInterfaceValidator } from './validations/class-interface-validations.js';
+import { TypeCDeclarationValidator } from './validations/declaration-validations.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
 import { TypeCTypeUtils } from './typing/type-utils.js';
 import { TypeCTypeFactory } from './typing/type-factory.js';
 import { MonomorphizationRegistry } from './typing/monomorphization-service.js';
-import { TypeDiagnosticsValidator } from './validations/type-diagnostics-validator.js';
-import { TypeCStaticContextValidator } from './validations/static-context-validation.js';
-import { FunctionOverloadValidator } from './validations/function-overload-validation.js';
 
 /**
  * Declaration of custom services - add your own service classes here.
@@ -38,13 +40,15 @@ export type TypeCAddedServices = {
         MonomorphizationRegistry: MonomorphizationRegistry
     },
     validation: {
+        TypeSystemValidator: TypeCTypeSystemValidator,
+        FunctionOverloadValidator: FunctionOverloadValidator,
         VariableUsageValidator: TypeCVariableUsageValidator,
         VariableInitializerValidator: TypeCVariableInitializerValidator,
         DuplicateValidator: DuplicateValidator,
         ControlFlowValidator: TypeCControlFlowValidator,
-        TypeDiagnosticsValidator: TypeDiagnosticsValidator,
         StaticContextValidator: TypeCStaticContextValidator,
-        OverloadValidator: FunctionOverloadValidator
+        ClassInterfaceValidator: TypeCClassInterfaceValidator,
+        DeclarationValidator: TypeCDeclarationValidator
     },
     documentation: {
         DocumentationProvider: TypeCDocumentationProvider
@@ -68,13 +72,15 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         Lexer: (services: LangiumCoreServices) => new TypeCLexer(services),
     },
     validation: {
+        TypeSystemValidator: (services: TypeCServices) => new TypeCTypeSystemValidator(services),
+        FunctionOverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services),
         VariableUsageValidator: () => new TypeCVariableUsageValidator(),
         VariableInitializerValidator: () => new TypeCVariableInitializerValidator(),
         DuplicateValidator: (services: TypeCServices) => new DuplicateValidator(services),
         ControlFlowValidator: () => new TypeCControlFlowValidator(),
-        TypeDiagnosticsValidator: (services: TypeCServices) => new TypeDiagnosticsValidator(services),
-        StaticContextValidator: () => new TypeCStaticContextValidator(),
-        OverloadValidator: (services: TypeCServices) => new FunctionOverloadValidator(services)
+        StaticContextValidator: (services: TypeCServices) => new TypeCStaticContextValidator(services),
+        ClassInterfaceValidator: (services: TypeCServices) => new TypeCClassInterfaceValidator(services),
+        DeclarationValidator: (services: TypeCServices) => new TypeCDeclarationValidator(services)
     },
     references: {
         ScopeComputation: (services: LangiumServices) => new TypeCScopeComputation(services),
@@ -85,7 +91,7 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
         TypeProvider: (services: TypeCServices) => new TypeCTypeProvider(services),
         TypeUtils: (services: TypeCServices) => new TypeCTypeUtils(services),
         TypeFactory: (services: TypeCServices) => new TypeCTypeFactory(services),
-        MonomorphizationRegistry: () => new MonomorphizationRegistry(),
+        MonomorphizationRegistry: () => new MonomorphizationRegistry()
     },
     documentation: {
         DocumentationProvider: (services: TypeCServices) => new TypeCDocumentationProvider(services)

@@ -7,16 +7,15 @@ import { TypeCBaseValidation } from './validations/base-validation.js';
 export function registerValidationChecks(services: TypeCServices) {
     const registry = services.validation.ValidationRegistry;
     const validations: TypeCBaseValidation[] = [
-        // Tier 2 (syntactic): unchanged
+        services.validation.TypeSystemValidator,
+        services.validation.FunctionOverloadValidator,
         services.validation.VariableUsageValidator,
         services.validation.DuplicateValidator,
         services.validation.VariableInitializerValidator,
         services.validation.ControlFlowValidator,
-        // Structural validators (no/minimal getType calls)
         services.validation.StaticContextValidator,
-        services.validation.OverloadValidator,
-        // Single entry point for type-dependent validation (collector + inference store)
-        services.validation.TypeDiagnosticsValidator,
+        services.validation.ClassInterfaceValidator,
+        services.validation.DeclarationValidator,
     ]
     for (const validation of validations) {
         registry.register(validation.getChecks(), validation);

@@ -444,12 +444,6 @@ export interface ErrorTypeDescription extends TypeDescription {
     readonly kind: TypeKind.Error;
     readonly message: string;
     readonly cause?: unknown;
-    /**
-     * Whether this error should be reported to the user as a diagnostic.
-     * Internal/fallback errors (e.g. "Cannot infer type for ${node.$type}")
-     * set this to false. User-facing errors default to true.
-     */
-    readonly reportable: boolean;
 }
 
 export interface NeverTypeDescription extends TypeDescription {

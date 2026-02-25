@@ -1,5 +1,6 @@
 
 import type { TypeCModuleConfig, TypeCServices } from 'type-c-language';
+import { profiler } from 'type-c-language/profiling';
 
 import chalk from 'chalk';
 import type { LangiumDocument } from 'langium';
@@ -26,12 +27,11 @@ export async function buildWorkspace(dirPath: string, services: TypeCServices): 
 
     const folderPath = path.dirname(configPath)
     const folderName = path.basename(folderPath);;
-    //console.log({name: folderName, uri: URI.file(path.resolve(folderName)).fsPath})
-    await services.shared.workspace.WorkspaceManager.initializeWorkspace([{name: folderName, uri: URI.file(path.resolve(folderPath)).fsPath}])
 
-    // const docs = (await services.shared.workspace.LangiumDocuments.all).toArray();
-    //console.log(docs.length, "Documents found", docs.map(e => e.uri.fsPath).join('\n'))
-    
+    profiler.startPhase('Workspace Init (parse + scope)');
+    await services.shared.workspace.WorkspaceManager.initializeWorkspace([{name: folderName, uri: URI.file(path.resolve(folderPath)).fsPath}])
+    profiler.endPhase();
+
     const document = await services.shared.workspace.LangiumDocuments.getDocument(URI.file(path.resolve(
         path.join(dirPath, config.sourceFolder, config.compiler.entry)
     )));
@@ -42,7 +42,13 @@ export async function buildWorkspace(dirPath: string, services: TypeCServices): 
 
     const allDocs = (await services.shared.workspace.LangiumDocuments.all).toArray();
 
+    profiler.startPhase('Document Build (link + validate)');
     await services.shared.workspace.DocumentBuilder.build(allDocs, { validation: true,  });
+    profiler.endPhase();
+
+    // Print profiling report
+    console.log(profiler.report());
+    console.log(`Documents processed: ${allDocs.length}`);
 
     const validationErrors = (document?.diagnostics ?? []).filter(e => e.severity === 1);
     if (validationErrors.length > 0) {

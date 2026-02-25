@@ -36,9 +36,9 @@ fn test_callable_placeholder(rn: TestUnit) {
     let v = p()
     rn.assert_eq(v, 42)
 
-    let p2 = new Placeholder<String>("Haha")
+    let p2 = new Placeholder<string>("Haha")
     let v2 = p2()
-    rn.assert_obj_eq(v2, "Haha")
+    rn.assert_eq(v2, "Haha")
 }
 
 type Vec3 = class {

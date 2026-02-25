@@ -36,3 +36,45 @@ fn test_callable_placeholder() {
     let p2 = new Placeholder<string>("Haha")
     let v2 = p2()
 }
+
+
+type DefaultGenericImpl<T> = impl (
+        value: T
+    ) {
+        fn getValue() -> T {
+            return this.value
+        }
+
+        fn setValue(mut newValue: T) -> void {
+            this.value = newValue
+        }
+    }
+
+type GenericContainer<T> = class {
+    let value: T
+
+    impl DefaultGenericImpl<T>(value)
+
+    fn init(mut value: T) {
+        this.value = value
+    }
+}
+
+fn test_generic_container() {
+    let container = new GenericContainer<u32>(100)
+
+    /// @Type(v1): u32
+    let v1 = container.getValue()
+
+    container.setValue(200)
+
+    /// @Type(v2): u32
+    let v2 = container.getValue()
+
+    let strContainer = new GenericContainer<string>("Hello")
+
+    /// @Type(v3): string
+    let v3 = strContainer.getValue()
+
+    strContainer.setValue("World")
+}

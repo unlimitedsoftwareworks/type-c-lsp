@@ -50,6 +50,7 @@ import {
     isUnionType,
     isJoinType,
     isClassType,
+    isImplementationType,
     isInterfaceType,
     isVariantType,
     isVariantConstructorType,
@@ -843,11 +844,41 @@ export class IRGenerator {
         }
 
         const typedDesc = resolved as ClassTypeDescription | InterfaceTypeDescription;
-        const methods = typedDesc.methods;
         const operatorAliases = this.getOperatorAliases(operator);
 
+        // Collect all methods including those from impl blocks
+        const allMethods = [...typedDesc.methods];
+
+        if (isClassType(resolved)) {
+            // Collect operator names from class methods for shadowing detection
+            const classOperatorNames = new Set<string>();
+            for (const m of resolved.methods) {
+                for (const name of m.names) {
+                    if (operatorAliases.includes(name)) {
+                        classOperatorNames.add(name);
+                    }
+                }
+            }
+
+            for (const implTypeDesc of resolved.implementations) {
+                let resolvedImpl = implTypeDesc;
+                if (isReferenceType(resolvedImpl)) {
+                    resolvedImpl = this.typeUtils.resolveIfReference(resolvedImpl);
+                }
+                if (isImplementationType(resolvedImpl)) {
+                    for (const method of resolvedImpl.methods) {
+                        // Skip impl methods that are shadowed by class override methods
+                        const isShadowed = method.names.some(name => classOperatorNames.has(name));
+                        if (!isShadowed) {
+                            allMethods.push(method);
+                        }
+                    }
+                }
+            }
+        }
+
         // Collect matching methods
-        const candidates = methods
+        const candidates = allMethods
             .map((m) => ({ method: m }))
             .filter(({ method }) => method.names.some(name => operatorAliases.includes(name)));
 

@@ -8,7 +8,7 @@ type Callable<T> = interface {
 type DefaultCallBehavior<T> = impl(
     value: T
 ) for interface { getX() -> u32 } {
-    fn __call__() -> T {
+    fn () ()-> T {
         return this.value + this.getX()
     }
 }
@@ -56,7 +56,7 @@ type Vec3 = class {
         return (this.x == v.x) && (this.y == v.y) && (this.z == v.z)
     }
 
-    fn toString() -> String {
+    fn toString() -> string {
         return "Vec3(" + this.x + ", " + this.y + ", " + this.z + ")"
     }
 }

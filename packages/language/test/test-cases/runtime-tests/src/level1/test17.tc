@@ -1,4 +1,3 @@
-from std.string import String
 from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
@@ -51,15 +50,15 @@ fn test_case_1(rn: TestUnit) {
 }
 
 type DataGenerator = class {
-    let co: coroutine<cfn() -> String>
+    let co: coroutine<cfn() -> string>
 
-    fn init(f: cfn() -> String) {
+    fn init(f: cfn() -> string) {
         this.co = coroutine f
     }
 }
 
 fn test_case_2(rn: TestUnit) {
-    fn dataGenerator() -> String {
+    cfn dataGenerator() -> string {
         let data = ["hi", "hello", "hey"]
         
         yield data[0]
@@ -71,19 +70,19 @@ fn test_case_2(rn: TestUnit) {
         co: coroutine dataGenerator
     }
 
-    rn.assert_obj_eq<String>(s.co(), "hi")
-    rn.assert_obj_eq<String>(s.co(), "hello")
-    rn.assert_obj_eq<String>(s.co(), "hey")
+    rn.assert_eq(s.co(), "hi")
+    rn.assert_eq(s.co(), "hello")
+    rn.assert_eq(s.co(), "hey")
 
     let c = new DataGenerator(dataGenerator)
 
-    rn.assert_obj_eq<String>(c.co(), "hi")
-    rn.assert_obj_eq<String>(c.co(), "hello")
-    rn.assert_obj_eq<String>(c.co(), "hey")
+    rn.assert_eq(c.co(), "hi")
+    rn.assert_eq(c.co(), "hello")
+    rn.assert_eq(c.co(), "hey")
 }
 
 fn test_case_3(rn: TestUnit) {
-    fn dataGenerator() -> String {
+    cfn dataGenerator() -> string {
         let data = ["hi", "hello", "hey"]
         
         yield data[0]
@@ -93,60 +92,60 @@ fn test_case_3(rn: TestUnit) {
 
     let arr = [coroutine dataGenerator, coroutine dataGenerator, coroutine dataGenerator]
 
-    rn.assert_obj_eq<String>(arr[0](), "hi")
-    rn.assert_obj_eq<String>(arr[0](), "hello")
-    rn.assert_obj_eq<String>(arr[0](), "hey")
+    rn.assert_eq(arr[0](), "hi")
+    rn.assert_eq(arr[0](), "hello")
+    rn.assert_eq(arr[0](), "hey")
 
-    rn.assert_obj_eq<String>(arr[1](), "hi")
-    rn.assert_obj_eq<String>(arr[1](), "hello")
-    rn.assert_obj_eq<String>(arr[1](), "hey")
+    rn.assert_eq(arr[1](), "hi")
+    rn.assert_eq(arr[1](), "hello")
+    rn.assert_eq(arr[1](), "hey")
 
-    rn.assert_obj_eq<String>(arr[2](), "hi")
-    rn.assert_obj_eq<String>(arr[2](), "hello")
-    rn.assert_obj_eq<String>(arr[2](), "hey")
+    rn.assert_eq(arr[2](), "hi")
+    rn.assert_eq(arr[2](), "hello")
+    rn.assert_eq(arr[2](), "hey")
 }
 
 fn test_case_4(rn: TestUnit) {
-    fn dataGenerator<T>(data: T[]) -> T {
+    cfn dataGenerator<T>(data: T[]) -> T {
         let const old = data
         yield old[0]
         yield old[1]
         yield! old[2]
     }
 
-    let co = coroutine dataGenerator<String>
+    let co = coroutine dataGenerator<string>
 
     let e = co(["hi", "hello", "hey"])
-    rn.assert_obj_eq<String>(e, "hi")
+    rn.assert_eq(e, "hi")
 
     e = co(["hi", "bye", "hey"])
-    rn.assert_obj_eq<String>(e, "hello")
+    rn.assert_eq(e, "hello")
 
     let co2 = coroutine dataGenerator<u64>
 
-    let e2 = co2([1 as u64, 2, 3])
+    let e2 = co2([1u64, 2, 3])
     rn.assert_eq<u64>(e2, 1)
 
-    e2 = co2([1 as u64, 5, 3])
+    e2 = co2([1u64, 5, 3])
     rn.assert_eq<u64>(e2, 2)
 }
 
 fn test_case_5(rn: TestUnit) {
-    fn dataGenerator<T>(data: T[]) -> T {
+    cfn dataGenerator<T>(data: T[]) -> T {
         yield data[0]
         yield data[1]
         yield! data[2]
     }
 
-    let co = coroutine dataGenerator<String>
+    let co = coroutine dataGenerator<string>
 
     let res = 
         let e0 = co(["hi", "hello", "hey"]) in
             let e1 = co(["hi", "hello", "hey"]) in
                 let e2 = co(["hi", "hello", "hey"]) in do {
-                    rn.assert_obj_eq<String>(e0, "hi")
-                    rn.assert_obj_eq<String>(e1, "hello")
-                    rn.assert_obj_eq<String>(e2, "hey")
+                    rn.assert_eq(e0, "hi")
+                    rn.assert_eq(e1, "hello")
+                    rn.assert_eq(e2, "hey")
                     return co.state
                 }
     

@@ -2,7 +2,7 @@
 local namespace privateAPI {
     let value: u32 = 1
 }
-
+/*
 namespace publicAPI {
     fn getValue() = privateAPI.value
 
@@ -21,3 +21,4 @@ namespace publicAPI {
         }
     }
 }
+*/

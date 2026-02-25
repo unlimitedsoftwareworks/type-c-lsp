@@ -3,7 +3,7 @@ from std.unit.test import TestUnit, UnitSet
 
 namespace tesla {
     type SomeClass = class {
-        let static value: u32, const static vsauce: i32
+        let static value: u32, static const vsauce: i32
         let static const value2: u32
         
         static {

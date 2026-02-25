@@ -4,7 +4,7 @@ local namespace privateAPI {
 }
 
 namespace publicAPI {
-    fn getValue() = privateAPI.value
+    fn getValue() = privateAPI.value // <- HERE
 
     local type AbstractVector = interface {
         fn getPos() -> {x: u32, y: u32}

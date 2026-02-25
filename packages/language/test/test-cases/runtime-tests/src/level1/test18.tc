@@ -1,10 +1,9 @@
-from std.string import String
 from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
-from folder.api import publicAPI /*, privateAPI << will crash (as it should) */
-from folder.api2 import engine, engine.graphics
-from folder.api2_clone import engine.graphics as gfx, engine as leEngine
+from level1.test18folder.api import publicAPI /*, privateAPI << will crash (as it should) */
+from level.test18folder.api2 import engine, engine.graphics
+from level.test18folder.api2_clone import engine.graphics as gfx, engine as leEngine
 
 type User = class {
     fn init() {

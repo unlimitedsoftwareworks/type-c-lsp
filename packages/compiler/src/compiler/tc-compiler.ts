@@ -1379,9 +1379,9 @@ export class IRGenerator {
         // Compile static methods of generic classes — they can't use class type params
         // (enforced by static-context-validations), so compile them once with base class name
         const classType = classDecl.definition as ast.ClassType;
+        const qualifiedName = this.getQualifiedDeclName(classDecl);
         const staticMethods = classType.methods.filter(m => m.isStatic);
         if (staticMethods.length > 0) {
-            const qualifiedName = this.getQualifiedDeclName(classDecl);
             this.classNodeToIRName.set(classDecl, qualifiedName);
             for (const method of staticMethods) {
                 if (method.method) {
@@ -1391,6 +1391,10 @@ export class IRGenerator {
             // Also generate monomorphized versions of generic static methods
             this.generateGenericMethodInstantiations(classDecl, qualifiedName, qualifiedName);
         }
+
+        // Static fields and blocks don't use class type params — declare/compile once with base name
+        this.declareStaticFieldGlobals(qualifiedName, classType);
+        this.generateStaticBlocks(qualifiedName, classType);
     }
 
     private generateClass(
@@ -1512,6 +1516,12 @@ export class IRGenerator {
             implementedInterfaces: classTd.implementations.map(() => 'impl') // Placeholder
         });
 
+        // Declare static attributes as global variables (skip for generic instantiations —
+        // those are declared once in generateGenericClassInstantiations with the base name)
+        if (substitutions.size === 0) {
+            this.declareStaticFieldGlobals(className, classType);
+        }
+
         // Generate class-level methods
         for (const method of classType.methods) {
             if (method.method) {
@@ -1526,6 +1536,9 @@ export class IRGenerator {
         // Implementation methods are stored separately in classType.implementations
         // and must be generated unless shadowed by an override in the class itself
         this.generateImplMethods(className, classType, overrideNames);
+
+        // Generate static blocks — each becomes a global function called at init time
+        this.generateStaticBlocks(className, classType);
     }
 
     /**
@@ -1659,6 +1672,92 @@ export class IRGenerator {
                     this.popSubstitutions();
                 }
             }
+        }
+    }
+
+    /**
+     * Declare global variables for static class attributes and generate their initializers.
+     */
+    private declareStaticFieldGlobals(
+        className: string,
+        classType: ast.ClassType
+    ): void {
+        for (const attr of classType.attributes) {
+            if (attr.isStatic) {
+                const globalId = this.getStaticFieldGlobalId(className, attr);
+                const attrType = this.getNodeIRType(attr);
+                this.program.declareGlobal({ id: globalId, type: attrType });
+
+                if (attr.initializer) {
+                    const prevFunc = this.context.currentFunction;
+                    const prevDoExprStack = this.context.doExprStack;
+                    this.context.currentFunction = this.globalFunc;
+                    this.context.doExprStack = [];
+
+                    const exprResult = this.visitExpression(attr.initializer, undefined);
+                    this.globalFunc.globalStore(globalId, exprResult.register, exprResult.type);
+
+                    this.context.currentFunction = prevFunc;
+                    this.context.doExprStack = prevDoExprStack;
+                }
+            }
+        }
+    }
+
+    /**
+     * Generate IR functions for class static blocks and add calls to them
+     * in the global init function ($G).
+     *
+     * Each static block becomes a separate function named `ClassName::$static_N`
+     * (where N is the block index). Static blocks have no parameters and no return
+     * value. Like static methods, they don't have access to `this`.
+     */
+    private generateStaticBlocks(
+        className: string,
+        classType: ast.ClassType
+    ): void {
+        if (!classType.staticBlock || classType.staticBlock.length === 0) return;
+
+        for (let i = 0; i < classType.staticBlock.length; i++) {
+            const block = classType.staticBlock[i];
+            const funcName = `${className}::$static_${i}`;
+
+            this.debugIR(`  Generating static block: ${funcName}`);
+
+            const lirFunc = this.program.createFunction(funcName, [], []);
+
+            const prevFunction = this.context.currentFunction;
+            const prevVars = new Map(this.context.variables);
+            const prevTemp = this.context.tempCounter;
+            const prevLabel = this.context.labelCounter;
+            const prevScope = this.context.scopeDepth;
+            const prevDoExprStack = this.context.doExprStack;
+
+            this.context.currentFunction = lirFunc;
+            this.context.variables.clear();
+            this.context.tempCounter = 0;
+            this.context.labelCounter = 0;
+            this.context.scopeDepth = 0;
+            this.context.doExprStack = [];
+
+            this.visitBlockStatement(block);
+
+            const lastInst = lirFunc.instructions[lirFunc.instructions.length - 1];
+            if (!lastInst || (lastInst.kind !== 'ret' && lastInst.kind !== 'exit')) {
+                lirFunc.ret();
+            }
+
+            this.debugIRFunction(lirFunc);
+
+            this.context.currentFunction = prevFunction;
+            this.context.variables = prevVars;
+            this.context.tempCounter = prevTemp;
+            this.context.labelCounter = prevLabel;
+            this.context.scopeDepth = prevScope;
+            this.context.doExprStack = prevDoExprStack;
+
+            // Add a call to this static block in the global init function
+            this.globalFunc.call([], funcName, [], [], []);
         }
     }
 
@@ -3781,14 +3880,18 @@ export class IRGenerator {
                     f.mov(varInfo.register, value.register, value.type);
                 }
             } else if (ref && ast.isClassAttributeDecl(ref)) {
-                // Implicit `this.field = value` for bare class field assignment
-                const thisVar = this.lookupVariable('this');
-                if (thisVar) {
-                    const classType = ref.$container; // ClassType AST node
-                    const classTd = this.getType(classType as AstNode);
-                    const resolvedClassTd = isReferenceType(classTd) ? this.typeUtils.resolveIfReference(classTd) : classTd;
-                    const fieldIndex = this.getClassFieldIndex(resolvedClassTd, ref.name);
-                    f.classSet(thisVar.register, fieldIndex, value.register, value.type);
+                if (ref.isStatic) {
+                    const globalId = this.G(ref);
+                    f.globalStore(globalId, value.register, value.type);
+                } else {
+                    const thisVar = this.lookupVariable('this');
+                    if (thisVar) {
+                        const classType = ref.$container;
+                        const classTd = this.getType(classType as AstNode);
+                        const resolvedClassTd = isReferenceType(classTd) ? this.typeUtils.resolveIfReference(classTd) : classTd;
+                        const fieldIndex = this.getClassFieldIndex(resolvedClassTd, ref.name);
+                        f.classSet(thisVar.register, fieldIndex, value.register, value.type);
+                    }
                 }
             }
         } else if (ast.isMemberAccess(lhs)) {
@@ -3799,7 +3902,10 @@ export class IRGenerator {
                 const objTd = this.getType(lhs.expr);
                 const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
 
-                if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
+                if (isMetaClassType(resolvedObjTd) && ast.isClassAttributeDecl(memberRef) && memberRef.isStatic) {
+                    const globalId = this.G(memberRef);
+                    f.globalStore(globalId, value.register, value.type);
+                } else if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
                     const fieldIndex = this.getStructFieldIndex(resolvedObjTd, this.getReferenceName(memberRef));
                     f.structSet(obj.register, fieldIndex, value.register, value.type);
                 } else if (isClassType(resolvedObjTd)) {
@@ -4057,16 +4163,21 @@ export class IRGenerator {
             return { register: handleReg, type: ptrType('ffi_handle') };
         }
 
-        // Class field access (implicit `this`) — e.g. `data` inside a method means `this.data`
+        // Class field access — static fields use globalLoad, instance fields use implicit `this`
         if (ast.isClassAttributeDecl(ref)) {
+            const resultType = this.getNodeIRType(node);
+            const temp = this.tmp();
+            if (ref.isStatic) {
+                const globalId = this.G(ref);
+                this.func().globalLoad(temp, globalId, resultType);
+                return { register: temp, type: resultType };
+            }
             const thisVar = this.lookupVariable('this');
             this.assert(thisVar !== undefined, "ClassAttributeDecl reference outside of method context");
-            const classType = ref.$container; // ClassType AST node
+            const classType = ref.$container;
             const classTd = this.getType(classType as AstNode);
             const resolvedClassTd = isReferenceType(classTd) ? this.typeUtils.resolveIfReference(classTd) : classTd;
             const fieldIndex = this.getClassFieldIndex(resolvedClassTd, ref.name);
-            const resultType = this.getNodeIRType(node);
-            const temp = this.tmp();
             this.func().classGet(temp, thisVar!.register, fieldIndex, resultType);
             return { register: temp, type: resultType };
         }
@@ -4742,6 +4853,13 @@ export class IRGenerator {
         if (isClassType(resolvedObjTd)) {
             const fieldIndex = this.getClassFieldIndex(resolvedObjTd, memberName);
             this.func().classGet(temp, obj.register, fieldIndex, resultType);
+            return { register: temp, type: resultType };
+        }
+
+        // Static field access via ClassName.field
+        if (isMetaClassType(resolvedObjTd) && memberRef && ast.isClassAttributeDecl(memberRef) && memberRef.isStatic) {
+            const globalId = this.G(memberRef);
+            this.func().globalLoad(temp, globalId, resultType);
             return { register: temp, type: resultType };
         }
 
@@ -6495,6 +6613,14 @@ export class IRGenerator {
             return idx >= 0 ? idx : 0;
         }
         return 0;
+    }
+
+    /**
+     * Get the global variable ID for a static class attribute.
+     * Uses the ClassAttributeDecl AST node as the registry key for consistency.
+     */
+    private getStaticFieldGlobalId(className: string, attr: ast.ClassAttributeDecl): string {
+        return this.G(attr, `${className}::${attr.name}`);
     }
 
     /**

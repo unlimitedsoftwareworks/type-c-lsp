@@ -12,6 +12,7 @@
  */
 
 import { AstNode, AstUtils, DocumentCache, URI } from 'langium';
+import type { TypeProviderProfiler } from '../workspace/tc-profiler.js';
 import { ArrayPrototypeBuiltin, CoroutinePrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
@@ -77,6 +78,9 @@ export class TypeCTypeProvider {
 
     /** Guard against re-entrant getExpectedType calls for the same node */
     private readonly expectedTypeInProgress = new Set<AstNode>();
+
+    /** Optional profiler — set from outside after service construction */
+    public typeProfiler: TypeProviderProfiler | undefined = undefined;
 
     /** Type Utils service */
     private readonly typeUtils: TypeCTypeUtils;
@@ -187,7 +191,17 @@ export class TypeCTypeProvider {
 
         const documentUri = AstUtils.getDocument(node).uri;
 
-        return this.typeCache.get(documentUri, node, () => this.computeType(node));
+        if (!this.typeProfiler) {
+            return this.typeCache.get(documentUri, node, () => this.computeType(node));
+        }
+
+        const profiler = this.typeProfiler;
+        return this.typeCache.get(documentUri, node, () => {
+            const t0 = performance.now();
+            const result = this.computeType(node);
+            profiler.record(node.$type, performance.now() - t0);
+            return result;
+        });
     }
 
     /**

@@ -51,7 +51,7 @@ fn test_static_consistency(rn: TestUnit) {
     rn.assert_eq(instance.getStaticValue(), tesla.SomeClass.value)
 }
 
-fn main() -> u32 {
+fn test20() -> u32 {
     let test_1 = new TestUnit("test static initialization", "Tests static block initialization", test_static_initialization)
     let test_2 = new TestUnit("test static increment", "Tests increment behavior of static attribute", test_static_increment)
     let test_3 = new TestUnit("test static consistency", "Tests consistency of static value access from instance", test_static_consistency)

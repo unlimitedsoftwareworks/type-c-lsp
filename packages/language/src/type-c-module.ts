@@ -18,6 +18,7 @@ import { TypeCStaticContextValidator } from './validations/static-context-valida
 import { TypeCClassInterfaceValidator } from './validations/class-interface-validations.js';
 import { TypeCDeclarationValidator } from './validations/declaration-validations.js';
 import { TCWorkspaceManager } from './workspace/tc-workspace-manager.js';
+import { TCDocumentBuilder } from './workspace/tc-document-builder.js';
 import { registerValidationChecks } from './type-c-validator.js';
 import { TypeCLinker } from './linking/tc-linker.js';
 import { TypeCTypeUtils } from './typing/type-utils.js';
@@ -103,10 +104,8 @@ export const TypeCModule: Module<TypeCServices, PartialLangiumServices & TypeCAd
 
 export const TypeCSharedModule = {
     workspace: {
-        WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)
-    },
-    profilers:  {
-        //LangiumProfiler: () => new DefaultLangiumProfiler(new Set(['validating']))
+        WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services),
+        DocumentBuilder: (services: LangiumSharedServices) => new TCDocumentBuilder(services),
     }
 };
 

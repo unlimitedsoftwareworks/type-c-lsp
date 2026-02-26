@@ -105,7 +105,7 @@ prototype for string {
 	 * @example: "hello".slice(-2) -> "lo"
 	 * @example: "hello".slice(1, -1) -> "ell"
 	 */
-	fn slice(start: i64, end: i64) -> string
+	fn slice | [] (start: i64, end: i64) -> string
 
 	/**
 	 * @brief: Extracts a section from a starting index to the end.
@@ -467,6 +467,18 @@ prototype for string {
 	 * @example: "hello" + " world" -> "hello world"
 	 */
 	fn cat | + (other: string) -> string
+	fn cat | + (other: u8) -> string
+	fn cat | + (other: i8) -> string
+	fn cat | + (other: u16) -> string
+	fn cat | + (other: i16) -> string
+	fn cat | + (other: u32) -> string
+	fn cat | + (other: i32) -> string
+	fn cat | + (other: u64) -> string
+	fn cat | + (other: i64) -> string
+	fn cat | + (other: f32) -> string
+	fn cat | + (other: f64) -> string
+	fn cat | + (other: bool) -> string
+
 
 	/**
 	 * @brief: Repeats the string n times.

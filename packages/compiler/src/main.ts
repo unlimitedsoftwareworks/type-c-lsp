@@ -4,15 +4,21 @@ import { NodeFileSystem } from 'langium/node';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as url from 'node:url';
-import { createTypeCServices } from 'type-c-language';
+import { createTypeCServices, TCDocumentBuilder } from 'type-c-language';
 import { buildWorkspace } from './compiler/module-loader.js';
 import { IRGenerator } from './compiler/tc-compiler.js';
 import { serializeProgram } from './ir/serializer.js';
 import { generateBytecode } from './codegen/index.js';
 
 export const generateAction = async (fileName: string, opts: GenerateOptions): Promise<void> => {
-    const services = createTypeCServices(NodeFileSystem).TypeC;
+    const { shared, TypeC: services } = createTypeCServices(NodeFileSystem);
+    const builder = shared.workspace.DocumentBuilder as TCDocumentBuilder;
+    services.typing.TypeProvider.typeProfiler = builder.profiler.typeProvider;
+
     const {documents} = await buildWorkspace(fileName, services);
+    const profilerPath = path.join(process.cwd(), 'profiler.json');
+    await builder.profiler.writeJSON(profilerPath);
+    console.log(chalk.cyan(`Profiling data written to ${profilerPath}`));
     const allClean = documents.map(e => e.diagnostics?.filter(e => e.severity === 1)).map(e => e?.length ?? 0).filter( e => e !== 0).length === 0
 
     if(allClean) {

@@ -26,19 +26,6 @@ namespace tesla {
             println(""+value)
         }
     }
-
-    type SomeOtherClass<T> = class {
-        let v: T
-        let static const value: T
-
-        static {
-            SomeOtherClass.value = 10
-        }
-
-        fn init(v: T) {
-            this.v = v
-        }
-    }
 }
 
 fn test_static_initialization(rn: TestUnit) {

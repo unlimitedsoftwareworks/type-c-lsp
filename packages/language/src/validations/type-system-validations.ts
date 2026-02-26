@@ -1636,7 +1636,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
      * @returns Field info including type and whether it's a const attribute, or undefined if not found
      */
     private getFieldInfo(baseType: TypeDescription, fieldName: string):
-        { type: TypeDescription; isConst: boolean; isClass: boolean } | undefined {
+        { type: TypeDescription; isConst: boolean; isStatic: boolean; isClass: boolean } | undefined {
         
         // For classes: get attribute type
         if (isClassType(baseType)) {
@@ -1645,6 +1645,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 return {
                     type: attribute.type,
                     isConst: attribute.isConst,
+                    isStatic: attribute.isStatic,
                     isClass: true
                 };
             }
@@ -1659,6 +1660,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 return {
                     type: field.type,
                     isConst: false,
+                    isStatic: false,
                     isClass: false
                 };
             }
@@ -1712,16 +1714,22 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 continue;
             }
             
-            // Allow const assignment in constructor (init method)
             if (fieldInfo.isConst) {
-                if (!this.isInConstructor(node)) {
+                if (fieldInfo.isStatic) {
+                    if (!this.isInFirstStaticBlock(node)) {
+                        accept('error', `Cannot assign to static const attribute '${kvPair.name}'. Static const attributes can only be assigned in the first static block.`, {
+                            node: kvPair,
+                            code: ErrorCode.TC_STATIC_CONST_NOT_FIRST_BLOCK
+                        });
+                        continue;
+                    }
+                } else if (!this.isInConstructor(node)) {
                     accept('error', `Attribute '${kvPair.name}' is constant and cannot be mutated. Const attributes can only be assigned in constructors (init methods).`, {
                         node: kvPair,
                         code: ErrorCode.TC_ASSIGNMENT_TO_CONST
                     });
                     continue;
                 }
-                // Valid: const can be assigned in constructor
             }
 
             // Check type compatibility
@@ -2370,9 +2378,17 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             // Check if it's a class attribute
             if (ast.isClassAttributeDecl(ref)) {
                 if (ref.isConst) {
-                    // Allow assignment in constructor (init method)
+                    if (ref.isStatic) {
+                        if (this.isInFirstStaticBlock(expr)) {
+                            return undefined;
+                        }
+                        return {
+                            message: `Cannot assign to static const attribute '${ref.name}'. Static const attributes can only be assigned in the first static block.`,
+                            code: ErrorCode.TC_STATIC_CONST_NOT_FIRST_BLOCK
+                        };
+                    }
                     if (this.isInConstructor(expr)) {
-                        return undefined; // Valid: const can be assigned in constructor
+                        return undefined;
                     }
                     return {
                         message: `Cannot assign to const attribute '${ref.name}'. Const attributes can only be assigned in constructors (init methods).`,
@@ -2416,9 +2432,17 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             // Then check if the member itself is const
             const element = expr.element?.ref;
             if (element && ast.isClassAttributeDecl(element) && element.isConst) {
-                // Allow assignment in constructor (init method)
+                if (element.isStatic) {
+                    if (this.isInFirstStaticBlock(expr)) {
+                        return undefined;
+                    }
+                    return {
+                        message: `Cannot assign to static const attribute '${element.name}'. Static const attributes can only be assigned in the first static block.`,
+                        code: ErrorCode.TC_STATIC_CONST_NOT_FIRST_BLOCK
+                    };
+                }
                 if (this.isInConstructor(expr)) {
-                    return undefined; // Valid: const can be assigned in constructor
+                    return undefined;
                 }
                 return {
                     message: `Cannot assign to const attribute '${element.name}'. Const attributes can only be assigned in constructors (init methods).`,
@@ -2604,6 +2628,38 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             current = current.$container;
         }
         
+        return false;
+    }
+
+    /**
+     * Check if an expression is within the first static block of its containing class.
+     *
+     * Static const attributes are allowed to be assigned only in the first static block,
+     * serving as the "static constructor" for the class.
+     */
+    private isInFirstStaticBlock(expr: AstNode): boolean {
+        let current: AstNode | undefined = expr;
+
+        while (current) {
+            if (ast.isBlockStatement(current)) {
+                const parent: AstNode | undefined = current.$container;
+                if (parent && ast.isClassType(parent) && parent.staticBlock?.length > 0) {
+                    if (parent.staticBlock[0] === current) {
+                        return true;
+                    }
+                    if (parent.staticBlock.includes(current)) {
+                        return false;
+                    }
+                }
+            }
+
+            if (ast.isClassMethod(current) || ast.isClassType(current)) {
+                return false;
+            }
+
+            current = current.$container;
+        }
+
         return false;
     }
 

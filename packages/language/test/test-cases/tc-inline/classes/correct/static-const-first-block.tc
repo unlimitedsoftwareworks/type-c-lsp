@@ -1,0 +1,267 @@
+// ============================================================
+// CORRECT: Static const attributes assigned in the first static block
+// ============================================================
+
+// Test 1: Basic static const assignment in first (and only) static block
+type BasicStaticConst = class {
+    let static const maxSize: u32
+
+    /// @NoError
+    static {
+        BasicStaticConst.maxSize = 100u32
+    }
+}
+
+// Test 2: Multiple static const fields in the first static block
+type MultipleStaticConst = class {
+    let static const width: u32
+    let static const height: u32
+    let static const depth: u32
+
+    /// @NoError
+    static {
+        MultipleStaticConst.width = 800u32
+        MultipleStaticConst.height = 600u32
+        MultipleStaticConst.depth = 32u32
+    }
+}
+
+// Test 3: Mix of static const and static mutable in the first static block
+type MixedStaticFields = class {
+    let static const immutableVal: u32
+    let static mutableVal: u32
+
+    /// @NoError
+    static {
+        MixedStaticFields.immutableVal = 42u32
+        MixedStaticFields.mutableVal = 100u32
+    }
+}
+
+// Test 4: Static const with various primitive types
+type VariousTypes = class {
+    let static const vu32: u32
+    let static const vi32: i32
+    let static const vf64: f64
+    let static const vstr: string
+    let static const vbool: bool
+
+    /// @NoError
+    static {
+        VariousTypes.vu32 = 1u32
+        VariousTypes.vi32 = -42i32
+        VariousTypes.vf64 = 3.14
+        VariousTypes.vstr = "hello"
+        VariousTypes.vbool = true
+    }
+}
+
+// Test 5: Comma-separated static const declarations
+type CommaSeparated = class {
+    let static const a: u32, static const b: i32, static const c: string
+
+    /// @NoError
+    static {
+        CommaSeparated.a = 10u32
+        CommaSeparated.b = 20i32
+        CommaSeparated.c = "test"
+    }
+}
+
+// Test 6: Instance const in constructor + static const in first static block (coexistence)
+type MixedConstScopes = class {
+    let const instanceConst: u32
+    let static const staticConst: u32
+
+    /// @NoError
+    static {
+        MixedConstScopes.staticConst = 99u32
+    }
+
+    /// @NoError
+    fn init() {
+        this.instanceConst = 42u32
+    }
+}
+
+// Test 7: Multiple classes each with their own first static block
+type ClassAlpha = class {
+    let static const alphaVal: u32
+
+    /// @NoError
+    static {
+        ClassAlpha.alphaVal = 1u32
+    }
+}
+
+type ClassBeta = class {
+    let static const betaVal: u32
+
+    /// @NoError
+    static {
+        ClassBeta.betaVal = 2u32
+    }
+}
+
+type ClassGamma = class {
+    let static const gammaVal: u32
+
+    /// @NoError
+    static {
+        ClassGamma.gammaVal = 3u32
+    }
+}
+
+// Test 8: Reassigning static const multiple times within the same first static block
+// (the validation only checks block position, not single-assignment semantics)
+type ReassignInFirstBlock = class {
+    let static const val: u32
+
+    /// @NoError
+    static {
+        ReassignInFirstBlock.val = 1u32
+        ReassignInFirstBlock.val = 2u32
+        ReassignInFirstBlock.val = 3u32
+    }
+}
+
+// Test 9: Static mutable can be assigned anywhere (baseline - no regression)
+type StaticMutableAnywhere = class {
+    let static counter: u32
+
+    /// @NoError
+    static {
+        StaticMutableAnywhere.counter = 0u32
+    }
+
+    /// @NoError
+    static {
+        StaticMutableAnywhere.counter = 1u32
+    }
+
+    /// @NoError
+    static fn increment() {
+        StaticMutableAnywhere.counter = StaticMutableAnywhere.counter + 1u32
+    }
+
+    /// @NoError
+    fn bump() {
+        StaticMutableAnywhere.counter = StaticMutableAnywhere.counter + 1u32
+    }
+}
+
+// Test 10: Static const with computed expressions in first block
+type ComputedInit = class {
+    let static const computed: u32
+    let static const derived: u32
+
+    /// @NoError
+    static {
+        ComputedInit.computed = 10u32 + 20u32
+        ComputedInit.derived = ComputedInit.computed * 2u32
+    }
+}
+
+// Test 11: Methods defined between attributes and the static block (ordering in class body)
+type InterleavedDecls = class {
+    let static const earlyConst: u32
+
+    fn someMethod() -> u32 {
+        return InterleavedDecls.earlyConst
+    }
+
+    let static const lateConst: u32
+
+    static fn staticHelper() -> u32 {
+        return InterleavedDecls.lateConst
+    }
+
+    /// @NoError
+    static {
+        InterleavedDecls.earlyConst = 10u32
+        InterleavedDecls.lateConst = 20u32
+    }
+}
+
+// Test 12: Generic class with static const
+type GenericWithStaticConst<T> = class {
+    let data: T
+    let static const instanceCount: u32
+
+    /// @NoError
+    static {
+        GenericWithStaticConst.instanceCount = 0u32
+    }
+}
+
+// Test 13: Static const assigned with expression referencing static mutable
+type DependentInit = class {
+    let static base: u32
+    let static const frozen: u32
+
+    /// @NoError
+    static {
+        DependentInit.base = 100u32
+        DependentInit.frozen = DependentInit.base + 50u32
+    }
+}
+
+// Test 14: Compound assignment to static MUTABLE in first static block (no restriction)
+type CompoundMutableFirst = class {
+    let static counter: u32
+
+    /// @NoError
+    static {
+        CompoundMutableFirst.counter = 0u32
+        CompoundMutableFirst.counter += 1u32
+        CompoundMutableFirst.counter -= 1u32
+    }
+}
+
+// Test 15: Compound assignment to static MUTABLE in second static block (no restriction)
+type CompoundMutableSecond = class {
+    let static counter: u32
+
+    /// @NoError
+    static {
+        CompoundMutableSecond.counter = 0u32
+    }
+
+    /// @NoError
+    static {
+        CompoundMutableSecond.counter += 10u32
+    }
+}
+
+// Test 16: Static const alongside local attributes
+type WithLocalAttrs = class {
+    let local secret: u32
+    let static const publicConst: u32
+
+    /// @NoError
+    static {
+        WithLocalAttrs.publicConst = 42u32
+    }
+
+    fn init() {
+        this.secret = 99u32
+    }
+}
+
+// Test 17: Class with supertype and static const
+type Displayable = interface {
+    fn display() -> string
+}
+
+type DerivedClass = class Displayable {
+    let static const tag: string
+
+    /// @NoError
+    static {
+        DerivedClass.tag = "derived"
+    }
+
+    fn display() -> string {
+        return DerivedClass.tag
+    }
+}

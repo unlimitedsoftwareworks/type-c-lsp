@@ -1,0 +1,310 @@
+// ============================================================
+// INCORRECT: Static const assignment errors
+// ============================================================
+
+// Test 1: Static const in second static block
+type SecondBlock = class {
+    let static const maxSize: u32
+    let static count: u32
+
+    static {
+        SecondBlock.maxSize = 100u32
+        SecondBlock.count = 0u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'maxSize'. Static const attributes can only be assigned in the first static block.
+        SecondBlock.maxSize = 200u32
+
+        /// @NoError
+        SecondBlock.count = 1u32
+    }
+}
+
+// Test 2: Static const in third static block
+type ThirdBlock = class {
+    let static const val: u32
+
+    static {
+        ThirdBlock.val = 1u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'val'. Static const attributes can only be assigned in the first static block.
+        ThirdBlock.val = 2u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'val'. Static const attributes can only be assigned in the first static block.
+        ThirdBlock.val = 3u32
+    }
+}
+
+// Test 3: Static const in static method
+type InStaticMethod = class {
+    let static const value: u32
+
+    static {
+        InStaticMethod.value = 42u32
+    }
+
+    static fn trySet() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'value'. Static const attributes can only be assigned in the first static block.
+        InStaticMethod.value = 99u32
+    }
+}
+
+// Test 4: Static const in instance method
+type InInstanceMethod = class {
+    let static const config: u32
+
+    static {
+        InInstanceMethod.config = 10u32
+    }
+
+    fn trySet() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'config'. Static const attributes can only be assigned in the first static block.
+        InInstanceMethod.config = 20u32
+    }
+}
+
+// Test 5: Static const in constructor (init) — init is NOT a static block
+type InConstructor = class {
+    let static const maxInstances: u32
+
+    static {
+        InConstructor.maxInstances = 5u32
+    }
+
+    fn init() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'maxInstances'. Static const attributes can only be assigned in the first static block.
+        InConstructor.maxInstances = 10u32
+    }
+}
+
+// Test 6: Compound assignment (+=) to static const in second static block
+type CompoundSecondBlock = class {
+    let static const total: u32
+
+    static {
+        CompoundSecondBlock.total = 100u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'total'. Static const attributes can only be assigned in the first static block.
+        CompoundSecondBlock.total += 50u32
+    }
+}
+
+// Test 7: Various compound assignments to static const in static method
+type CompoundInStaticMethod = class {
+    let static const val: u32
+
+    static {
+        CompoundInStaticMethod.val = 10u32
+    }
+
+    static fn mutations() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'val'. Static const attributes can only be assigned in the first static block.
+        CompoundInStaticMethod.val += 1u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'val'. Static const attributes can only be assigned in the first static block.
+        CompoundInStaticMethod.val -= 1u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'val'. Static const attributes can only be assigned in the first static block.
+        CompoundInStaticMethod.val *= 2u32
+    }
+}
+
+// Test 8: Compound assignment to static const in instance method
+type CompoundInInstanceMethod = class {
+    let static const counter: u32
+
+    static {
+        CompoundInInstanceMethod.counter = 0u32
+    }
+
+    fn bump() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'counter'. Static const attributes can only be assigned in the first static block.
+        CompoundInInstanceMethod.counter += 1u32
+    }
+}
+
+// Test 9: Multiple static const fields erroring in second block
+type MultipleFieldsSecondBlock = class {
+    let static const a: u32
+    let static const b: u32
+    let static const c: u32
+
+    static {
+        MultipleFieldsSecondBlock.a = 1u32
+        MultipleFieldsSecondBlock.b = 2u32
+        MultipleFieldsSecondBlock.c = 3u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'a'. Static const attributes can only be assigned in the first static block.
+        MultipleFieldsSecondBlock.a = 10u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'b'. Static const attributes can only be assigned in the first static block.
+        MultipleFieldsSecondBlock.b = 20u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'c'. Static const attributes can only be assigned in the first static block.
+        MultipleFieldsSecondBlock.c = 30u32
+    }
+}
+
+// Test 10: Class without any static block — static const can't be assigned in methods
+type NoStaticBlock = class {
+    let static const frozen: u32
+
+    static fn tryAssign() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'frozen'. Static const attributes can only be assigned in the first static block.
+        NoStaticBlock.frozen = 42u32
+    }
+
+    fn tryAssignInstance() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'frozen'. Static const attributes can only be assigned in the first static block.
+        NoStaticBlock.frozen = 42u32
+    }
+}
+
+// Test 11: Comma-separated static const declarations, error in second block
+type CommaSepErrors = class {
+    let static const x: u32, static const y: u32
+
+    static {
+        CommaSepErrors.x = 1u32
+        CommaSepErrors.y = 2u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'x'. Static const attributes can only be assigned in the first static block.
+        CommaSepErrors.x = 10u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'y'. Static const attributes can only be assigned in the first static block.
+        CommaSepErrors.y = 20u32
+    }
+}
+
+// Test 12: Static const from multiple static methods (all should error)
+type MultipleStaticMethods = class {
+    let static const limit: u32
+
+    static {
+        MultipleStaticMethods.limit = 100u32
+    }
+
+    static fn methodA() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'limit'. Static const attributes can only be assigned in the first static block.
+        MultipleStaticMethods.limit = 200u32
+    }
+
+    static fn methodB() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'limit'. Static const attributes can only be assigned in the first static block.
+        MultipleStaticMethods.limit = 300u32
+    }
+
+    static fn methodC() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'limit'. Static const attributes can only be assigned in the first static block.
+        MultipleStaticMethods.limit += 1u32
+    }
+}
+
+// Test 13: Generic class — static const errors in non-first static block
+type GenericErrors<T> = class {
+    let data: T
+    let static const maxItems: u32
+
+    static {
+        GenericErrors.maxItems = 256u32
+    }
+
+    static {
+        /// @Error(TCE196): Cannot assign to static const attribute 'maxItems'. Static const attributes can only be assigned in the first static block.
+        GenericErrors.maxItems = 512u32
+    }
+}
+
+// Test 14: Mix of const violations — instance const outside constructor AND static const outside first block
+type MixedConstViolations = class {
+    let const instanceVal: u32
+    let static const staticVal: u32
+
+    static {
+        MixedConstViolations.staticVal = 1u32
+    }
+
+    fn notConstructor() {
+        /// @Error(TCE191): Cannot assign to const attribute 'instanceVal'. Const attributes can only be assigned in constructors (init methods).
+        this.instanceVal = 10u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'staticVal'. Static const attributes can only be assigned in the first static block.
+        MixedConstViolations.staticVal = 20u32
+    }
+}
+
+// Test 15: Static const with local modifier — error outside first block
+type LocalStaticConst = class {
+    let local static const secret: u32
+
+    static {
+        LocalStaticConst.secret = 42u32
+    }
+
+    static fn tryModify() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'secret'. Static const attributes can only be assigned in the first static block.
+        LocalStaticConst.secret = 99u32
+    }
+}
+
+// Test 16: Static const — compound assignment in constructor (init is NOT a static block)
+type CompoundInConstructor = class {
+    let static const base: u32
+
+    static {
+        CompoundInConstructor.base = 100u32
+    }
+
+    fn init() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'base'. Static const attributes can only be assigned in the first static block.
+        CompoundInConstructor.base += 1u32
+    }
+}
+
+// Test 17: Nested function inside static method — still errors
+type NestedFnInStaticMethod = class {
+    let static const cfg: u32
+
+    static {
+        NestedFnInStaticMethod.cfg = 42u32
+    }
+
+    static fn outer() {
+        fn inner() {
+            /// @Error(TCE196): Cannot assign to static const attribute 'cfg'. Static const attributes can only be assigned in the first static block.
+            NestedFnInStaticMethod.cfg = 99u32
+        }
+        inner()
+    }
+}
+
+// Test 18: Multiple errors on the same field in the same method
+type SameFieldMultipleErrors = class {
+    let static const x: u32
+
+    static {
+        SameFieldMultipleErrors.x = 1u32
+    }
+
+    static fn badMethod() {
+        /// @Error(TCE196): Cannot assign to static const attribute 'x'. Static const attributes can only be assigned in the first static block.
+        SameFieldMultipleErrors.x = 10u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'x'. Static const attributes can only be assigned in the first static block.
+        SameFieldMultipleErrors.x = 20u32
+
+        /// @Error(TCE196): Cannot assign to static const attribute 'x'. Static const attributes can only be assigned in the first static block.
+        SameFieldMultipleErrors.x += 5u32
+    }
+}

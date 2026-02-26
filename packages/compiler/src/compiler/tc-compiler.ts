@@ -60,6 +60,7 @@ import {
     isStringLiteralType,
     isEnumType,
     isMetaClassType,
+    isNamespaceType,
     getMinArity
 } from 'type-c-language/types';
 import type {
@@ -2126,6 +2127,21 @@ export class IRGenerator {
                     const methodName = this.getReferenceName(memberRef);
                     const methodId = this.getMethodId(resolvedObjTd, methodName);
                     f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+                } else if (isNamespaceType(resolvedObjTd) && memberRef && ast.isFunctionDeclaration(memberRef)) {
+                    // Namespace function call — no namespace register
+                    let funcName = this.C(memberRef);
+                    if (memberRef.genericParameters && memberRef.genericParameters.length > 0) {
+                        const calleeType = this.typeProvider.getType(memberAccess);
+                        const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                        const parameterTypes = isFunctionType(resolvedCalleeType)
+                            ? resolvedCalleeType.parameters.map(p => p.type)
+                            : (memberRef.header?.args || []).map(p => this.typeProvider.getType(p));
+                        const inferredTypeArgs = this.resolveGenericCallTypeArgs(init, memberRef.genericParameters, parameterTypes);
+                        if (inferredTypeArgs) {
+                            funcName = this.callableRegistry.getGenericFunctionName(memberRef, inferredTypeArgs);
+                        }
+                    }
+                    f.call(dests, funcName, argRegs, argTypes, retTypes);
                 } else {
                     f.call(dests, 'unknown', argRegs, argTypes, retTypes);
                 }
@@ -2185,7 +2201,9 @@ export class IRGenerator {
                     f.call(dests, funcName, argRegs, argTypes, retTypes);
                 } else {
                     const varInfo = this.lookupVariable(this.getReferenceName(ref));
-                    if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                    if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'coroutine') {
+                        f.coroCall(dests, varInfo.register, argRegs, argTypes, retTypes);
+                    } else if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
                         f.callClosure(dests, varInfo.register, argRegs, argTypes, retTypes);
                     } else {
                         f.call(dests, 'unknown', argRegs, argTypes, retTypes);
@@ -2496,6 +2514,21 @@ export class IRGenerator {
                 const methodName = this.getReferenceName(memberRef);
                 const methodId = this.getMethodId(resolvedObjTd, methodName);
                 f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+            } else if (isNamespaceType(resolvedObjTd) && memberRef && ast.isFunctionDeclaration(memberRef)) {
+                // Namespace function call — no namespace register
+                let funcName = this.C(memberRef);
+                if (memberRef.genericParameters && memberRef.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(memberAccess);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    const parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (memberRef.header?.args || []).map(p => this.typeProvider.getType(p));
+                    const inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, memberRef.genericParameters, parameterTypes);
+                    if (inferredTypeArgs) {
+                        funcName = this.callableRegistry.getGenericFunctionName(memberRef, inferredTypeArgs);
+                    }
+                }
+                f.call(dests, funcName, argRegs, argTypes, retTypes);
             }
         } else if (ast.isQualifiedReference(callNode.expr)) {
             const ref = callNode.expr.reference?.ref;
@@ -2541,7 +2574,9 @@ export class IRGenerator {
                 f.call(dests, funcName, argRegs, argTypes, retTypes);
             } else {
                 const varInfo = this.lookupVariable(this.getReferenceName(ref));
-                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'coroutine') {
+                    f.coroCall(dests, varInfo.register, argRegs, argTypes, retTypes);
+                } else if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
                     f.callClosure(dests, varInfo.register, argRegs, argTypes, retTypes);
                 }
             }
@@ -2621,6 +2656,21 @@ export class IRGenerator {
                 const methodName = this.getReferenceName(memberRef);
                 const methodId = this.getMethodId(resolvedObjTd, methodName);
                 f.callMethod(destRegs, obj.register, methodId, argRegs, argTypes, destTypes);
+            } else if (isNamespaceType(resolvedObjTd) && memberRef && ast.isFunctionDeclaration(memberRef)) {
+                // Namespace function call — no namespace register
+                let funcName = this.C(memberRef);
+                if (memberRef.genericParameters && memberRef.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(memberAccess);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    const parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (memberRef.header?.args || []).map(p => this.typeProvider.getType(p));
+                    const inferredTypeArgs = this.resolveGenericCallTypeArgs(callNode, memberRef.genericParameters, parameterTypes);
+                    if (inferredTypeArgs) {
+                        funcName = this.callableRegistry.getGenericFunctionName(memberRef, inferredTypeArgs);
+                    }
+                }
+                f.call(destRegs, funcName, argRegs, argTypes, destTypes);
             }
         } else if (ast.isQualifiedReference(callNode.expr)) {
             const ref = callNode.expr.reference?.ref;
@@ -2646,7 +2696,9 @@ export class IRGenerator {
                 f.call(destRegs, funcName, argRegs, argTypes, destTypes);
             } else {
                 const varInfo = this.lookupVariable(this.getReferenceName(ref));
-                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
+                if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'coroutine') {
+                    f.coroCall(destRegs, varInfo.register, argRegs, argTypes, destTypes);
+                } else if (varInfo && varInfo.type.tag === 'ptr' && varInfo.type.kind === 'closure') {
                     f.callClosure(destRegs, varInfo.register, argRegs, argTypes, destTypes);
                 }
             }
@@ -4113,6 +4165,40 @@ export class IRGenerator {
                 }
                 return { register: this.tmp(), type: voidType() };
             }
+            if (isCoroutineType(resolvedMemberTd)) {
+                const fieldName = this.getReferenceName(memberRef);
+                const fieldIndex = this.getClassFieldIndex(resolvedObjTd, fieldName);
+                const coroReg = this.tmp();
+                f.classGet(coroReg, obj.register, fieldIndex, ptrType('coroutine'));
+                f.coroCall(dests, coroReg, argRegs, argTypes, retTypes);
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
+        }
+
+        // Struct/variant field with callable type — load field and call as closure/coroutine
+        if (memberRef && (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd))) {
+            const memberTd = this.getType(memberAccess);
+            const resolvedMemberTd = isReferenceType(memberTd) ? this.typeUtils.resolveIfReference(memberTd) : memberTd;
+            if (isCoroutineType(resolvedMemberTd) || isFunctionType(resolvedMemberTd)) {
+                const fieldName = this.getReferenceName(memberRef);
+                const fieldIndex = this.getStructFieldIndex(resolvedObjTd, fieldName);
+                if (isCoroutineType(resolvedMemberTd)) {
+                    const coroReg = this.tmp();
+                    f.structGet(coroReg, obj.register, fieldIndex, ptrType('coroutine'));
+                    f.coroCall(dests, coroReg, argRegs, argTypes, retTypes);
+                } else {
+                    const closureReg = this.tmp();
+                    f.structGet(closureReg, obj.register, fieldIndex, ptrType('closure'));
+                    f.callClosure(dests, closureReg, argRegs, argTypes, retTypes);
+                }
+                if (dests.length > 0) {
+                    return { register: dests[0], type: retTypes[0] };
+                }
+                return { register: this.tmp(), type: voidType() };
+            }
         }
 
         if (isMetaClassType(resolvedObjTd)) {
@@ -4218,6 +4304,26 @@ export class IRGenerator {
                 f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
             } else {
                 f.callMethod(dests, obj.register, 0, argRegs, argTypes, retTypes);
+            }
+        } else if (isNamespaceType(resolvedObjTd)) {
+            // Namespace function call — direct call without namespace register (not a runtime value)
+            if (memberRef && ast.isFunctionDeclaration(memberRef)) {
+                let funcName = this.C(memberRef);
+                if (memberRef.genericParameters && memberRef.genericParameters.length > 0) {
+                    const calleeType = this.typeProvider.getType(memberAccess);
+                    const resolvedCalleeType = isReferenceType(calleeType) ? this.typeUtils.resolveIfReference(calleeType) : calleeType;
+                    const parameterTypes = isFunctionType(resolvedCalleeType)
+                        ? resolvedCalleeType.parameters.map(p => p.type)
+                        : (memberRef.header?.args || []).map(p => this.typeProvider.getType(p));
+                    const inferredTypeArgs = this.resolveGenericCallTypeArgs(node, memberRef.genericParameters, parameterTypes);
+                    if (inferredTypeArgs) {
+                        funcName = this.callableRegistry.getGenericFunctionName(memberRef, inferredTypeArgs);
+                    }
+                }
+                f.call(dests, funcName, argRegs, argTypes, retTypes);
+            } else {
+                const methodName = memberRef ? this.getReferenceName(memberRef) : 'unknown';
+                f.call(dests, methodName, argRegs, argTypes, retTypes);
             }
         } else {
             // Fallback: treat as direct call with mangled name
@@ -4445,6 +4551,31 @@ export class IRGenerator {
             const fieldIndex = this.getClassFieldIndex(resolvedObjTd, memberName);
             this.func().classGet(temp, obj.register, fieldIndex, resultType);
             return { register: temp, type: resultType };
+        }
+
+        // Namespace member access
+        if (isNamespaceType(resolvedObjTd)) {
+            if (ast.isVariableDeclSingle(memberRef)) {
+                // Namespace constant/variable — global load
+                this.func().globalLoad(temp, this.G(memberRef), resultType);
+                return { register: temp, type: resultType };
+            }
+            if (ast.isNamespaceDecl(memberRef)) {
+                // Nested namespace — void placeholder (not a runtime value)
+                this.func().undef(temp, voidType());
+                return { register: temp, type: voidType() };
+            }
+            if (ast.isFunctionDeclaration(memberRef)) {
+                // Function reference (as value) — closure alloc
+                const funcName = this.C(memberRef);
+                this.func().closureAlloc(temp, funcName);
+                return { register: temp, type: ptrType('closure') };
+            }
+            if (ast.isTypeDeclaration(memberRef)) {
+                // Type inside namespace (enum, variant, etc.) — not a runtime value
+                this.func().undef(temp, resultType);
+                return { register: temp, type: resultType };
+            }
         }
 
         // Fallback

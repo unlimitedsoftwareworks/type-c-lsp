@@ -219,7 +219,6 @@ function strCatOp(valueType: IRType): Op {
 export function selectInstructions(
     instructions: IRInstruction[],
     regMap: RegMap,
-    pointerRegs: Set<number>,
     stringConstants: string[] = [],
     funcNameToIndex: Map<string, number> = new Map(),
     classIdToIndex: Map<string, number> = new Map(),
@@ -753,6 +752,8 @@ export function selectInstructions(
                 }
                 // CLOSURE_CALL: copies upvalues into frame->next and dispatches
                 emit(makeABC(Op.CLOSURE_CALL, closureReg, 0, 0));
+                // Write back mutated env from callee frame to closure
+                emit(makeABC(Op.CLOSURE_BACK, closureReg, 0, 0));
                 // Retrieve return values
                 for (let j = 0; j < inst.dests.length; j++) {
                     const destReg = r(regMap, inst.dests[j]);
@@ -923,8 +924,10 @@ export function selectInstructions(
             // === Closure ===
             case 'closure_alloc': {
                 const funcIdx = requireFuncIndex(inst.funcName, 'closure_alloc');
-                const offset = pool.add32(funcIdx);
-                emit(makeAD(Op.CLOSURE_ALLOC, r(regMap, inst.dest), offset));
+                const packed = (inst.offsetToArgs << 8) | (inst.envSize & 0xFF);
+                const combined = (BigInt(packed) << 32n) | BigInt(funcIdx);
+                const slot = pool.add64(combined);
+                emit(makeAD(Op.CLOSURE_ALLOC, r(regMap, inst.dest), slot));
                 break;
             }
             case 'closure_push_env': {
@@ -933,11 +936,6 @@ export function selectInstructions(
                     r(regMap, inst.closure), r(regMap, inst.value), 0));
                 break;
             }
-            case 'closure_ret':
-                emitReturnValueMoves(inst.values, inst.types);
-                emit(makeABC(Op.CLOSURE_BACK, 0, 0, 0));
-                break;
-
             // === Coroutine ===
             case 'coro_alloc': {
                 const funcIdx = requireFuncIndex(inst.funcName, 'coro_alloc');

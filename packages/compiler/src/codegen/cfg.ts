@@ -24,7 +24,7 @@ export interface BasicBlock {
 
 function isTerminator(inst: IRInstruction): boolean {
     return inst.kind === 'jmp' || inst.kind === 'br' || inst.kind === 'ret'
-        || inst.kind === 'exit' || inst.kind === 'closure_ret'
+        || inst.kind === 'exit'
         || inst.kind === 'coro_ret' || inst.kind === 'coro_yield'
         || inst.kind === 'for_init';
 }

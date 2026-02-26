@@ -515,6 +515,8 @@ export interface ClosureAllocInstruction extends Instruction {
     readonly kind: 'closure_alloc';
     readonly dest: VReg;
     readonly funcName: string;
+    readonly envSize: number;
+    readonly offsetToArgs: number;
 }
 
 export interface ClosurePushEnvInstruction extends Instruction {
@@ -522,12 +524,6 @@ export interface ClosurePushEnvInstruction extends Instruction {
     readonly closure: VReg;
     readonly value: VReg;
     readonly valueType: IRType;
-}
-
-export interface ClosureRetInstruction extends Instruction {
-    readonly kind: 'closure_ret';
-    readonly values: VReg[];
-    readonly types: IRType[];
 }
 
 // ===== Coroutine Operations =====
@@ -752,7 +748,6 @@ export type IRInstruction =
     // Closure
     | ClosureAllocInstruction
     | ClosurePushEnvInstruction
-    | ClosureRetInstruction
     // Coroutine
     | CoroAllocInstruction
     | CoroAllocFromInstruction

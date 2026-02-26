@@ -482,18 +482,13 @@ export class IRFunction {
 
     // ===== Closure Operations =====
 
-    closureAlloc(dest: VReg, funcName: string): this {
-        this.instructions.push({ kind: 'closure_alloc', dest, funcName });
+    closureAlloc(dest: VReg, funcName: string, envSize: number, offsetToArgs: number): this {
+        this.instructions.push({ kind: 'closure_alloc', dest, funcName, envSize, offsetToArgs });
         return this;
     }
 
     closurePushEnv(closure: VReg, value: VReg, valueType: IRType): this {
         this.instructions.push({ kind: 'closure_push_env', closure, value, valueType });
-        return this;
-    }
-
-    closureRet(values: VReg[] = [], types: IRType[] = []): this {
-        this.instructions.push({ kind: 'closure_ret', values, types });
         return this;
     }
 

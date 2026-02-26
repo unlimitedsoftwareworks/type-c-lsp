@@ -251,6 +251,19 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
     }
 
     private getExportedRefFromSubModule(context: ReferenceInfo): Scope {
+        // Restrict scope to the specific import's source file, not all imports.
+        // SubModule.$container is the Import that contains it.
+        const subModule = context.container;
+        if (ast.isSubModule(subModule) && ast.isImport(subModule.$container)) {
+            const uri = this.findURIForImport(subModule.$container);
+            if (uri) {
+                const uris = new Set<string>([uri]);
+                const astNodeDescriptions = this.indexManager.allElements(ast.IdentifiableReference.$type, uris).toArray();
+                return this.createScope(stream(astNodeDescriptions));
+            }
+        }
+
+        // Fallback: use all imported URIs (shouldn't normally be reached)
         const document = AstUtils.getDocument(context.container);
         const parseResult = document.parseResult.value;
         if (!ast.isModule(parseResult)) {
@@ -266,10 +279,7 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             }
         }
 
-        // Use indexManager to find all elements in the imported URIs
         const astNodeDescriptions = this.indexManager.allElements(ast.IdentifiableReference.$type, uris).toArray();
-
-        // Create a scope from the imported elements
         return this.createScope(stream(astNodeDescriptions));
     }
 
@@ -379,8 +389,8 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
                             importedModules.push(...this.getNamedImportRefsFromModule(importEntry, subModule));
                         }
                     }
-                    scopes.push(stream(importedModules));
                 }
+                scopes.push(stream(importedModules));
             }
         }
 

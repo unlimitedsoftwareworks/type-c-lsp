@@ -206,14 +206,6 @@ function serializeInstruction(inst: IRInstruction): string {
             return `    ${inst.dest}: ptr.closure = closure_alloc @${inst.funcName}`;
         case 'closure_push_env':
             return `    closure_push_env ${inst.closure} ${inst.value}: ${serializeIRType(inst.valueType)}`;
-        case 'closure_ret': {
-            if (inst.values.length === 0) return `    closure_ret`;
-            const vals = inst.values.map((v, i) =>
-                `${v}: ${serializeIRType(inst.types[i])}`
-            ).join(', ');
-            return `    closure_ret ${vals}`;
-        }
-
         // --- Coroutine ---
         case 'coro_alloc':
             return `    ${inst.dest}: ptr.coroutine = coro_alloc @${inst.funcName}`;

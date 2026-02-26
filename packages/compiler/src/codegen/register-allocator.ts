@@ -145,8 +145,6 @@ function getUsedVRegs(inst: IRInstruction): VReg[] {
             return [inst.condition];
         case 'ret':
             return [...inst.values];
-        case 'closure_ret':
-            return [...inst.values];
         case 'coro_ret':
             return [...inst.values];
         case 'coro_yield':

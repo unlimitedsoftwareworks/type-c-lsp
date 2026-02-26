@@ -120,21 +120,22 @@ export class MonomorphizationRegistry {
         decl: ast.TypeDeclaration,
         typeArgs: readonly TypeDescription[]
     ): string {
+        const qualifiedName = this.getQualifiedDeclName(decl);
         // Validate that this is actually a generic class
         if (!decl.genericParameters || decl.genericParameters.length === 0) {
             // Not a generic class - no need to register
-            return decl.name;
+            return qualifiedName;
         }
 
         // Error types are invalid monomorphization keys; skip registration.
         if (typeArgs.some(arg => this.containsErrorType(arg))) {
-            return decl.name;
+            return qualifiedName;
         }
 
         // Unresolved generic parameters (e.g. `new Array<U>()` inside a generic method)
         // are not concrete instantiations — skip registration.
         if (typeArgs.some(arg => this.containsGenericType(arg))) {
-            return decl.name;
+            return qualifiedName;
         }
 
         const key = this.makeClassKey(decl, typeArgs);
@@ -151,19 +152,38 @@ export class MonomorphizationRegistry {
     }
 
     /**
+     * Build a namespace-qualified name for a declaration by walking up the AST.
+     * E.g. a class `Data` inside `namespace Main` returns `"Main.Data"`.
+     */
+    private getQualifiedDeclName(node: ast.TypeDeclaration | ast.FunctionDeclaration): string {
+        const parts: string[] = [];
+        let current = node as ast.TypeDeclaration | ast.FunctionDeclaration | ast.NamespaceDecl | ast.Module | undefined;
+        while (current) {
+            if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current) || ast.isFunctionDeclaration(current)) {
+                parts.unshift(current.name);
+            } else if (ast.isModule(current)) {
+                break;
+            }
+            current = current.$container as typeof current;
+        }
+        return parts.join('.');
+    }
+
+    /**
      * Creates a canonical key for a class instantiation.
-     * Format: ClassName<Type1,Type2,...>
+     * Format: QualifiedClassName<Type1,Type2,...>
      */
     private makeClassKey(
         decl: ast.TypeDeclaration,
         typeArgs: readonly TypeDescription[]
     ): string {
+        const qualifiedName = this.getQualifiedDeclName(decl);
         if (typeArgs.length === 0) {
-            return decl.name;
+            return qualifiedName;
         }
         
         const typeArgStrings = typeArgs.map(t => this.canonicalizeType(t));
-        return `${decl.name}<${typeArgStrings.join(',')}>`;
+        return `${qualifiedName}<${typeArgStrings.join(',')}>`;
     }
 
     // ============================================================================
@@ -272,19 +292,20 @@ export class MonomorphizationRegistry {
         decl: ast.FunctionDeclaration,
         typeArgs: readonly TypeDescription[]
     ): string {
+        const qualifiedName = this.getQualifiedDeclName(decl);
         // Validate that this is actually a generic function
         if (!decl.genericParameters || decl.genericParameters.length === 0) {
             // Not a generic function - no need to register
-            return decl.name;
+            return qualifiedName;
         }
 
         if (typeArgs.some(arg => this.containsErrorType(arg))) {
-            return decl.name;
+            return qualifiedName;
         }
 
         // Unresolved generic parameters are not concrete — skip registration.
         if (typeArgs.some(arg => this.containsGenericType(arg))) {
-            return decl.name;
+            return qualifiedName;
         }
 
         const key = this.makeFunctionKey(decl, typeArgs);
@@ -308,7 +329,7 @@ export class MonomorphizationRegistry {
         decl: ast.FunctionDeclaration,
         typeArgs: readonly TypeDescription[]
     ): string {
-        const funcName = decl.name;
+        const funcName = this.getQualifiedDeclName(decl);
         
         if (typeArgs.length === 0) {
             return funcName;

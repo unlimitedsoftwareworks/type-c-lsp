@@ -120,7 +120,6 @@ export type {
     StrFromBytesInstruction,
     ClosureAllocInstruction,
     ClosurePushEnvInstruction,
-    ClosureRetInstruction,
     CoroAllocInstruction,
     CoroAllocFromInstruction,
     CoroStateInstruction,

@@ -160,6 +160,18 @@ export class IRGenerator {
     /** Counter for generating unique closure names */
     private closureCounter = 0;
 
+    /**
+     * When compiling impl method bodies for a specific class, tracks the class
+     * context so that field accesses and method calls on `this` (which has
+     * ImplementationType from the type provider) can be correctly lowered to
+     * class field loads/stores and direct method dispatch.
+     */
+    private currentImplClassContext?: {
+        className: string;
+        classTd: ClassTypeDescription;
+        fieldMapping: Map<string, string>;  // impl attr name → class attr name
+    };
+
     private structShapeCounter = 0;
 
     /** Maps field name string → unique numeric ID for graph coloring */
@@ -234,8 +246,8 @@ export class IRGenerator {
                     const className = this.monoMorph.mangleName(this.makeClassKey(decl, substitutions));
                     return this.getOrCreateClassUid(className);
                 } else {
-                    // Non-generic class: use declaration name directly
-                    return this.getOrCreateClassUid(decl.name);
+                    // Non-generic class: use qualified declaration name
+                    return this.getOrCreateClassUid(this.getQualifiedDeclName(decl));
                 }
             }
         }
@@ -245,6 +257,9 @@ export class IRGenerator {
     /** Maps class TypeDeclaration node → IR class name (for direct method dispatch) */
     private classNodeToIRName = new Map<ast.TypeDeclaration, string>();
     private readonly verboseIR = process.env.TYPEC_VERBOSE_IR === '1';
+
+    /** Captured upvalues for named nested functions that act as closures */
+    private namedFunctionCaptures = new Map<ast.FunctionDeclaration, CapturedUpvalue[]>();
 
     /**
      * Resolves the correct IR class name for a class type at a call site.
@@ -256,9 +271,9 @@ export class IRGenerator {
         classDecl: ast.TypeDeclaration,
         resolvedType: ClassTypeDescription
     ): string {
-        // Non-generic class: use declaration name directly
+        // Non-generic class: use qualified declaration name
         if (!classDecl.genericParameters || classDecl.genericParameters.length === 0) {
-            return classDecl.name;
+            return this.getQualifiedDeclName(classDecl);
         }
 
         // Generic class: find the matching instantiation from the registry
@@ -281,8 +296,8 @@ export class IRGenerator {
             }
         }
 
-        // Fallback: use the classNodeToIRName map (last registered) or declaration name
-        return this.classNodeToIRName.get(classDecl) || classDecl.name;
+        // Fallback: use the classNodeToIRName map (last registered) or qualified declaration name
+        return this.classNodeToIRName.get(classDecl) || this.getQualifiedDeclName(classDecl);
     }
 
     constructor(services: TypeCServices) {
@@ -1137,19 +1152,39 @@ export class IRGenerator {
         }
     }
 
+    /**
+     * Build a namespace-qualified name for a declaration by walking up the AST.
+     * E.g. a class `Data` inside `namespace Main` returns `"Main.Data"`.
+     * Top-level declarations return their bare name.
+     */
+    private getQualifiedDeclName(node: AstNode): string {
+        const parts: string[] = [];
+        let current: AstNode | undefined = node;
+        while (current) {
+            if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current)) {
+                parts.unshift((current as { name: string }).name);
+            } else if (ast.isModule(current)) {
+                break;
+            }
+            current = current.$container;
+        }
+        return parts.join('.');
+    }
+
     private makeClassKey(
         classDecl: ast.TypeDeclaration,
         substitutions: Map<string, TypeDescription>
     ): string {
+        const qualifiedName = this.getQualifiedDeclName(classDecl);
         if (substitutions.size === 0) {
-            return classDecl.name;
+            return qualifiedName;
         }
         const typeArgStrings = classDecl.genericParameters
             .map(param => {
                 const type = substitutions.get(param.name);
                 return type ? type.toString() : param.name;
             });
-        return `${classDecl.name}<${typeArgStrings.join(',')}>`;
+        return `${qualifiedName}<${typeArgStrings.join(',')}>`;
     }
 
     /**
@@ -1346,14 +1381,15 @@ export class IRGenerator {
         const classType = classDecl.definition as ast.ClassType;
         const staticMethods = classType.methods.filter(m => m.isStatic);
         if (staticMethods.length > 0) {
-            this.classNodeToIRName.set(classDecl, classDecl.name);
+            const qualifiedName = this.getQualifiedDeclName(classDecl);
+            this.classNodeToIRName.set(classDecl, qualifiedName);
             for (const method of staticMethods) {
                 if (method.method) {
-                    this.generateMethod(classDecl.name, method);
+                    this.generateMethod(qualifiedName, method);
                 }
             }
             // Also generate monomorphized versions of generic static methods
-            this.generateGenericMethodInstantiations(classDecl, classDecl.name, classDecl.name);
+            this.generateGenericMethodInstantiations(classDecl, qualifiedName, qualifiedName);
         }
     }
 
@@ -1362,14 +1398,15 @@ export class IRGenerator {
         classType: ast.ClassType
     ): void {
         const substitutions = this.getCurrentSubstitutions();
-        // Unmangled key (e.g. "Array<User<string>>") — used for monomorphization registry lookups
+        const qualifiedName = this.getQualifiedDeclName(classDecl);
+        // Unmangled key (e.g. "Main.Array<User<string>>") — used for monomorphization registry lookups
         const classKey = substitutions.size > 0
             ? this.makeClassKey(classDecl, substitutions)
-            : classDecl.name;
-        // Mangled name (e.g. "Array$User$string") — used for IR function names
+            : qualifiedName;
+        // Mangled name (e.g. "Main.Array$User$string") — used for IR function names
         const className = substitutions.size > 0
             ? this.monoMorph.mangleName(classKey)
-            : classDecl.name;
+            : qualifiedName;
 
         this.debugIR(`Generating class: ${className}`);
 
@@ -1390,9 +1427,19 @@ export class IRGenerator {
         // funcName is disambiguated (for binary function index resolution).
         const nameOccurrences = new Map<string, number>();
         let methodIdx = 0;
+
+        // Collect override method names — overrides completely shadow impl methods
+        // in the vtable, so they are used for both direct and polymorphic dispatch.
+        const overrideNames = new Set<string>();
+        for (const classMethod of classType.methods) {
+            if (classMethod.isOverride && classMethod.method) {
+                for (const name of classMethod.method.names) {
+                    overrideNames.add(name);
+                }
+            }
+        }
+
         for (const method of classTd.methods) {
-            // Generic methods are monomorphized per call site and do not have a
-            // single dispatchable target for vtable slots.
             if (method.genericParameters.length > 0) {
                 continue;
             }
@@ -1400,19 +1447,59 @@ export class IRGenerator {
             const primaryName = method.names[0] || `method_${methodIdx}`;
             const occurrence = nameOccurrences.get(primaryName) ?? 0;
             nameOccurrences.set(primaryName, occurrence + 1);
-            // Overloaded methods get unique suffix on funcName: init, init$1, etc.
             const dispatchName = occurrence === 0 ? primaryName : `${primaryName}$${occurrence}`;
             const funcName = this.monoMorph.mangleName(`${className}::${dispatchName}`);
+
+            // All class methods (including overrides) go into the vtable.
             classMethods.push({
                 methodId: this.getOrCreateMethodNameId(primaryName),
                 name: primaryName,
                 funcName: funcName
             });
-            // Store AST node → funcName mapping for use by generateMethod and call sites
+
             if (method.node) {
                 this.methodNodeToFuncName.set(method.node, funcName);
             }
             methodIdx++;
+        }
+
+        // Add methods from impl blocks to the vtable — but skip any that are
+        // shadowed by an override, since the override already occupies the slot.
+        if (classType.implementations) {
+            for (const implDecl of classType.implementations) {
+                const implTypeRef = implDecl.type;
+                const refTarget = implTypeRef.field?.ref;
+                if (!refTarget || !ast.isTypeDeclaration(refTarget)) continue;
+                const implDef = refTarget.definition;
+                if (!ast.isImplementationType(implDef)) continue;
+
+                for (const implMethod of implDef.methods) {
+                    if (!implMethod.method) continue;
+                    if (implMethod.method.genericParameters && implMethod.method.genericParameters.length > 0) continue;
+
+                    const primaryName = implMethod.method.names[0] || `method_${methodIdx}`;
+
+                    // Override completely shadows this impl method in the vtable
+                    if (overrideNames.has(primaryName)) {
+                        this.methodNodeToFuncName.set(implMethod.method, this.monoMorph.mangleName(`${className}::${primaryName}`));
+                        continue;
+                    }
+
+                    const occurrence = nameOccurrences.get(primaryName) ?? 0;
+                    nameOccurrences.set(primaryName, occurrence + 1);
+                    const dispatchName = occurrence === 0 ? primaryName : `${primaryName}$${occurrence}`;
+                    const funcName = this.monoMorph.mangleName(`${className}::${dispatchName}`);
+
+                    classMethods.push({
+                        methodId: this.getOrCreateMethodNameId(primaryName),
+                        name: primaryName,
+                        funcName: funcName
+                    });
+
+                    this.methodNodeToFuncName.set(implMethod.method, funcName);
+                    methodIdx++;
+                }
+            }
         }
 
         const classShapeId = `class_${className}`;
@@ -1438,7 +1525,7 @@ export class IRGenerator {
         // Generate methods from implementation blocks
         // Implementation methods are stored separately in classType.implementations
         // and must be generated unless shadowed by an override in the class itself
-        this.generateImplMethods(className, classType);
+        this.generateImplMethods(className, classType, overrideNames);
     }
 
     /**
@@ -1458,11 +1545,12 @@ export class IRGenerator {
         const classKey = registryClassKey ?? className;
         const methodInstantiations = this.monoMorph.getMethodInstantiations(classKey);
 
-        // Also check with the declaration name for non-generic classes
-        // (the classKey in the registry uses the declaration name)
+        // Also check with the qualified declaration name for non-generic classes
+        // (the classKey in the registry may use the qualified declaration name)
         let allInstantiations = methodInstantiations;
-        if (classDecl.name !== classKey) {
-            const extraInstantiations = this.monoMorph.getMethodInstantiations(classDecl.name);
+        const qualifiedName = this.getQualifiedDeclName(classDecl);
+        if (qualifiedName !== classKey) {
+            const extraInstantiations = this.monoMorph.getMethodInstantiations(qualifiedName);
             allInstantiations = [...methodInstantiations, ...extraInstantiations];
         }
 
@@ -1506,26 +1594,19 @@ export class IRGenerator {
 
     /**
      * Generate methods from impl blocks attached to a class.
-     * Skips methods that are overridden by the class (isOverride: true).
+     * All impl methods are generated — even those with class-level overrides,
+     * since overrides completely shadow the impl version in the vtable.
+     * Impl methods that are shadowed by overrides are skipped — the override
+     * provides the implementation for both direct and polymorphic dispatch.
      */
     private generateImplMethods(
         className: string,
-        classType: ast.ClassType
+        classType: ast.ClassType,
+        overrideNames: Set<string>
     ): void {
         if (!classType.implementations || classType.implementations.length === 0) return;
 
-        // Collect override method names from the class for shadowing check
-        const overrideNames = new Set<string>();
-        for (const classMethod of classType.methods) {
-            if (classMethod.isOverride && classMethod.method) {
-                for (const name of classMethod.method.names) {
-                    overrideNames.add(name);
-                }
-            }
-        }
-
         for (const implDecl of classType.implementations) {
-            // Resolve the impl type reference to get the ImplementationType AST node
             const implTypeRef = implDecl.type;
             const refTarget = implTypeRef.field?.ref;
 
@@ -1533,17 +1614,50 @@ export class IRGenerator {
             const implDef = refTarget.definition;
             if (!ast.isImplementationType(implDef)) continue;
 
-            // Generate each method from the impl that isn't shadowed
-            for (const implMethod of implDef.methods) {
-                if (!implMethod.method) continue;
+            const implSubstitutions = new Map<string, TypeDescription>();
+            if (refTarget.genericParameters && refTarget.genericParameters.length > 0 && implTypeRef.genericArgs) {
+                const classSubs = this.getCurrentSubstitutions();
+                refTarget.genericParameters.forEach((param, index) => {
+                    if (index < implTypeRef.genericArgs.length) {
+                        let argType = this.getType(implTypeRef.genericArgs[index]);
+                        if (classSubs.size > 0) {
+                            argType = this.typeUtils.substituteGenerics(argType, classSubs);
+                        }
+                        implSubstitutions.set(param.name, argType);
+                    }
+                });
+            }
 
-                // Check if any name of this impl method is overridden
-                const isShadowed = implMethod.method.names.some(
-                    name => overrideNames.has(name)
-                );
-                if (isShadowed) continue;
+            const fieldMapping = new Map<string, string>();
+            const implAttrs = implDef.attributes ?? [];
+            const implArgs = implDecl.args ?? [];
+            for (let i = 0; i < Math.min(implAttrs.length, implArgs.length); i++) {
+                const implAttrName = implAttrs[i].name;
+                const classAttrRef = implArgs[i]?.ref;
+                if (classAttrRef && ast.isClassAttributeDecl(classAttrRef)) {
+                    fieldMapping.set(implAttrName, classAttrRef.name);
+                }
+            }
 
-                this.generateMethod(className, implMethod);
+            const classTd = this.getType(classType as AstNode) as ClassTypeDescription;
+
+            if (implSubstitutions.size > 0) {
+                this.pushSubstitutions(implSubstitutions);
+            }
+            const prevImplContext = this.currentImplClassContext;
+            this.currentImplClassContext = { className, classTd, fieldMapping };
+            try {
+                for (const implMethod of implDef.methods) {
+                    if (!implMethod.method) continue;
+                    const methodName = implMethod.method.names[0];
+                    if (methodName && overrideNames.has(methodName)) continue;
+                    this.generateMethod(className, implMethod);
+                }
+            } finally {
+                this.currentImplClassContext = prevImplContext;
+                if (implSubstitutions.size > 0) {
+                    this.popSubstitutions();
+                }
             }
         }
     }
@@ -1851,13 +1965,28 @@ export class IRGenerator {
     }
 
     private visitFunctionDeclarationWithName(node: ast.FunctionDeclaration, funcName: string): void {
-        // Build params
+        // Detect captures for nested functions (functions declared inside other functions)
+        const isNested = this.context.currentFunction !== null;
+        let upvalues: CapturedUpvalue[] = [];
+        if (isNested) {
+            upvalues = this.collectUpvaluesForFunction(node);
+            if (upvalues.length > 0) {
+                this.namedFunctionCaptures.set(node, upvalues);
+            }
+        }
+
+        // Build params: user params first, then env params for closures
         const params: FunctionParam[] = node.header.args.map(param => ({
             name: param.name ?? '',
             type: param.type
                 ? this.convertTypeWithSubstitution(param.type)
                 : voidType()
         }));
+
+        // Add captured env params after user params (closure calling convention)
+        for (const uv of upvalues) {
+            params.push({ name: uv.name, type: uv.type });
+        }
 
         // Return types — expand tuple types into multiple returns
         const returnTypes: IRType[] = [];
@@ -1871,7 +2000,6 @@ export class IRGenerator {
                 returnTypes.push(this.convertTypeDescriptionToIR(retTd));
             }
         } else if (node.expr && ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
-            // No explicit return type but expression body is a tuple — infer return types from elements
             for (const elem of node.expr.expressions) {
                 const elemTd = this.getType(elem);
                 returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
@@ -1879,9 +2007,10 @@ export class IRGenerator {
         }
 
         const isCoroutine = node.fnType === 'cfn';
+        const isClosure = upvalues.length > 0;
         const lirFunc = this.program.createFunction(
             funcName, params, returnTypes,
-            { isCoroutine }
+            { isCoroutine, isClosure }
         );
 
         // Save and set context
@@ -1907,11 +2036,15 @@ export class IRGenerator {
             this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
         }
 
+        // Map captured env params to variables
+        for (const uv of upvalues) {
+            this.context.variables.set(uv.name, { register: uv.name, type: uv.type });
+        }
+
         // Generate body
         if (node.body) {
             this.visitBlockStatement(node.body);
         } else if (node.expr) {
-            // Handle tuple expression bodies (e.g., `fn f() = (a, b)`)
             if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
                 const values: VReg[] = [];
                 const types: IRType[] = [];
@@ -2075,7 +2208,7 @@ export class IRGenerator {
                         classDecl = classNode;
                     }
 
-                    const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                    const className = classDecl ? (this.classNodeToIRName.get(classDecl) || this.getQualifiedDeclName(classDecl)) : undefined;
                     if (className) {
                         const methodName = this.getReferenceName(memberRef);
                         let methodHeader: ast.MethodHeader | undefined;
@@ -2113,7 +2246,7 @@ export class IRGenerator {
                     const methodName = this.getReferenceName(memberRef);
                     const classNode = resolvedObjTd.node;
                     const className = classNode && ast.isTypeDeclaration(classNode)
-                        ? this.classNodeToIRName.get(classNode) || classNode.name
+                        ? this.classNodeToIRName.get(classNode) || this.getQualifiedDeclName(classNode)
                         : undefined;
                     if (className) {
                         const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -2122,6 +2255,10 @@ export class IRGenerator {
                         const methodId = this.getMethodId(resolvedObjTd, methodName);
                         f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
                     }
+                } else if (isImplementationType(resolvedObjTd) && this.currentImplClassContext && memberRef) {
+                    const methodName = this.getReferenceName(memberRef);
+                    const funcName = this.monoMorph.mangleName(`${this.currentImplClassContext.className}::${methodName}`);
+                    f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
                 } else if (isInterfaceType(resolvedObjTd) && memberRef) {
                     // Interface — vtable dispatch
                     const methodName = this.getReferenceName(memberRef);
@@ -2491,7 +2628,7 @@ export class IRGenerator {
                 } else if (classNode && ast.isTypeDeclaration(classNode)) {
                     classDecl = classNode;
                 }
-                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || this.getQualifiedDeclName(classDecl)) : undefined;
                 if (className) {
                     const methodName = this.getReferenceName(memberRef);
                     const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -2501,7 +2638,7 @@ export class IRGenerator {
                 const methodName = this.getReferenceName(memberRef);
                 const classNode = resolvedObjTd.node;
                 const className = classNode && ast.isTypeDeclaration(classNode)
-                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    ? this.classNodeToIRName.get(classNode) || this.getQualifiedDeclName(classNode)
                     : undefined;
                 if (className) {
                     const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -2510,6 +2647,10 @@ export class IRGenerator {
                     const methodId = this.getMethodId(resolvedObjTd, methodName);
                     f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
                 }
+            } else if (isImplementationType(resolvedObjTd) && this.currentImplClassContext && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const funcName = this.monoMorph.mangleName(`${this.currentImplClassContext.className}::${methodName}`);
+                f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
             } else if (isInterfaceType(resolvedObjTd) && memberRef) {
                 const methodName = this.getReferenceName(memberRef);
                 const methodId = this.getMethodId(resolvedObjTd, methodName);
@@ -2569,6 +2710,13 @@ export class IRGenerator {
                     }
                     if (inferredTypeArgs) {
                         funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
+                    }
+                }
+                const captures = this.namedFunctionCaptures.get(ref);
+                if (captures && captures.length > 0) {
+                    for (const cap of captures) {
+                        argRegs.push(cap.register);
+                        argTypes.push(cap.type);
                     }
                 }
                 f.call(dests, funcName, argRegs, argTypes, retTypes);
@@ -2633,7 +2781,7 @@ export class IRGenerator {
                 } else if (classNode && ast.isTypeDeclaration(classNode)) {
                     classDecl = classNode;
                 }
-                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+                const className = classDecl ? (this.classNodeToIRName.get(classDecl) || this.getQualifiedDeclName(classDecl)) : undefined;
                 if (className) {
                     const methodName = this.getReferenceName(memberRef);
                     const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -2643,7 +2791,7 @@ export class IRGenerator {
                 const methodName = this.getReferenceName(memberRef);
                 const classNode = resolvedObjTd.node;
                 const className = classNode && ast.isTypeDeclaration(classNode)
-                    ? this.classNodeToIRName.get(classNode) || classNode.name
+                    ? this.classNodeToIRName.get(classNode) || this.getQualifiedDeclName(classNode)
                     : undefined;
                 if (className) {
                     const funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -2652,6 +2800,10 @@ export class IRGenerator {
                     const methodId = this.getMethodId(resolvedObjTd, methodName);
                     f.callMethod(destRegs, obj.register, methodId, argRegs, argTypes, destTypes);
                 }
+            } else if (isImplementationType(resolvedObjTd) && this.currentImplClassContext && memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const funcName = this.monoMorph.mangleName(`${this.currentImplClassContext.className}::${methodName}`);
+                f.call(destRegs, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], destTypes);
             } else if (isInterfaceType(resolvedObjTd) && memberRef) {
                 const methodName = this.getReferenceName(memberRef);
                 const methodId = this.getMethodId(resolvedObjTd, methodName);
@@ -3301,8 +3453,9 @@ export class IRGenerator {
             if (overload) {
                 const left = this.visitExpression(node.left, undefined);
                 const right = this.visitExpression(node.right, undefined);
+                const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    left, overload.methodId, overload.returnType,
+                    left, overload.methodId, inferredRetTd,
                     [right.register], [right.type]
                 );
             }
@@ -3327,8 +3480,9 @@ export class IRGenerator {
         const rightTd = this.getType(node.right);
         const overload = this.resolveOperatorMethod(leftTd, op, [rightTd]);
         if (overload) {
+            const inferredRetTd = this.getType(node);
             return this.emitOperatorCall(
-                left, overload.methodId, overload.returnType,
+                left, overload.methodId, inferredRetTd,
                 [right.register], [right.type]
             );
         }
@@ -3563,8 +3717,9 @@ export class IRGenerator {
         const rhsTd = this.getType(node.right);
         const overload = this.resolveOperatorMethod(lhsTd, baseOp, [rhsTd]);
         if (overload) {
+            const inferredRetTd = this.getType(node);
             const result = this.emitOperatorCall(
-                lhsResult, overload.methodId, overload.returnType,
+                lhsResult, overload.methodId, inferredRetTd,
                 [rhsResult.register], [rhsResult.type]
             );
             this.storeBack(lhs, result);
@@ -3650,6 +3805,11 @@ export class IRGenerator {
                 } else if (isClassType(resolvedObjTd)) {
                     const fieldIndex = this.getClassFieldIndex(resolvedObjTd, this.getReferenceName(memberRef));
                     f.classSet(obj.register, fieldIndex, value.register, value.type);
+                } else if (isImplementationType(resolvedObjTd) && this.currentImplClassContext) {
+                    const implFieldName = this.getReferenceName(memberRef);
+                    const mappedName = this.currentImplClassContext.fieldMapping.get(implFieldName) ?? implFieldName;
+                    const fieldIndex = this.getClassFieldIndex(this.currentImplClassContext.classTd, mappedName);
+                    f.classSet(obj.register, fieldIndex, value.register, value.type);
                 }
             }
         } else if (ast.isIndexAccess(lhs)) {
@@ -3695,8 +3855,9 @@ export class IRGenerator {
         const operandTd = this.getType(node.expr);
         const overload = this.resolveOperatorMethod(operandTd, node.op, []);
         if (overload) {
+            const inferredRetTd = this.getType(node);
             return this.emitOperatorCall(
-                operand, overload.methodId, overload.returnType,
+                operand, overload.methodId, inferredRetTd,
                 [], []
             );
         }
@@ -3764,8 +3925,9 @@ export class IRGenerator {
             // For postfix, save original value before calling overload
             const temp = this.tmp();
             this.func().mov(temp, operand.register, operand.type);
+            const inferredRetTd = this.getType(node);
             const newResult = this.emitOperatorCall(
-                operand, overload.methodId, overload.returnType,
+                operand, overload.methodId, inferredRetTd,
                 [], []
             );
             this.storeBack(node.expr, newResult);
@@ -3846,7 +4008,16 @@ export class IRGenerator {
                 const typeArgs = node.genericArgs.map(ga => this.getType(ga));
                 funcName = this.callableRegistry.getGenericFunctionName(ref, typeArgs);
             }
-            this.func().closureAlloc(temp, funcName);
+            const captures = this.namedFunctionCaptures.get(ref);
+            if (captures && captures.length > 0) {
+                const userParamCount = ref.header.args.length;
+                this.func().closureAlloc(temp, funcName, captures.length, userParamCount);
+                for (const uv of captures) {
+                    this.func().closurePushEnv(temp, uv.register, uv.type);
+                }
+            } else {
+                this.func().closureAlloc(temp, funcName, 0, 0);
+            }
             return { register: temp, type: ptrType('closure') };
         }
 
@@ -4017,6 +4188,15 @@ export class IRGenerator {
                     }
                     funcName = this.callableRegistry.getGenericFunctionName(ref, inferredTypeArgs);
                 }
+
+                const captures = this.namedFunctionCaptures.get(ref);
+                if (captures && captures.length > 0) {
+                    for (const cap of captures) {
+                        argRegs.push(cap.register);
+                        argTypes.push(cap.type);
+                    }
+                }
+
                 const retTd = this.getType(node);
                 const retType = this.convertTypeDescriptionToIR(retTd);
                 const retTypes = retType.tag === 'void' ? [] : [retType];
@@ -4078,8 +4258,11 @@ export class IRGenerator {
             const overload = this.resolveOperatorMethod(exprTd, '()', argTds);
             if (overload) {
                 const objResult = this.visitExpression(node.expr, undefined);
+                // Use the type provider's inferred return type for the call expression,
+                // which properly resolves generics from the class's monomorphized type.
+                const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    objResult, overload.methodId, overload.returnType,
+                    objResult, overload.methodId, inferredRetTd,
                     argRegs, argTypes
                 );
             }
@@ -4212,7 +4395,7 @@ export class IRGenerator {
                 classDecl = classNode;
             }
 
-            const className = classDecl ? (this.classNodeToIRName.get(classDecl) || classDecl.name) : undefined;
+            const className = classDecl ? (this.classNodeToIRName.get(classDecl) || this.getQualifiedDeclName(classDecl)) : undefined;
             if (className && memberRef) {
                 const methodName = this.getReferenceName(memberRef);
                 let methodHeader: ast.MethodHeader | undefined;
@@ -4293,6 +4476,15 @@ export class IRGenerator {
                     const methodId = this.getMethodId(resolvedObjTd, methodName);
                     f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
                 }
+            } else {
+                f.callMethod(dests, obj.register, 0, argRegs, argTypes, retTypes);
+            }
+        } else if (isImplementationType(resolvedObjTd) && this.currentImplClassContext) {
+            // Impl method body — dispatch as if this is the class type
+            if (memberRef) {
+                const methodName = this.getReferenceName(memberRef);
+                const funcName = this.monoMorph.mangleName(`${this.currentImplClassContext.className}::${methodName}`);
+                f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
             } else {
                 f.callMethod(dests, obj.register, 0, argRegs, argTypes, retTypes);
             }
@@ -4553,6 +4745,14 @@ export class IRGenerator {
             return { register: temp, type: resultType };
         }
 
+        // Impl field access — map impl attribute name to class attribute, then load
+        if (isImplementationType(resolvedObjTd) && this.currentImplClassContext) {
+            const mappedName = this.currentImplClassContext.fieldMapping.get(memberName) ?? memberName;
+            const fieldIndex = this.getClassFieldIndex(this.currentImplClassContext.classTd, mappedName);
+            this.func().classGet(temp, obj.register, fieldIndex, resultType);
+            return { register: temp, type: resultType };
+        }
+
         // Namespace member access
         if (isNamespaceType(resolvedObjTd)) {
             if (ast.isVariableDeclSingle(memberRef)) {
@@ -4566,9 +4766,8 @@ export class IRGenerator {
                 return { register: temp, type: voidType() };
             }
             if (ast.isFunctionDeclaration(memberRef)) {
-                // Function reference (as value) — closure alloc
                 const funcName = this.C(memberRef);
-                this.func().closureAlloc(temp, funcName);
+                this.func().closureAlloc(temp, funcName, 0, 0);
                 return { register: temp, type: ptrType('closure') };
             }
             if (ast.isTypeDeclaration(memberRef)) {
@@ -4595,8 +4794,9 @@ export class IRGenerator {
             const indexTds = node.indexes.map(idx => this.getType(idx));
             const overload = this.resolveOperatorMethod(objTd, '[]', indexTds);
             if (overload) {
+                const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    obj, overload.methodId, overload.returnType,
+                    obj, overload.methodId, inferredRetTd,
                     indexResults.map(r => r.register),
                     indexResults.map(r => r.type)
                 );
@@ -4841,22 +5041,19 @@ export class IRGenerator {
             }
         }
 
-        // Call init method if the class has one (even with zero arguments)
+        // Call init method if the class has one (even with zero arguments).
+        // Always compute funcName from getClassIRName to get the correct
+        // instantiation — methodNodeToFuncName is unreliable for generic classes
+        // because the shared AST node gets overwritten by each instantiation.
         if (initResult !== undefined) {
-            // Use pre-computed function name from generateClass (handles overloads).
-            // This avoids vtable dispatch which can't distinguish overloads.
-            let funcName = this.methodNodeToFuncName.get(initResult.methodHeader);
+            let funcName: string | undefined;
+            const className = this.getClassIRName(node);
+            if (className) {
+                const suffix = initResult.overloadIndex === 0 ? 'init' : `init$${initResult.overloadIndex}`;
+                funcName = this.monoMorph.mangleName(`${className}::${suffix}`);
+            }
             if (!funcName) {
-                // Fallback: compute name directly (class may not be generated yet).
-                // NOTE: overloadIndex comes from AST classDef.methods ordering, while
-                // generateClass uses classTd.methods ordering. These must be consistent
-                // for the suffix to match. Safe in practice because both iterate the
-                // same declaration-order methods for non-inherited init overloads.
-                const className = this.getClassIRName(node);
-                if (className) {
-                    const suffix = initResult.overloadIndex === 0 ? 'init' : `init$${initResult.overloadIndex}`;
-                    funcName = this.monoMorph.mangleName(`${className}::${suffix}`);
-                }
+                funcName = this.methodNodeToFuncName.get(initResult.methodHeader);
             }
             if (!funcName) {
                 throw new Error(`Cannot resolve init method name for NewExpression`);
@@ -4880,15 +5077,13 @@ export class IRGenerator {
         // 2. Generate backing function
         const closureName = `$lambda_${this.closureCounter++}`;
 
-        // Build params: env params first, then user params
+        // Build params: user params first, then env params.
+        // This matches the closure calling convention: FN_SET_REG places
+        // user args at callee[0..M-1], then CLOSURE_CALL loads env vars
+        // at callee[M..M+N-1].
         const params: FunctionParam[] = [];
 
-        // Env params (captured upvalues)
-        for (const uv of upvalues) {
-            params.push({ name: uv.name, type: uv.type });
-        }
-
-        // User params
+        // User params first
         for (const param of node.header.args) {
             const paramType = param.type
                 ? this.convertTypeWithSubstitution(param.type)
@@ -4896,10 +5091,27 @@ export class IRGenerator {
             params.push({ name: param.name ?? '', type: paramType });
         }
 
-        // Return type
+        // Env params (captured upvalues) after user params
+        for (const uv of upvalues) {
+            params.push({ name: uv.name, type: uv.type });
+        }
+
+        // Return types — expand tuple types into multiple returns (same as regular functions)
         const returnTypes: IRType[] = [];
         if (node.header.returnType) {
-            returnTypes.push(this.convertTypeWithSubstitution(node.header.returnType));
+            const retTd = this.getType(node.header.returnType);
+            if (isTupleType(retTd)) {
+                for (const elem of retTd.elementTypes) {
+                    returnTypes.push(this.convertTypeDescriptionToIR(elem));
+                }
+            } else {
+                returnTypes.push(this.convertTypeWithSubstitution(node.header.returnType));
+            }
+        } else if (node.expr && ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+            for (const elem of node.expr.expressions) {
+                const elemTd = this.getType(elem);
+                returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
+            }
         }
 
         const closureFunc = this.program.createFunction(
@@ -4940,19 +5152,42 @@ export class IRGenerator {
             if (ast.isBlockStatement(node.body)) {
                 this.visitBlockStatement(node.body);
             } else {
-                // Expression body
-                const result = this.visitExpression(node.body as ast.Expression, undefined);
-                closureFunc.closureRet([result.register], [result.type]);
+                // Expression body — handle tuple expressions as multi-value returns
+                const bodyExpr = node.body as ast.Expression;
+                if (ast.isTupleExpression(bodyExpr) && bodyExpr.expressions.length > 1) {
+                    const values: VReg[] = [];
+                    const types: IRType[] = [];
+                    for (const elem of bodyExpr.expressions) {
+                        const r = this.visitExpression(elem, undefined);
+                        values.push(r.register);
+                        types.push(r.type);
+                    }
+                    closureFunc.ret(values, types);
+                } else {
+                    const result = this.visitExpression(bodyExpr, undefined);
+                    closureFunc.ret([result.register], [result.type]);
+                }
             }
         } else if (node.expr) {
-            const result = this.visitExpression(node.expr, undefined);
-            closureFunc.closureRet([result.register], [result.type]);
+            if (ast.isTupleExpression(node.expr) && node.expr.expressions.length > 1) {
+                const values: VReg[] = [];
+                const types: IRType[] = [];
+                for (const elem of node.expr.expressions) {
+                    const r = this.visitExpression(elem, undefined);
+                    values.push(r.register);
+                    types.push(r.type);
+                }
+                closureFunc.ret(values, types);
+            } else {
+                const result = this.visitExpression(node.expr, undefined);
+                closureFunc.ret([result.register], [result.type]);
+            }
         }
 
         // Ensure closure ends with a return (implicit void return)
         const lastClosureInst = closureFunc.instructions[closureFunc.instructions.length - 1];
-        if (!lastClosureInst || (lastClosureInst.kind !== 'closure_ret' && lastClosureInst.kind !== 'ret' && lastClosureInst.kind !== 'exit')) {
-            closureFunc.closureRet();
+        if (!lastClosureInst || (lastClosureInst.kind !== 'ret' && lastClosureInst.kind !== 'exit')) {
+            closureFunc.ret();
         }
 
         // Restore context
@@ -4965,7 +5200,8 @@ export class IRGenerator {
 
         // 3. Generate closure_alloc + push_env in enclosing function
         const closureReg = this.tmp();
-        f.closureAlloc(closureReg, closureName);
+        const userParamCount = node.header.args.length;
+        f.closureAlloc(closureReg, closureName, upvalues.length, userParamCount);
 
         for (const uv of upvalues) {
             f.closurePushEnv(closureReg, uv.register, uv.type);
@@ -4975,21 +5211,33 @@ export class IRGenerator {
     }
 
     /**
-     * Collect upvalues for a lambda by walking its body and finding references
-     * to variables from enclosing scopes.
+     * Collect captured upvalues by walking a function/lambda body and finding
+     * references to variables from enclosing scopes.
+     *
+     * Works for both lambdas and named nested functions — the caller provides
+     * the parameter names and the body AST node.
      */
-    private collectUpvalues(node: ast.LambdaExpression): CapturedUpvalue[] {
+    private collectCapturedUpvalues(paramNames: Set<string>, body: AstNode): CapturedUpvalue[] {
         const upvalues: CapturedUpvalue[] = [];
         const seen = new Set<string>();
 
-        // Get the set of parameter names (these are not upvalues)
-        const paramNames = new Set(node.header.args.map(p => p.name ?? ''));
+        // Collect top-level local declarations so we don't mistake
+        // shadowed names for captured outer variables.
+        const localNames = new Set<string>();
+        if (ast.isBlockStatement(body)) {
+            for (const stmt of body.statements) {
+                if (ast.isVariableDeclarationStatement(stmt)) {
+                    for (const decl of stmt.declarations.variables) {
+                        if (decl.name) localNames.add(decl.name);
+                    }
+                }
+                if (ast.isFunctionDeclarationStatement(stmt) && stmt.fn.name) {
+                    localNames.add(stmt.fn.name);
+                }
+            }
+        }
 
-        // Walk all QualifiedReference nodes in the lambda body
-        const body = node.body ?? node.expr;
-        if (!body) return upvalues;
-
-        const refs = AstUtils.streamAllContents(body as AstNode)
+        const refs = AstUtils.streamAllContents(body)
             .filter(ast.isQualifiedReference)
             .toArray();
 
@@ -4999,44 +5247,45 @@ export class IRGenerator {
 
             if (ast.isFunctionParameter(target) || ast.isVariableDeclSingle(target)) {
                 const name = this.getReferenceName(target);
-
-                // Skip if it's a lambda parameter
                 if (paramNames.has(name)) continue;
-
-                // Skip if already captured
+                if (localNames.has(name)) continue;
                 if (seen.has(name)) continue;
 
-                // Check if it exists in the current (enclosing) scope
                 const varInfo = this.lookupVariable(name);
                 if (varInfo) {
                     seen.add(name);
-                    upvalues.push({
-                        name,
-                        register: varInfo.register,
-                        type: varInfo.type
-                    });
+                    upvalues.push({ name, register: varInfo.register, type: varInfo.type });
                 }
             }
         }
 
-        // Also capture 'this' if used
         if (!seen.has('this')) {
-            const thisRefs = AstUtils.streamAllContents(body as AstNode)
+            const hasThis = AstUtils.streamAllContents(body)
                 .filter(ast.isThisExpression)
-                .toArray();
-            if (thisRefs.length > 0) {
+                .head() !== undefined;
+            if (hasThis) {
                 const thisInfo = this.lookupVariable('this');
                 if (thisInfo) {
-                    upvalues.push({
-                        name: 'this',
-                        register: thisInfo.register,
-                        type: thisInfo.type
-                    });
+                    upvalues.push({ name: 'this', register: thisInfo.register, type: thisInfo.type });
                 }
             }
         }
 
         return upvalues;
+    }
+
+    private collectUpvalues(node: ast.LambdaExpression): CapturedUpvalue[] {
+        const paramNames = new Set(node.header.args.map(p => p.name ?? ''));
+        const body = node.body ?? node.expr;
+        if (!body) return [];
+        return this.collectCapturedUpvalues(paramNames, body as AstNode);
+    }
+
+    private collectUpvaluesForFunction(node: ast.FunctionDeclaration): CapturedUpvalue[] {
+        const paramNames = new Set(node.header.args.map(p => p.name ?? ''));
+        const body = node.body ?? node.expr;
+        if (!body) return [];
+        return this.collectCapturedUpvalues(paramNames, body as AstNode);
     }
 
     // ============================================================================
@@ -6267,7 +6516,7 @@ export class IRGenerator {
                     });
                     return this.monoMorph.mangleName(this.makeClassKey(classDecl, substitutions));
                 } else {
-                    return classDecl.name;
+                    return this.getQualifiedDeclName(classDecl);
                 }
             }
         }

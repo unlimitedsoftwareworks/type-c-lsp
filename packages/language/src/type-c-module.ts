@@ -1,4 +1,4 @@
-import { DefaultLangiumProfiler, inject, type LangiumCoreServices, type Module } from 'langium';
+import { inject, type LangiumCoreServices, type Module } from 'langium';
 import { createDefaultModule, createDefaultSharedModule, type DefaultSharedModuleContext, type LangiumServices, type LangiumSharedServices, type PartialLangiumServices } from 'langium/lsp';
 import { TypeCTokenBuilder } from './parser/tc-token-builder.js';
 import { TypeCLexer } from './parser/tc-lexer.js';
@@ -106,7 +106,7 @@ export const TypeCSharedModule = {
         WorkspaceManager: (services: LangiumSharedServices) => new TCWorkspaceManager(services)
     },
     profilers:  {
-        LangiumProfiler: () => new DefaultLangiumProfiler(new Set(['validating']))
+        //LangiumProfiler: () => new DefaultLangiumProfiler(new Set(['validating']))
     }
 };
 

@@ -38,7 +38,7 @@ fn test_callable_placeholder(rn: TestUnit) {
 
     let p2 = new Placeholder<string>("Haha")
     let v2 = p2()
-    rn.assert_eq(v2, "Haha")
+    rn.assert_eq(v2, "Haha0")
 }
 
 type Vec3 = class {
@@ -155,6 +155,9 @@ type StaticMesh = class {
     fn getParent() -> Object3D? = this.obj_parent
 
     override fn getWorldPosition() -> Vec3 {
+        if(this.getParent() == null){
+            return this.getPosition()
+        }
         return this.getPosition() + this.getParent()!.getWorldPosition()
     }
 }

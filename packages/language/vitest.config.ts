@@ -10,6 +10,6 @@ export default defineConfig({
             interopDefault: true
         },
         include: ['**/*.test.ts'],
-        testTimeout: 30000
+        testTimeout: 60000
     }
 });

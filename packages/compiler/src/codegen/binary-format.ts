@@ -65,8 +65,6 @@
  *     numReturns:     u8
  *     flags:          u8    (bit 0=coroutine, bit 1=closure)
  *     maxReg:         u8    (highest physical register used)
- *     ptrBitmapSize:  u16   (number of bytes in pointer bitmap)
- *     ptrBitmap:      u8[]  (ceil(maxReg+1 / 8) bytes)
  *     constPool:      u32[constPoolSlots]
  *     code:           u32[codeSize]
  */
@@ -76,7 +74,7 @@ import type { IRType } from '../ir/types.js';
 // === Magic and Version ===
 
 export const BINARY_MAGIC = 0x54564243;  // "TVBC" in ASCII
-export const BINARY_VERSION = 5;
+export const BINARY_VERSION = 6;
 
 // === Type Tag Encoding ===
 
@@ -129,7 +127,6 @@ export interface CompiledFunction {
     readonly isCoroutine: boolean;
     readonly isClosure: boolean;
     readonly maxRegUsed: number;
-    readonly pointerRegs: Set<number>;
     readonly constantPool: Uint32Array;
     readonly code: number[];       // u32 bytecode words
 }
@@ -199,19 +196,6 @@ class BinaryWriter {
         }
         return result;
     }
-}
-
-// === Pointer Bitmap ===
-
-function buildPointerBitmap(pointerRegs: Set<number>, maxReg: number): Uint8Array {
-    const numBytes = Math.ceil((maxReg + 1) / 8);
-    const bitmap = new Uint8Array(numBytes);
-    for (const reg of pointerRegs) {
-        if (reg <= maxReg) {
-            bitmap[reg >> 3] |= (1 << (reg & 7));
-        }
-    }
-    return bitmap;
 }
 
 // === Main Encoding ===
@@ -314,11 +298,6 @@ export function encodeBinary(program: CompiledProgram): Uint8Array {
 
         // Max register
         w.writeU8(fn.maxRegUsed);
-
-        // Pointer bitmap
-        const bitmap = buildPointerBitmap(fn.pointerRegs, fn.maxRegUsed);
-        w.writeU16(bitmap.length);
-        w.writeBytes(bitmap);
 
         // Constant pool data (u32[])
         for (let i = 0; i < fn.constantPool.length; i++) {

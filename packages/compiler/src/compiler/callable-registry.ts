@@ -41,17 +41,26 @@ export class CallableRegistry {
         // Get the base name (from parameter or extract from node)
         const baseName = name ?? this.extractNodeName(node);
         
-        // For methods, include the class name
+        // For methods, include the namespace-qualified class name
         if (ast.isClassMethod(node)) {
             const classDecl = this.findParentClass(node);
             if (classDecl) {
-                const className = classDecl.name;
+                const className = this.getQualifiedName(classDecl);
                 const methodName = baseName;
                 const fullName = `${className}::${methodName}`;
                 return this.generateMangledName(node, fullName);
             }
         }
         
+        // For standalone functions inside namespaces, include namespace prefix
+        if (ast.isFunctionDeclaration(node)) {
+            const nsPrefix = this.getQualifiedName(node);
+            if (nsPrefix.length > 0) {
+                const fullName = `${nsPrefix}.${baseName}`;
+                return this.generateMangledName(node, fullName);
+            }
+        }
+
         // For regular functions or if we couldn't find parent class
         return this.generateMangledName(node, baseName);
     }
@@ -171,6 +180,20 @@ export class CallableRegistry {
         // Store the mapping and return the mangled name
         this.nodeMap.set(node, mangledName);
         return mangledName;
+    }
+
+    private getQualifiedName(node: AstNode): string {
+        const parts: string[] = [];
+        let current: AstNode | undefined = node;
+        while (current) {
+            if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current)) {
+                parts.unshift((current as { name: string }).name);
+            } else if (ast.isModule(current)) {
+                break;
+            }
+            current = current.$container;
+        }
+        return parts.join('.');
     }
 
     /**

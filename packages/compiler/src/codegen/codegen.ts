@@ -120,7 +120,6 @@ function compileFunction(
     const { instructions: vmInstructions, constantPool } = selectInstructions(
         flatInstructions,
         allocation.regMap,
-        allocation.pointerRegs,
         stringConstants,
         funcNameToIndex,
         classIdToIndex,
@@ -142,7 +141,6 @@ function compileFunction(
         isCoroutine: fn.isCoroutine,
         isClosure: fn.isClosure,
         maxRegUsed: allocation.maxRegUsed,
-        pointerRegs: allocation.pointerRegs,
         constantPool: constPoolEncoded,
         code,
     };

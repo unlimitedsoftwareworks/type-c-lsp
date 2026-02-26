@@ -9,6 +9,12 @@ import { describe, expect, test, beforeAll } from 'vitest';
 import { setupLanguageServices, clearFileDocuments } from './test-utils.js';
 import { ClassInstantiation, MethodInstantiation, FunctionInstantiation } from '../src/typing/monomorphization-service.js';
 
+/** Strip the document URI prefix from a qualified key (e.g. "file:///1.tc/Array<u32>" → "Array<u32>") */
+function stripUri(key: string): string {
+    const lastSlash = key.lastIndexOf('/');
+    return lastSlash >= 0 ? key.substring(lastSlash + 1) : key;
+}
+
 describe('Monomorphization Service', () => {
     const setup = setupLanguageServices();
 
@@ -36,7 +42,7 @@ describe('Monomorphization Service', () => {
         expect(stats.classCount).toBeGreaterThan(0);
         
         const allClasses = registry.getAllClassInstantiations();
-        const arrayU32 = allClasses.find((c: ClassInstantiation) => c.key === 'Array<u32>');
+        const arrayU32 = allClasses.find((c: ClassInstantiation) => stripUri(c.key) === 'Array<u32>');
         
         expect(arrayU32).toBeDefined();
         expect(arrayU32?.declaration.name).toBe('Array');
@@ -63,7 +69,7 @@ describe('Monomorphization Service', () => {
         // Should have Array<u32> and Array<string>
         expect(allClasses.length).toBeGreaterThanOrEqual(2);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Array<u32>');
         expect(keys).toContain('Array<string>');
     });
@@ -228,7 +234,7 @@ describe('Monomorphization Service', () => {
         expect(stats.functionCount).toBeGreaterThanOrEqual(2);
         
         const allFunctions = registry.getAllFunctionInstantiations();
-        const keys = allFunctions.map((f: FunctionInstantiation) => f.key).sort();
+        const keys = allFunctions.map((f: FunctionInstantiation) => stripUri(f.key)).sort();
         
         expect(keys).toContain('identity<u32>');
         expect(keys).toContain('identity<string>');
@@ -248,12 +254,12 @@ describe('Monomorphization Service', () => {
 
         const registry = setup.services.TypeC.typing.MonomorphizationRegistry;
         const allClasses = registry.getAllClassInstantiations();
-        const arrayU32 = allClasses.find((c: ClassInstantiation) => c.key === 'Array<u32>');
+        const arrayU32 = allClasses.find((c: ClassInstantiation) => stripUri(c.key) === 'Array<u32>');
         
         expect(arrayU32).toBeDefined();
         
         const mangledName = registry.mangleName(arrayU32!.key);
-        expect(mangledName).toBe('Array<u32>');
+        expect(mangledName).toContain('Array<u32>');
     });
 
     test('should handle nested generics in mangling', async () => {
@@ -360,7 +366,7 @@ describe('Monomorphization Service', () => {
         
         expect(allClasses.length).toBeGreaterThanOrEqual(2);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Map<string,u32>');
         expect(keys).toContain('Map<u32,string>');
     });
@@ -389,7 +395,7 @@ describe('Monomorphization Service', () => {
         
         expect(allClasses.length).toBeGreaterThanOrEqual(3);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Result<u32,string>');
         expect(keys).toContain('Result<string,u32>');
         expect(keys).toContain('Result<bool,string>');
@@ -422,7 +428,7 @@ describe('Monomorphization Service', () => {
         // Should have Array<u32>, Result<Array<u32>,string>, Array<Result<Array<u32>,string> >
         expect(allClasses.length).toBeGreaterThanOrEqual(3);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key);
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key));
         expect(keys).toContain('Array<u32>');
         expect(keys.some(k => k.includes('Result'))).toBe(true);
     });
@@ -572,7 +578,7 @@ describe('Monomorphization Service', () => {
         
         expect(allFunctions.length).toBeGreaterThanOrEqual(2);
         
-        const keys = allFunctions.map((f: FunctionInstantiation) => f.key).sort();
+        const keys = allFunctions.map((f: FunctionInstantiation) => stripUri(f.key)).sort();
         expect(keys).toContain('map<u32,string>');
         expect(keys).toContain('map<string,bool>');
     });
@@ -631,7 +637,7 @@ describe('Monomorphization Service', () => {
         
         // Should only register Array<u32> once despite 3 uses
         const arrayU32Count = allClasses.filter((c: ClassInstantiation) =>
-            c.key === 'Array<u32>'
+            stripUri(c.key) === 'Array<u32>'
         ).length;
         
         expect(arrayU32Count).toBe(1);
@@ -659,7 +665,7 @@ describe('Monomorphization Service', () => {
         
         // All three should resolve to the same Array<u32> instantiation
         const arrayU32Count = allClasses.filter((c: ClassInstantiation) =>
-            c.key === 'Array<u32>'
+            stripUri(c.key) === 'Array<u32>'
         ).length;
         
         expect(arrayU32Count).toBe(1);
@@ -697,7 +703,7 @@ describe('Monomorphization Service', () => {
         // Should register Option<u32>, Option<string>, Option<bool>
         expect(allClasses.length).toBeGreaterThanOrEqual(3);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Option<u32>');
         expect(keys).toContain('Option<string>');
         expect(keys).toContain('Option<bool>');
@@ -766,7 +772,7 @@ describe('Monomorphization Service', () => {
         // Should register Iterator<u32> and Iterator<string>
         expect(allClasses.length).toBeGreaterThanOrEqual(2);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Iterator<u32>');
         expect(keys).toContain('Iterator<string>');
     });
@@ -828,7 +834,7 @@ describe('Monomorphization Service', () => {
         
         expect(allClasses.length).toBeGreaterThanOrEqual(3);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key).sort();
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key)).sort();
         expect(keys).toContain('Box<u32>');
         expect(keys).toContain('Box<string>');
         expect(keys).toContain('Box<bool>');
@@ -893,7 +899,7 @@ describe('Monomorphization Service', () => {
         // Should register all 12 distinct Array<T> instantiations
         expect(allClasses.length).toBeGreaterThanOrEqual(12);
         
-        const keys = allClasses.map((c: ClassInstantiation) => c.key);
+        const keys = allClasses.map((c: ClassInstantiation) => stripUri(c.key));
         expect(keys).toContain('Array<u32>');
         expect(keys).toContain('Array<string>');
         expect(keys).toContain('Array<bool>');

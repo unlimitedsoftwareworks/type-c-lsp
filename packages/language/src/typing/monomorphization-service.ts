@@ -10,6 +10,7 @@
  * - Generic function instantiations: sort<u32>, map<string>, etc.
  */
 
+import { AstUtils } from 'langium';
 import * as ast from '../generated/ast.js';
 import {
     isArrayType,
@@ -158,15 +159,21 @@ export class MonomorphizationRegistry {
     private getQualifiedDeclName(node: ast.TypeDeclaration | ast.FunctionDeclaration): string {
         const parts: string[] = [];
         let current = node as ast.TypeDeclaration | ast.FunctionDeclaration | ast.NamespaceDecl | ast.Module | undefined;
+        let docUri = '';
         while (current) {
             if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current) || ast.isFunctionDeclaration(current)) {
                 parts.unshift(current.name);
             } else if (ast.isModule(current)) {
+                docUri = AstUtils.getDocument(current).uri.toString();
                 break;
             }
             current = current.$container as typeof current;
         }
-        return parts.join('.');
+        const qualifiedName = parts.join('.');
+        if (docUri) {
+            return qualifiedName.length > 0 ? `${docUri}/${qualifiedName}` : docUri;
+        }
+        return qualifiedName;
     }
 
     /**

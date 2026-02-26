@@ -16,9 +16,13 @@ export const generateAction = async (fileName: string, opts: GenerateOptions): P
     services.typing.TypeProvider.typeProfiler = builder.profiler.typeProvider;
 
     const {documents} = await buildWorkspace(fileName, services);
-    const profilerPath = path.join(process.cwd(), 'profiler.json');
-    await builder.profiler.writeJSON(profilerPath);
-    console.log(chalk.cyan(`Profiling data written to ${profilerPath}`));
+    try {
+        const profilerPath = path.join(process.cwd(), 'profiler.json');
+        await builder.profiler.writeJSON(profilerPath);
+        console.log(chalk.cyan(`Profiling data written to ${profilerPath}`));
+    } catch (e) {
+        console.log(chalk.red(`Failed to write profiling data: ${(e as Error).message}`));
+    }
     const allClean = documents.map(e => e.diagnostics?.filter(e => e.severity === 1)).map(e => e?.length ?? 0).filter( e => e !== 0).length === 0
 
     if(allClean) {

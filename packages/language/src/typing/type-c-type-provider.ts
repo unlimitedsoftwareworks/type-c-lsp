@@ -4028,7 +4028,7 @@ export class TypeCTypeProvider {
                     }
 
                     if (methodHeader && methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
-                        const classKey = classDeclaration.name;
+                        const classKey = this.getQualifiedDeclName(classDeclaration);
                         const methodTypeArgs = Array.from(substitutions.values());
                         if (!hasErrorTypeArgs(methodTypeArgs)) {
                             this.services.typing.MonomorphizationRegistry.registerMethodInstantiation(
@@ -5063,6 +5063,30 @@ export class TypeCTypeProvider {
      * - getFieldType(Vector3, "x") → f32
      * - getFieldType(Point2D, "y") → f32
      */
+    /**
+     * Build a URI-qualified name for a declaration by walking up the AST.
+     * Prepends the document URI so names are unique across files.
+     */
+    private getQualifiedDeclName(node: AstNode): string {
+        const parts: string[] = [];
+        let current: AstNode | undefined = node;
+        let docUri = '';
+        while (current) {
+            if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current)) {
+                parts.unshift((current as { name: string }).name);
+            } else if (ast.isModule(current)) {
+                docUri = AstUtils.getDocument(current).uri.toString();
+                break;
+            }
+            current = current.$container;
+        }
+        const qualifiedName = parts.join('.');
+        if (docUri) {
+            return qualifiedName.length > 0 ? `${docUri}/${qualifiedName}` : docUri;
+        }
+        return qualifiedName;
+    }
+
     private getFieldType(baseType: TypeDescription, fieldName: string): TypeDescription | undefined {
         // For classes: get attribute type
         if (isClassType(baseType)) {

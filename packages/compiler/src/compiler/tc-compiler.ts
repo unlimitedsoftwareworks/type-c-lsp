@@ -261,6 +261,9 @@ export class IRGenerator {
     /** Captured upvalues for named nested functions that act as closures */
     private namedFunctionCaptures = new Map<ast.FunctionDeclaration, CapturedUpvalue[]>();
 
+    /** Tracked IR name of the top-level `main` function (set during function generation) */
+    private mainFuncIRName: string | undefined;
+
     /**
      * Resolves the correct IR class name for a class type at a call site.
      * For non-generic classes, returns the declaration name.
@@ -1160,15 +1163,21 @@ export class IRGenerator {
     private getQualifiedDeclName(node: AstNode): string {
         const parts: string[] = [];
         let current: AstNode | undefined = node;
+        let docUri = '';
         while (current) {
             if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current)) {
                 parts.unshift((current as { name: string }).name);
             } else if (ast.isModule(current)) {
+                docUri = AstUtils.getDocument(current).uri.toString();
                 break;
             }
             current = current.$container;
         }
-        return parts.join('.');
+        const qualifiedName = parts.join('.');
+        if (docUri) {
+            return qualifiedName.length > 0 ? `${docUri}/${qualifiedName}` : docUri;
+        }
+        return qualifiedName;
     }
 
     private makeClassKey(
@@ -1215,16 +1224,18 @@ export class IRGenerator {
 
         // Finalize the global init function
         // If a "main" function exists, call it and use its return as exit code
-        const mainFunc = this.program.functions.find(f => f.name === 'main');
+        const mainFunc = this.mainFuncIRName
+            ? this.program.functions.find(f => f.name === this.mainFuncIRName)
+            : undefined;
         if (mainFunc && mainFunc.returnTypes.length > 0) {
             const exitReg = `%$G_exit`;
-            this.globalFunc.call([exitReg], 'main', [], [], mainFunc.returnTypes);
+            this.globalFunc.call([exitReg], mainFunc.name, [], [], mainFunc.returnTypes);
             this.globalFunc.exit(exitReg);
         } else if (mainFunc) {
             // main returns void — exit with 0
             const exitReg = `%$G_exit`;
             this.globalFunc.constInt(exitReg, 0, 'u32');
-            this.globalFunc.call([], 'main', [], [], []);
+            this.globalFunc.call([], mainFunc.name, [], [], []);
             this.globalFunc.exit(exitReg);
         } else {
             // No main — just exit 0
@@ -2060,6 +2071,9 @@ export class IRGenerator {
 
     private visitFunctionDeclaration(node: ast.FunctionDeclaration): void {
         const funcName = this.C(node);
+        if (node.name === 'main' && ast.isModule(node.$container)) {
+            this.mainFuncIRName = funcName;
+        }
         this.visitFunctionDeclarationWithName(node, funcName);
     }
 
@@ -2329,7 +2343,7 @@ export class IRGenerator {
                             if (!methodTypeArgs) {
                                 throw new Error(`Unable to resolve generic arguments for static method '${methodName}'`);
                             }
-                            const classKey = classDecl?.name || className;
+                            const classKey = classDecl ? this.getQualifiedDeclName(classDecl) : className;
                             funcName = this.callableRegistry.getGenericMethodName(classKey, methodHeader, methodTypeArgs, classDecl);
                         } else {
                             funcName = this.monoMorph.mangleName(`${className}::${methodName}`);
@@ -4524,7 +4538,7 @@ export class IRGenerator {
                     if (!methodTypeArgs) {
                         throw new Error(`Unable to resolve generic arguments for static method '${methodName}' on class '${className}'`);
                     }
-                    const classKey = classDecl?.name || className;
+                    const classKey = classDecl ? this.getQualifiedDeclName(classDecl) : className;
                     funcName = this.callableRegistry.getGenericMethodName(classKey, methodHeader, methodTypeArgs, classDecl);
                 } else {
                     funcName = this.monoMorph.mangleName(`${className}::${methodName}`);

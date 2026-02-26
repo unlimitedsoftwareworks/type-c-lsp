@@ -1,4 +1,4 @@
-import { AstNode } from "langium"
+import { AstNode, AstUtils } from "langium"
 import * as ast from 'type-c-language/ast';
 import { TypeDescription } from 'type-c-language/types';
 import { MonomorphizationRegistry } from 'type-c-language/services';
@@ -185,15 +185,21 @@ export class CallableRegistry {
     private getQualifiedName(node: AstNode): string {
         const parts: string[] = [];
         let current: AstNode | undefined = node;
+        let docUri = '';
         while (current) {
             if (ast.isTypeDeclaration(current) || ast.isNamespaceDecl(current)) {
                 parts.unshift((current as { name: string }).name);
             } else if (ast.isModule(current)) {
+                docUri = AstUtils.getDocument(current).uri.toString();
                 break;
             }
             current = current.$container;
         }
-        return parts.join('.');
+        const qualifiedName = parts.join('.');
+        if (docUri) {
+            return qualifiedName.length > 0 ? `${docUri}/${qualifiedName}` : docUri;
+        }
+        return qualifiedName;
     }
 
     /**

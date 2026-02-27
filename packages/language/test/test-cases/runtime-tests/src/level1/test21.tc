@@ -6,22 +6,24 @@ type Vec3 = class {
     let x: f32, y: f32, z: f32
 
     fn init(x: f32, y: f32, z: f32) {
-        this += {x, y, z}
+        this.{x: x, y: y, z: z}
     }
 
     fn init(v: Vec3) {
-        this += {x: v.x, y: v.y, z: v.z}
+        this.{x: v.x, y: v.y, z: v.z}
     }
 
     fn init() {
-        this.x = this.y = this.z = 0.0f
+        this.x = 0.0f
+        this.y = 0.0f
+        this.z = 0.0f
     }
 
     fn print() {
         println("Vec3: x: " + this.x + ", y: " + this.y + ", z: " + this.z)
     }
 
-    fn __add__(v: Vec3) -> Vec3 {
+    fn + (v: Vec3) -> Vec3 {
         return new Vec3(this.x + v.x, this.y + v.y, this.z + v.z)
     }
 }
@@ -64,7 +66,7 @@ fn test_vec3_addition(rn: TestUnit) {
     rn.assert_f32_eq_pre(v3.z, 9.0f, 0.00001f)
 }
 
-fn main() -> u32 {
+fn test21() -> u32 {
     let test_1 = new TestUnit("test vec3 initialization with values", "Tests Vec3 initialization with explicit values", test_vec3_initialization_with_values)
     let test_2 = new TestUnit("test vec3 default initialization", "Tests Vec3 default initialization with zero values", test_vec3_default_initialization)
     let test_3 = new TestUnit("test vec3 copy initialization", "Tests Vec3 initialization by copying another Vec3 instance", test_vec3_copy_initialization)

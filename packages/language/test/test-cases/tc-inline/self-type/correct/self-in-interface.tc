@@ -1,0 +1,29 @@
+// Self type in interface context is valid
+
+type Chainable = interface {
+    fn chain() -> Self
+    fn reset() -> Self
+}
+
+type Builder = class Chainable {
+    let count: u32
+
+    fn init() {
+        this.count = 0
+    }
+
+    fn chain() -> Self {
+        this.count = this.count + 1
+        return this
+    }
+
+    fn reset() -> Self {
+        this.count = 0
+        return this
+    }
+}
+
+fn test_self_in_interface() {
+    let b = new Builder()
+    let b2 = b.chain().chain().reset()
+}

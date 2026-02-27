@@ -1,0 +1,16 @@
+// Self type cannot be used at the top level or in free functions
+
+/// @Error(TCE250): Type 'Self' can only be used inside a class, interface, or implementation block
+fn bad_return() -> Self {
+    return 42
+}
+
+/// @Error(TCE250): Type 'Self' can only be used inside a class, interface, or implementation block
+fn bad_param(x: Self) -> u32 {
+    return 0
+}
+
+type Wrapper = struct {
+    /// @Error(TCE250): Type 'Self' can only be used inside a class, interface, or implementation block
+    value: Self
+}

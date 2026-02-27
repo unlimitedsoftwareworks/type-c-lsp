@@ -1,0 +1,7 @@
+// Self cannot be used in struct field types
+
+type BadStruct = struct {
+    /// @Error(TCE250): Type 'Self' can only be used inside a class, interface, or implementation block
+    value: Self,
+    count: u32
+}

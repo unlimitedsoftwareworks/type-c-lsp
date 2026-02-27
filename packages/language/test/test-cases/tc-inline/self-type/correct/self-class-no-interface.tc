@@ -1,0 +1,27 @@
+// Self type in a class that doesn't implement any interface
+
+type Fluent = class {
+    let count: u32
+
+    fn init() {
+        this.count = 0
+    }
+
+    fn increment() -> Self {
+        this.count = this.count + 1
+        return this
+    }
+
+    fn decrement() -> Self {
+        this.count = this.count - 1
+        return this
+    }
+
+    fn getCount() -> u32 = this.count
+}
+
+fn test_fluent_api() {
+    let f = new Fluent()
+    let f2 = f.increment().increment().decrement()
+    let c = f2.getCount()
+}

@@ -1,0 +1,46 @@
+// Stress test: Self with generics, chained through generic interface variables.
+
+type Collection<T> = interface {
+    fn add(item: T) -> Self
+    fn clear() -> Self
+    fn size() -> u32
+}
+
+type SimpleList<T> = class Collection<T> {
+    let count: u32
+
+    fn init() {
+        this.count = 0
+    }
+
+    fn add(item: T) -> Self {
+        this.count = this.count + 1
+        return this
+    }
+
+    fn clear() -> Self {
+        this.count = 0
+        return this
+    }
+
+    fn size() -> u32 = this.count
+}
+
+fn test_generic_interface_chain() {
+    // Through generic interface variable — Self → Collection<u32>
+    let list: Collection<u32> = new SimpleList<u32>()
+    let list2 = list.add(1).add(2).add(3)
+    let s = list2.size()
+
+    // Through generic interface variable with string
+    let strList: Collection<string> = new SimpleList<string>()
+    let strList2 = strList.add("a").add("b").clear()
+    let s2 = strList2.size()
+}
+
+fn test_generic_class_single() {
+    // Through class variable — single call (not chained)
+    let list = new SimpleList<u32>()
+    let list2 = list.add(42)
+    let s = list2.size()
+}

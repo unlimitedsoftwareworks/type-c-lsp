@@ -1,0 +1,49 @@
+// Stress test: Self methods accessed and chained through interface-typed variables.
+// This tests that Self is substituted to the interface type when the variable
+// is interface-typed, enabling method chains on the result.
+
+type Chainable = interface {
+    fn chain() -> Self
+    fn reset() -> Self
+    fn getValue() -> u32
+}
+
+type Counter = class Chainable {
+    let count: u32
+
+    fn init() {
+        this.count = 0
+    }
+
+    fn chain() -> Self {
+        this.count = this.count + 1
+        return this
+    }
+
+    fn reset() -> Self {
+        this.count = 0
+        return this
+    }
+
+    fn getValue() -> u32 = this.count
+}
+
+fn test_interface_chain() {
+    // Access through interface-typed variable: Self → Chainable
+    let c: Chainable = new Counter()
+    let c2 = c.chain()
+    let c3 = c2.chain()
+    let c4 = c3.reset()
+    let val = c4.getValue()
+
+    // Full chain through interface variable
+    let v = c.chain().chain().chain().reset().getValue()
+}
+
+fn test_class_chain() {
+    // Access through class-typed variable: Self → Counter class type
+    let c = new Counter()
+    let c2 = c.chain()
+    let c3 = c2.chain().reset()
+    let val = c3.getValue()
+}

@@ -87,6 +87,7 @@ export enum TypeKind {
     Prototype = 'prototype',       // Built-in prototype methods
     Namespace = 'namespace',       // Namespace type
     FFI = 'ffi',                  // External FFI declaration
+    Self = 'self',                // Self type (resolved to host class in impl/class context)
     
     // Meta types
     Error = 'error',              // Type error sentinel
@@ -310,6 +311,11 @@ export interface ImplementationTypeDescription extends TypeDescription {
     readonly attributes: readonly AttributeType[];
     readonly methods: readonly MethodType[];
     readonly targetTypes: TypeDescription[]; // The type this impl is for
+}
+
+export interface SelfTypeDescription extends TypeDescription {
+    readonly kind: TypeKind.Self;
+    readonly targetTypes: readonly TypeDescription[];
 }
 
 // ============================================================================
@@ -549,6 +555,10 @@ export function isMetaClassType(type: TypeDescription): type is MetaClassTypeDes
 
 export function isImplementationType(type: TypeDescription): type is ImplementationTypeDescription {
     return type.kind === TypeKind.Implementation;
+}
+
+export function isSelfType(type: TypeDescription): type is SelfTypeDescription {
+    return type.kind === TypeKind.Self;
 }
 
 export function isFunctionType(type: TypeDescription): type is FunctionTypeDescription {

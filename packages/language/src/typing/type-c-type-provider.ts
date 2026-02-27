@@ -32,6 +32,7 @@ import {
     isFunctionType,
     isGenericType,
     isImplementationType,
+    isInterfaceType,
     isJoinType,
     isMetaClassType,
     isMetaEnumType,
@@ -1193,6 +1194,7 @@ export class TypeCTypeProvider {
         if (ast.isInterfaceType(node)) return this.inferInterfaceType(node);
         if (ast.isClassType(node)) return this.inferClassType(node);
         if (ast.isImplementationType(node)) return this.inferImplementationType(node);
+        if (ast.isSelfType(node)) return this.inferSelfType(node);
         if (ast.isFunctionType(node)) return this.inferFunctionType(node);
         if (ast.isCoroutineType(node)) return this.inferCoroutineType(node);
         if (ast.isReferenceType(node)) return this.inferReferenceType(node);
@@ -2944,9 +2946,15 @@ export class TypeCTypeProvider {
         const interfaceType = this.typeUtils.asInterfaceType(resolvedLhs);
 
         if (!classType && !interfaceType) {
-            // Not a class or interface, no operator overload possible
             return undefined;
         }
+
+        // Add Self → LHS type to generic substitutions so Self in return types
+        // is properly resolved (including when nested inside other types)
+        if (!genericSubstitutions) {
+            genericSubstitutions = new Map();
+        }
+        genericSubstitutions.set('Self', resolvedLhs);
 
         // Collect all methods with the operator name
         // Track per-method impl substitutions for generic impl operator methods
@@ -3029,7 +3037,7 @@ export class TypeCTypeProvider {
             if (implSubs && implSubs.size > 0) {
                 returnType = this.typeUtils.substituteGenerics(returnType, implSubs);
             }
-            // Then apply class-level substitutions
+            // Then apply class-level substitutions (includes Self → LHS type)
             if (genericSubstitutions && genericSubstitutions.size > 0) {
                 returnType = this.typeUtils.substituteGenerics(returnType, genericSubstitutions);
             }
@@ -3294,6 +3302,15 @@ export class TypeCTypeProvider {
                 );
                 genericSubstitutions = this.buildGenericSubstitutions(tempRef);
             }
+        }
+
+        // Add Self → baseType substitution for types that support Self.
+        // This ensures Self is resolved in all member access paths uniformly.
+        if (isClassType(baseType) || isInterfaceType(baseType) || isImplementationType(baseType)) {
+            if (!genericSubstitutions) {
+                genericSubstitutions = new Map();
+            }
+            genericSubstitutions.set('Self', baseType);
         }
 
         // Variable to hold the resolved member type
@@ -3622,8 +3639,6 @@ export class TypeCTypeProvider {
 
             const method = findMethodInInterface(baseInterface);
             if (method) {
-                // Convert method to function type for return
-                // The method already has substituted types (e.g., return type is `string`, not `T`)
                 memberType = this.typeFactory.createFunctionType(
                     method.parameters,
                     method.returnType,
@@ -3631,6 +3646,10 @@ export class TypeCTypeProvider {
                     method.genericParameters,
                     targetRef
                 );
+                // Apply Self → interfaceType (and any other generic substitutions)
+                if (genericSubstitutions && genericSubstitutions.size > 0) {
+                    memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                }
             }
         }
 
@@ -4924,6 +4943,42 @@ export class TypeCTypeProvider {
         return this.typeFactory.createErrorType('this outside of class or impl', undefined, node);
     }
 
+    private inferSelfType(node: ast.SelfType): TypeDescription {
+        // In all contexts, we must avoid calling getType on the containing type node
+        // because that would trigger full inference, which processes methods,
+        // encounters Self again, and causes infinite recursion.
+        // Instead, we read superTypes directly from the AST.
+
+        // In a class: Self is a placeholder carrying the class's interface targets.
+        // It resolves to the concrete class type via substituteGenerics('Self' → classType)
+        // when accessed through member access or operator resolution.
+        const classNode = AstUtils.getContainerOfType(node, ast.isClassType);
+        if (classNode) {
+            const targetTypes = classNode.superTypes?.map(st => this.getType(st)) ?? [];
+            return this.typeFactory.createSelfType(targetTypes, node);
+        }
+
+        // In an impl: Self carries the impl's target interfaces
+        const implNode = AstUtils.getContainerOfType(node, ast.isImplementationType);
+        if (implNode) {
+            const targetTypes = implNode.superTypes?.map(st => this.getType(st)) ?? [];
+            return this.typeFactory.createSelfType(targetTypes, node);
+        }
+
+        // In an interface: Self carries the interface's own supertypes
+        const interfaceNode = AstUtils.getContainerOfType(node, ast.isInterfaceType);
+        if (interfaceNode) {
+            const superTypes = interfaceNode.superTypes?.map(st => this.getType(st)) ?? [];
+            return this.typeFactory.createSelfType(superTypes, node);
+        }
+
+        return this.typeFactory.createErrorType(
+            "Type 'Self' can only be used inside a class, interface, or implementation block",
+            undefined,
+            node
+        );
+    }
+
     private inferYieldExpression(node: ast.YieldExpression): TypeDescription {
         // Yield expression type is void
         return this.typeFactory.createVoidType(node);
@@ -5090,6 +5145,12 @@ export class TypeCTypeProvider {
     private getFieldType(baseType: TypeDescription, fieldName: string): TypeDescription | undefined {
         // For classes: get attribute type
         if (isClassType(baseType)) {
+            const attribute = baseType.attributes.find(a => a.name === fieldName);
+            return attribute?.type;
+        }
+
+        // For impl types: get attribute type
+        if (isImplementationType(baseType)) {
             const attribute = baseType.attributes.find(a => a.name === fieldName);
             return attribute?.type;
         }

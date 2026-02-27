@@ -3,12 +3,14 @@ import { ErrorCode } from "../codes/errors.js";
 import * as ast from "../generated/ast.js";
 import { TypeCServices } from "../type-c-module.js";
 import {
+    ClassTypeDescription,
     isClassType,
     isImplementationType,
     isInterfaceType,
     isJoinType,
     isNullableType,
     isReferenceType,
+    isSelfType,
     isStructType,
     MethodType,
     TypeDescription
@@ -920,7 +922,7 @@ export class TypeCClassInterfaceValidator extends TypeCTypedValidation {
 
                 // Check if this interface method is implemented by the impl itself
                 const implementedByImpl = resolvedImplType.methods.some(implMethod =>
-                    this.methodMatchesInterfaceMethod(implMethod, expectedMethod)
+                    this.methodMatchesInterfaceMethod(implMethod, expectedMethod, classType)
                 );
 
                 if (implementedByImpl) {
@@ -968,7 +970,7 @@ export class TypeCClassInterfaceValidator extends TypeCTypedValidation {
 
                 // Check if any method in the class (including from other impls) provides this interface method
                 const providedByClass = allClassMethods.some(classMethod =>
-                    this.methodMatchesInterfaceMethod(classMethod, expectedMethod)
+                    this.methodMatchesInterfaceMethod(classMethod, expectedMethod, classType)
                 );
 
                 if (!providedByClass) {
@@ -998,7 +1000,8 @@ export class TypeCClassInterfaceValidator extends TypeCTypedValidation {
      */
     private methodMatchesInterfaceMethod(
         method: MethodType,
-        interfaceMethod: MethodType
+        interfaceMethod: MethodType,
+        classType?: ClassTypeDescription
     ): boolean {
         // Check if method has any name that matches the interface method
         const hasCommonName = method.names.some((name: string) =>
@@ -1015,8 +1018,21 @@ export class TypeCClassInterfaceValidator extends TypeCTypedValidation {
             return false;
         }
 
+        // Substitute Self with the class type before comparing signatures
+        let effectiveMethod = method;
+        let effectiveInterfaceMethod = interfaceMethod;
+        if (classType) {
+            const selfSubs = new Map<string, TypeDescription>([['Self', classType]]);
+            if (isSelfType(method.returnType)) {
+                effectiveMethod = { ...method, returnType: this.typeUtils.substituteGenerics(method.returnType, selfSubs) };
+            }
+            if (isSelfType(interfaceMethod.returnType)) {
+                effectiveInterfaceMethod = { ...interfaceMethod, returnType: this.typeUtils.substituteGenerics(interfaceMethod.returnType, selfSubs) };
+            }
+        }
+
         // Check signature compatibility
-        const compatResult = this.typeUtils.isMethodImplementationCompatible(method, interfaceMethod);
+        const compatResult = this.typeUtils.isMethodImplementationCompatible(effectiveMethod, effectiveInterfaceMethod);
         return compatResult.success;
     }
 

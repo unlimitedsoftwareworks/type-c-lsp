@@ -14,6 +14,7 @@ import {
     isFloatType,
     isFunctionType,
     isGenericType,
+    isImplementationType,
     isIntegerType,
     isInterfaceType,
     isJoinType,
@@ -27,6 +28,7 @@ import {
     isVariantConstructorType,
     isVariantType,
     getMinArity,
+    MethodType,
     TypeDescription,
     TypeKind
 } from "../typing/type-c-types.js";
@@ -80,6 +82,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             ThisExpression: this.checkExpressionForErrors,
             MatchCasePattern: this.checkPatternErrors,
             ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
+            SelfType: this.checkSelfTypeContext,
         };
     }
 
@@ -132,79 +135,85 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 return;
             }
 
-            // For compound assignments (+=, -=, etc.), check if LHS class implements the operator
-            if (node.op !== '=' && isClassType(leftType)) {
-                // Extract the underlying operator: '+=' → '+', '-=' → '-', etc.
+            // For compound assignments (+=, -=, etc.), check if LHS class/interface implements the operator
+            if (node.op !== '=') {
                 const underlyingOp = node.op.substring(0, node.op.length - 1);
-                
-                // Find all methods with this operator name
-                const operatorMethods = leftType.methods.filter(m => m.names.includes(underlyingOp));
-                
-                if (operatorMethods.length === 0) {
-                    // Class doesn't implement the underlying operator
-                    const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
-                    accept('error',
-                        `Compound assignment '${node.op}' error: Class '${leftType.toString()}' does not implement operator '${underlyingOp}'`,
-                        {
-                            node,
-                            code: errorCode
+                let operatorMethods: MethodType[] = [];
+
+                if (isClassType(leftType)) {
+                    const allCompoundMethods: MethodType[] = [...leftType.methods];
+                    for (const implRef of leftType.implementations) {
+                        const resolvedImpl = this.typeUtils.resolveIfReference(implRef);
+                        if (isImplementationType(resolvedImpl)) {
+                            allCompoundMethods.push(...resolvedImpl.methods);
                         }
-                    );
-                    return;
-                }
-                
-                // Validate that there's a matching overload for the RHS type
-                const hasMatchingOverload = operatorMethods.some(method => {
-                    // Check parameter count (binary operators have 1 parameter)
-                    if (method.parameters.length !== 1) {
-                        return false;
                     }
-                    
-                    // Check if RHS type is compatible with the parameter type
-                    const paramType = method.parameters[0].type;
-                    const compatResult = this.isTypeCompatible(rightType, paramType);
-                    return compatResult.success;
-                });
-                
-                if (!hasMatchingOverload) {
-                    // Class defines the operator but not for this RHS type
-                    const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
-                    const availableOverloads = operatorMethods
-                        .map(m => `${underlyingOp}(${m.parameters.map(p => p.type.toString()).join(', ')})`)
-                        .join(' or ');
-                    accept('error',
-                        `Compound assignment '${node.op}' error: Class '${leftType.toString()}' has operator '${underlyingOp}', but none match the right operand type '${rightType.toString()}'. Available: ${availableOverloads}`,
-                        {
-                            node,
-                            code: errorCode
-                        }
-                    );
-                    return;
-                }
-                
-                // Also validate that the result type is assignable back to LHS
-                // Find the matching method to get its return type
-                const matchingMethod = operatorMethods.find(method => {
-                    if (method.parameters.length !== 1) return false;
-                    return this.isTypeCompatible(rightType, method.parameters[0].type).success;
-                });
-                
-                if (matchingMethod) {
-                    const resultType = matchingMethod.returnType;
-                    const assignableResult = this.isTypeCompatible(resultType, leftType);
-                    if (!assignableResult.success) {
-                        const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
-                        const errorMsg = assignableResult.message
-                            ? `Compound assignment '${node.op}' error: ${assignableResult.message}`
-                            : `Compound assignment '${node.op}' error: Operator '${underlyingOp}' returns '${resultType.toString()}', which is not assignable to '${leftType.toString()}'`;
-                        accept('error', errorMsg, {
-                            node,
-                            code: errorCode
-                        });
+                    operatorMethods = allCompoundMethods.filter(m => m.names.includes(underlyingOp));
+                } else {
+                    const leftIface = this.typeUtils.asInterfaceType(leftType);
+                    if (leftIface) {
+                        operatorMethods = leftIface.methods.filter(m => m.names.includes(underlyingOp));
                     }
                 }
-                
-                return;
+
+                if (isClassType(leftType) || this.typeUtils.asInterfaceType(leftType)) {
+                    if (operatorMethods.length === 0) {
+                        const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
+                        accept('error',
+                            `Compound assignment '${node.op}' error: '${leftType.toString()}' does not implement operator '${underlyingOp}'`,
+                            {
+                                node,
+                                code: errorCode
+                            }
+                        );
+                        return;
+                    }
+
+                    const hasMatchingOverload = operatorMethods.some(method => {
+                        if (method.parameters.length !== 1) {
+                            return false;
+                        }
+                        const paramType = method.parameters[0].type;
+                        return this.isTypeCompatible(rightType, paramType).success;
+                    });
+
+                    if (!hasMatchingOverload) {
+                        const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
+                        const availableOverloads = operatorMethods
+                            .map(m => `${underlyingOp}(${m.parameters.map(p => p.type.toString()).join(', ')})`)
+                            .join(' or ');
+                        accept('error',
+                            `Compound assignment '${node.op}' error: '${leftType.toString()}' has operator '${underlyingOp}', but none match the right operand type '${rightType.toString()}'. Available: ${availableOverloads}`,
+                            {
+                                node,
+                                code: errorCode
+                            }
+                        );
+                        return;
+                    }
+
+                    const matchingMethod = operatorMethods.find(method => {
+                        if (method.parameters.length !== 1) return false;
+                        return this.isTypeCompatible(rightType, method.parameters[0].type).success;
+                    });
+
+                    if (matchingMethod) {
+                        const resultType = matchingMethod.returnType;
+                        const assignableResult = this.isTypeCompatible(resultType, leftType);
+                        if (!assignableResult.success) {
+                            const errorCode = ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH;
+                            const errorMsg = assignableResult.message
+                                ? `Compound assignment '${node.op}' error: ${assignableResult.message}`
+                                : `Compound assignment '${node.op}' error: Operator '${underlyingOp}' returns '${resultType.toString()}', which is not assignable to '${leftType.toString()}'`;
+                            accept('error', errorMsg, {
+                                node,
+                                code: errorCode
+                            });
+                        }
+                    }
+
+                    return;
+                }
             }
             
             // Standard assignment validation for non-class types or plain '='
@@ -229,25 +238,28 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
         // Example: Vector + u32 → check if Vector has fn +(u32)
         // Example: Vector + string → error if no fn +(string) defined
         if (isClassType(leftType)) {
-            // Find all methods with this operator name
-            const operatorMethods = leftType.methods.filter(m => m.names.includes(node.op));
+            // Find all methods with this operator name (including from impls)
+            const allMethods: MethodType[] = [...leftType.methods];
+            for (const implRef of leftType.implementations) {
+                const resolvedImpl = this.typeUtils.resolveIfReference(implRef);
+                if (isImplementationType(resolvedImpl)) {
+                    allMethods.push(...resolvedImpl.methods);
+                }
+            }
+            const operatorMethods = allMethods.filter(m => m.names.includes(node.op));
             
             if (operatorMethods.length > 0) {
                 // Validate that there's a matching overload for the RHS type
                 const hasMatchingOverload = operatorMethods.some(method => {
-                    // Check parameter count (binary operators have 1 parameter)
                     if (method.parameters.length !== 1) {
                         return false;
                     }
-                    
-                    // Check if RHS type is compatible with the parameter type
                     const paramType = method.parameters[0].type;
                     const compatResult = this.isTypeCompatible(rightType, paramType);
                     return compatResult.success;
                 });
                 
                 if (!hasMatchingOverload) {
-                    // Class defines the operator but not for this RHS type
                     const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
                     const availableOverloads = operatorMethods
                         .map(m => `${node.op}(${m.parameters.map(p => p.type.toString()).join(', ')})`)
@@ -261,11 +273,9 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                     );
                 }
                 
-                // Whether matching or not, we're done validating (error already reported if needed)
                 return;
             }
             else {
-                // Class doesn't define the operator at all - report specific error
                 const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
                 accept('error',
                     `Binary operator '${node.op}' error: Class '${leftType.toString()}' does not implement operator '${node.op}'`,
@@ -274,6 +284,36 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                         code: errorCode
                     }
                 );
+                return;
+            }
+        }
+
+        // Check if LEFT operand is an interface with operator methods
+        const leftInterface = this.typeUtils.asInterfaceType(leftType);
+        if (leftInterface) {
+            const operatorMethods = leftInterface.methods.filter(m => m.names.includes(node.op));
+            if (operatorMethods.length > 0) {
+                const hasMatchingOverload = operatorMethods.some(method => {
+                    if (method.parameters.length !== 1) {
+                        return false;
+                    }
+                    const paramType = method.parameters[0].type;
+                    return this.isTypeCompatible(rightType, paramType).success;
+                });
+
+                if (!hasMatchingOverload) {
+                    const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
+                    const availableOverloads = operatorMethods
+                        .map(m => `${node.op}(${m.parameters.map(p => p.type.toString()).join(', ')})`)
+                        .join(' or ');
+                    accept('error',
+                        `Binary operator '${node.op}' error: Interface '${leftType.toString()}' has operator overloads, but none match the right operand type '${rightType.toString()}'. Available: ${availableOverloads}`,
+                        {
+                            node,
+                            code: errorCode
+                        }
+                    );
+                }
                 return;
             }
         }
@@ -1651,6 +1691,20 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             }
             return undefined;
         }
+
+        // For impl types: get attribute type
+        if (isImplementationType(baseType)) {
+            const attribute = baseType.attributes.find(a => a.name === fieldName);
+            if (attribute) {
+                return {
+                    type: attribute.type,
+                    isConst: attribute.isConst,
+                    isStatic: attribute.isStatic,
+                    isClass: false
+                };
+            }
+            return undefined;
+        }
         
         // For structs: get field type
         const structType = this.typeUtils.asStructType(baseType);
@@ -1687,11 +1741,12 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
         const baseType = this.typeProvider.getType(node.expr);
         const resolvedType = this.typeUtils.resolveIfReference(baseType);
         
-        // Validate base type is struct or class
+        // Validate base type is struct, class, or impl
         const isClass = isClassType(resolvedType);
+        const isImpl = isImplementationType(resolvedType);
         const structType = this.typeUtils.asStructType(resolvedType);
 
-        if (!isClass && !structType) {
+        if (!isClass && !isImpl && !structType) {
             accept('error', `Object Update Operator ".{}" requires either a struct or a class on the LHS, instead found ${baseType.toString()}`, {
                 node: node.expr,
                 code: ErrorCode.TC_INVALID_OBJ_UPDATE_LHS
@@ -2708,7 +2763,18 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
         return undefined;
     }
 
-
+    checkSelfTypeContext = (node: ast.SelfType, accept: ValidationAcceptor): void => {
+        const inClass = AstUtils.getContainerOfType(node, ast.isClassType);
+        if (inClass) return;
+        const inImpl = AstUtils.getContainerOfType(node, ast.isImplementationType);
+        if (inImpl) return;
+        const inInterface = AstUtils.getContainerOfType(node, ast.isInterfaceType);
+        if (inInterface) return;
+        accept('error', "Type 'Self' can only be used inside a class, interface, or implementation block", {
+            node,
+            code: ErrorCode.TC_SELF_TYPE_OUTSIDE_CONTEXT
+        });
+    };
 
 
 

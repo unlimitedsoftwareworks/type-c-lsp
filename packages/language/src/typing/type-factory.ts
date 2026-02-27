@@ -54,6 +54,7 @@ import {
     UnsetTypeDescription,
     VariantConstructorType,
     VariantConstructorTypeDescription,
+    SelfTypeDescription,
     VariantTypeDescription,
     VoidTypeDescription,
     isFunctionType,
@@ -485,6 +486,18 @@ function createImplementationType(
             const forStr = targetTypes.length ? ` for ${targetTypes.map(e => e.toString()).join(", ")}` : '';
             return `impl${forStr} { ... }`;
         }
+    };
+}
+
+function createSelfType(
+    targetTypes: readonly TypeDescription[] = [],
+    node?: AstNode
+): SelfTypeDescription {
+    return {
+        kind: TypeKind.Self,
+        targetTypes,
+        node,
+        toString: () => 'Self'
     };
 }
 
@@ -944,6 +957,7 @@ export class TypeCTypeFactory {
     createClassType = createClassType;
     createMetaClassType = createMetaClassType;
     createImplementationType = createImplementationType;
+    createSelfType = createSelfType;
     createMethodType = createMethodType;
     createAttributeType = createAttributeType;
     createFunctionParameterType = createFunctionParameterType;

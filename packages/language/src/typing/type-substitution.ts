@@ -16,6 +16,7 @@ import {
     isJoinType,
     isNullableType,
     isReferenceType,
+    isSelfType,
     isStructType,
     isTupleType,
     isTypeGuardType,
@@ -113,6 +114,11 @@ function substituteGenericsImpl(
     errors?: string[]
 ): TypeDescription {
     const { typeFactory } = deps;
+
+    // If it's a Self type, substitute it if a mapping exists (e.g., Self → class type)
+    if (isSelfType(type)) {
+        return substitutions.get('Self') ?? type;
+    }
 
     // If it's a generic type parameter, substitute it
     if (isGenericType(type)) {

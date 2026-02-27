@@ -1,0 +1,6 @@
+// Self cannot be used in free function body or as local variable type outside a class
+
+fn bad_local() {
+    /// @Error(TCE250): Type 'Self' can only be used inside a class, interface, or implementation block
+    let x: Self = 42
+}

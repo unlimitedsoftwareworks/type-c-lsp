@@ -228,6 +228,9 @@ export function areTypesEqual(
             }
             return areVariantTypesEqual(a, b, resolveIfReference);
 
+        case TypeKind.Self:
+            return success();
+
         // For other complex types, fall back to string comparison
         // (This is a simplified approach; real implementation would need deeper comparison)
         default:

@@ -550,6 +550,7 @@ export class IRGenerator {
                 throw new Error(
                     `Cannot lower ErrorType to IR (${type.toString()}) at ${this.getSourceLocation(type.node)}`
                 );
+            case TypeKind.Self: return ptrType('class');
             case TypeKind.Never: return voidType();
             default: return voidType();
         }
@@ -6463,10 +6464,18 @@ export class IRGenerator {
         }
 
         if (isClassType(resolvedObjTd)) {
-            // For classes, update fields on the object directly (or clone if immutable)
-            // For now, create a simple update pattern
             for (const pair of node.pairs) {
                 const fieldIndex = this.getClassFieldIndex(resolvedObjTd, pair.name);
+                const newValue = this.visitExpression(pair.expr, undefined);
+                f.classSet(obj.register, fieldIndex, newValue.register, newValue.type);
+            }
+            return obj;
+        }
+
+        if (isImplementationType(resolvedObjTd) && this.currentImplClassContext) {
+            for (const pair of node.pairs) {
+                const mappedName = this.currentImplClassContext.fieldMapping.get(pair.name) ?? pair.name;
+                const fieldIndex = this.getClassFieldIndex(this.currentImplClassContext.classTd, mappedName);
                 const newValue = this.visitExpression(pair.expr, undefined);
                 f.classSet(obj.register, fieldIndex, newValue.register, newValue.type);
             }

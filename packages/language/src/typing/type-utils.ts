@@ -38,6 +38,7 @@ import {
     isNumericType,
     isPrimitiveType,
     isReferenceType,
+    isSelfType,
     isStringEnumType,
     isStringLiteralType,
     isStructType,
@@ -346,6 +347,35 @@ export class TypeCTypeUtils {
 
         // Unset types - treat as assignable for now (they should be resolved)
         if (isUnsetType(from) || isUnsetType(to)) return success();
+
+        // Self type assignability:
+        // - Self → Self: always compatible (contextual placeholders)
+        // - ImplementationType → Self: valid (impl body returning `this` as Self)
+        // - Self → Interface/Class: valid if Self's target types satisfy the target
+        if (isSelfType(from) && isSelfType(to)) return success();
+
+        if (isSelfType(to) && isImplementationType(from)) return success();
+        if (isSelfType(to) && isClassType(from)) return success();
+
+        if (isSelfType(from)) {
+            const resolvedTo = this.resolveIfReference(to);
+            for (const targetType of from.targetTypes) {
+                const resolvedTarget = this.resolveIfReference(targetType);
+                if (this.isAssignable(resolvedTarget, resolvedTo).success) {
+                    return success();
+                }
+            }
+        }
+
+        if (isSelfType(to)) {
+            const resolvedFrom = this.resolveIfReference(from);
+            for (const targetType of to.targetTypes) {
+                const resolvedTarget = this.resolveIfReference(targetType);
+                if (this.isAssignable(resolvedFrom, resolvedTarget).success) {
+                    return success();
+                }
+            }
+        }
 
         // CRITICAL: Generic types with constraints are assignable to their constraints
         // This enables passing constrained generics to methods expecting the constraint type
@@ -852,6 +882,7 @@ export class TypeCTypeUtils {
      * substitutions and filtering out methods shadowed by class override methods.
      */
     private collectImplMethods(cls: ClassTypeDescription): MethodType[] {
+        const selfSubstitutions = new Map<string, TypeDescription>([['Self', cls]]);
         const implMethods = cls.implementations.map(implRef => {
             let implSubstitutions: Map<string, TypeDescription> | undefined;
             if (isReferenceType(implRef) && implRef.genericArgs.length > 0 && implRef.declaration.genericParameters) {
@@ -864,19 +895,21 @@ export class TypeCTypeUtils {
             }
             const impl = this.typeProvider().resolveReference(implRef);
             if (isImplementationType(impl)) {
-                if (implSubstitutions && implSubstitutions.size > 0) {
-                    return impl.methods.map(m => ({
-                        ...m,
-                        parameters: m.parameters.map(p => ({
-                            name: p.name,
-                            type: this.substituteGenerics(p.type, implSubstitutions!),
-                            isMut: p.isMut,
-                            hasDefault: p.hasDefault
-                        })),
-                        returnType: this.substituteGenerics(m.returnType, implSubstitutions!)
-                    }));
+                // Always substitute Self → class type; also apply generic substitutions if present
+                const combinedSubs = new Map(selfSubstitutions);
+                if (implSubstitutions) {
+                    for (const [k, v] of implSubstitutions) combinedSubs.set(k, v);
                 }
-                return impl.methods;
+                return impl.methods.map(m => ({
+                    ...m,
+                    parameters: m.parameters.map(p => ({
+                        name: p.name,
+                        type: this.substituteGenerics(p.type, combinedSubs),
+                        isMut: p.isMut,
+                        hasDefault: p.hasDefault
+                    })),
+                    returnType: this.substituteGenerics(m.returnType, combinedSubs)
+                }));
             }
             return [];
         }).flat();

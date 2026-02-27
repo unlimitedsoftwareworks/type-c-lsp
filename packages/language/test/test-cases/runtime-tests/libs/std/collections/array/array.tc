@@ -59,7 +59,7 @@ type Array<T> = interface {
     /**
      * @brief Returns an iterable instance to iterate over the array
      */
-    fn getIterable() -> ArrayIterator<T>
+    fn getIterator() -> ArrayIterator<T>
 
     /**
      * @brief Clears the array removing all elements
@@ -232,7 +232,7 @@ type StdArray<T> = class Array<T> {
         return coroutine iterator
     }
 
-    fn getIterable() = new ArrayIterator<T>(this)
+    fn getIterator() = new ArrayIterator<T>(this)
 
     fn clear() {
         // reset array to dereference all elements

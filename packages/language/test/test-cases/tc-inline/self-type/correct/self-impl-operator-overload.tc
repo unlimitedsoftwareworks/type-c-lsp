@@ -1,0 +1,38 @@
+// Self type in impl blocks with operator overloads
+
+type Arithmetic = interface {
+    fn +(v: Arithmetic) -> Arithmetic
+    fn -(v: Arithmetic) -> Arithmetic
+    fn getValue() -> f32
+}
+
+type DefaultArithmetic = impl Arithmetic (value: f32) {
+    fn +(v: Arithmetic) -> Self {
+        this.{value: this.value + v.getValue()}
+        return this
+    }
+
+    fn -(v: Arithmetic) -> Self {
+        this.{value: this.value - v.getValue()}
+        return this
+    }
+}
+
+type Scalar = class Arithmetic {
+    let value: f32
+
+    fn init(value: f32) {
+        this.value = value
+    }
+
+    impl DefaultArithmetic(value)
+
+    fn getValue() -> f32 = this.value
+}
+
+fn test_self_operator_overload() {
+    let a = new Scalar(10.0f)
+    let b = new Scalar(5.0f)
+    let sum = a + b
+    let diff = a - b
+}

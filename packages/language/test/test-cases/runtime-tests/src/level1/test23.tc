@@ -32,7 +32,7 @@ fn test_case_1(rn: TestUnit) {
     }
 
 
-    let arr_3: Array<String> = StdArray.create<String>(["hi", "hello", "world"])
+    let arr_3: Array<string> = StdArray.create<string>(["hi", "hello", "world"])
     let arr_3_idx: u64[] = [0, 1, 2]
 
     foreach i, v in arr_3 {

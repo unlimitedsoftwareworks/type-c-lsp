@@ -1,0 +1,34 @@
+// Self type in impl blocks with interface target
+
+type Addable = interface {
+    fn add(v: Addable) -> Addable
+    fn getVal() -> f32
+}
+
+type DefaultAdd = impl Addable (val: f32) {
+    fn add(v: Addable) -> Self {
+        this.{val: this.val + v.getVal()}
+        return this
+    }
+}
+
+type Number = class Addable {
+    let val: f32
+
+    fn init(val: f32) {
+        this.val = val
+    }
+
+    impl DefaultAdd(val)
+
+    fn getVal() -> f32 = this.val
+}
+
+fn test_self_in_impl() {
+    let a = new Number(10.0f)
+    let b = new Number(20.0f)
+    let c = a.add(b)
+
+    let iface: Addable = a
+    let d = iface.add(b)
+}

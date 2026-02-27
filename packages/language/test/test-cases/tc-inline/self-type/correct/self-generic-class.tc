@@ -1,0 +1,26 @@
+// Self type with generic classes and interfaces
+
+type Container<T> = interface {
+    fn get() -> T
+    fn withDefault(value: T) -> Self
+}
+
+type Box<T> = class Container<T> {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+
+    fn get() -> T = this.value
+
+    fn withDefault(value: T) -> Self {
+        return new Box<T>(value)
+    }
+}
+
+fn test_generic_self() {
+    let box = new Box<u32>(42)
+    let box2 = box.withDefault(100)
+    let val = box2.get()
+}

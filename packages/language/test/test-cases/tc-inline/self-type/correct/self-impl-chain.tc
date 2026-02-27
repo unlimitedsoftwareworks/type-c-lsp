@@ -1,0 +1,51 @@
+// Stress test: Self in impl methods, chained through both class and interface variables.
+// Exercises the impl-through-class member access path.
+
+type Transformable = interface {
+    fn scale(factor: f32) -> Self
+    fn translate(dx: f32, dy: f32) -> Self
+    fn getX() -> f32
+    fn getY() -> f32
+}
+
+type DefaultTransform = impl Transformable (x: f32, y: f32) {
+    fn scale(factor: f32) -> Self {
+        this.{x: this.x * factor, y: this.y * factor}
+        return this
+    }
+
+    fn translate(dx: f32, dy: f32) -> Self {
+        this.{x: this.x + dx, y: this.y + dy}
+        return this
+    }
+}
+
+type Point2D = class Transformable {
+    let x: f32, y: f32
+
+    fn init(x: f32, y: f32) {
+        this.x = x
+        this.y = y
+    }
+
+    impl DefaultTransform(x, y)
+
+    fn getX() -> f32 = this.x
+    fn getY() -> f32 = this.y
+}
+
+fn test_impl_chain_via_class() {
+    let p = new Point2D(1.0f, 2.0f)
+    // Chain impl methods through class variable
+    let p2 = p.scale(2.0f).translate(1.0f, 1.0f)
+    let x = p2.getX()
+    let y = p2.getY()
+}
+
+fn test_impl_chain_via_interface() {
+    let t: Transformable = new Point2D(1.0f, 2.0f)
+    // Chain impl methods through interface variable
+    let t2 = t.scale(3.0f).translate(5.0f, 5.0f)
+    let x = t2.getX()
+    let y = t2.getY()
+}

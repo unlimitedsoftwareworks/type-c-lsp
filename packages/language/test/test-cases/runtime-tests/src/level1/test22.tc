@@ -21,32 +21,32 @@ type Addable = interface {
     fn rset | [-]=(i: u64, v: f32) -> void // reverse set
 }
 
-type DefaultAddition = impl (x: f32, y: f32, z: f32) {
-    fn add | + (v: Addable) -> Vec3 {
+type DefaultAddition = impl Addable (x: f32, y: f32, z: f32) {
+    fn add | + (v: Addable) -> Self {
         let {x, y, z} = v.getCoords()
-        this += {x: this.x + x, y: this.y + y, z: this.z + z}
+        this.{x: this.x + x, y: this.y + y, z: this.z + z}
         return this
     }
 
-    fn sub | - (v: Addable) -> Vec3 {
+    fn sub | - (v: Addable) -> Self {
         let {x, y, z} = v.getCoords()
         this.{x: this.x - x, y: this.y - y, z: this.z - z}
         return this
     }
 
-    fn mul | * (v: Addable) -> Vec3 {
+    fn mul | * (v: Addable) -> Self {
         let {x, y, z} = v.getCoords()
         this.{x: this.x * x, y: this.y * y, z: this.z * z}
         return this
     }
 
-    fn div | / (v: Addable) -> Vec3 {
+    fn div | / (v: Addable) -> Self {
         let {x, y, z} = v.getCoords()
         this.{x: this.x / x, y: this.y / y, z: this.z / z}
         return this
     }
 
-    fn mod | % (v: Addable) -> Vec3 {
+    fn mod | % (v: Addable) -> Self {
         let {x, y, z} = v.getCoords()
         this.{x: this.x % x, y: this.y % y, z: this.z % z}
         return this
@@ -80,7 +80,7 @@ type DefaultAddition = impl (x: f32, y: f32, z: f32) {
     fn set | []=(i: u64, v: f32) -> void {
         let data = [this.x, this.y, this.z]
         data[i] = v
-        this += {x: data[0], y: data[1], z: data[2]}
+        this.{x: data[0], y: data[1], z: data[2]}
     }
 
     fn rget | [-](i: u64) -> f32 {
@@ -91,7 +91,7 @@ type DefaultAddition = impl (x: f32, y: f32, z: f32) {
     fn rset | [-]=(i: u64, v: f32) -> void {
         let data = [this.x, this.y, this.z]
         data[-i] = v
-        this += {x: data[0], y: data[1], z: data[2]}
+        this.{x: data[0], y: data[1], z: data[2]}
     }
 }
 
@@ -193,7 +193,7 @@ fn test_vec3_reverse_setting(rn: TestUnit) {
     rn.assert_f32_eq_pre(v.x, 30.0f, 0.00001f)
 }
 
-fn main() -> u32 {
+fn test22() -> u32 {
     let test_1 = new TestUnit("test vec3 addition operator", "Tests addition operator for Vec3 class", test_vec3_addition_operator)
     let test_2 = new TestUnit("test vec3 subtraction operator", "Tests subtraction operator for Vec3 class", test_vec3_subtraction_operator)
     let test_3 = new TestUnit("test vec3 multiplication operator", "Tests multiplication operator for Vec3 class", test_vec3_multiplication_operator)

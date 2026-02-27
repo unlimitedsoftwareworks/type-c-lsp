@@ -1,0 +1,51 @@
+// Stress test: operator overloads returning Self, accessed through interface variables.
+// Tests that Self in operator return types is properly substituted for both
+// class-typed and interface-typed LHS operands.
+
+type Numeric = interface {
+    fn +(v: Numeric) -> Self
+    fn -(v: Numeric) -> Self
+    fn getVal() -> f32
+}
+
+type DefaultNumeric = impl Numeric (value: f32) {
+    fn +(v: Numeric) -> Self {
+        this.{value: this.value + v.getVal()}
+        return this
+    }
+
+    fn -(v: Numeric) -> Self {
+        this.{value: this.value - v.getVal()}
+        return this
+    }
+}
+
+type Scalar = class Numeric {
+    let value: f32
+
+    fn init(value: f32) {
+        this.value = value
+    }
+
+    impl DefaultNumeric(value)
+
+    fn getVal() -> f32 = this.value
+}
+
+fn test_operator_class() {
+    let a = new Scalar(10.0f)
+    let b = new Scalar(5.0f)
+    // Through class: Self → Scalar, result should be class type
+    let sum = a + b
+    let diff = sum - b
+    let val = diff.getVal()
+}
+
+fn test_operator_interface() {
+    let a: Numeric = new Scalar(10.0f)
+    let b: Numeric = new Scalar(5.0f)
+    // Through interface: Self → Numeric, result should be interface type
+    let sum = a + b
+    let diff = sum - b
+    let val = diff.getVal()
+}

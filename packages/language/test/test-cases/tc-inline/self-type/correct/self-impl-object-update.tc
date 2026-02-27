@@ -1,0 +1,28 @@
+// Object update (.{}) works inside impl blocks on `this`
+
+type Resettable = interface {
+    fn reset() -> Resettable
+}
+
+type DefaultResettable = impl Resettable (x: f32, y: f32) {
+    fn reset() -> Self {
+        this.{x: 0.0f, y: 0.0f}
+        return this
+    }
+}
+
+type Pos2D = class Resettable {
+    let x: f32, y: f32
+
+    fn init(x: f32, y: f32) {
+        this.x = x
+        this.y = y
+    }
+
+    impl DefaultResettable(x, y)
+}
+
+fn test_object_update_impl() {
+    let p = new Pos2D(1.0f, 2.0f)
+    let p2 = p.reset()
+}

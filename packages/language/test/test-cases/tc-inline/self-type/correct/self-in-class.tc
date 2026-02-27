@@ -1,0 +1,31 @@
+// Self type in class context — methods can declare -> Self as return type
+
+type Clonable = interface {
+    fn clone() -> Clonable
+}
+
+type Point = class Clonable {
+    let x: f32, y: f32
+
+    fn init(x: f32, y: f32) {
+        this.x = x
+        this.y = y
+    }
+
+    fn clone() -> Self {
+        return new Point(this.x, this.y)
+    }
+
+    fn translate(dx: f32, dy: f32) -> Self {
+        return new Point(this.x + dx, this.y + dy)
+    }
+}
+
+fn test_self_in_class() {
+    let p = new Point(1.0f, 2.0f)
+    let p2 = p.clone()
+    let p3 = p.translate(3.0f, 4.0f)
+
+    let c: Clonable = p
+    let c2 = c.clone()
+}

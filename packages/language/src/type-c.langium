@@ -561,6 +561,7 @@ GroupType infers DataType:
     PrimeType;
 
 PrimeType infers DataType:
+    {infer SelfType} 'Self' |
     ReferenceType {infer ReferenceType} |
     PrimitiveType {infer PrimitiveType} |
     StructType {infer StructType} |

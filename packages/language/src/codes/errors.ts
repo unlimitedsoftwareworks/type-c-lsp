@@ -177,4 +177,7 @@ export enum ErrorCode {
 
     // Operator Constraint Errors (TCE240-TCE249)
     TC_OPERATOR_CONSTRAINT_NOT_SATISFIED = 'TCE240',
+
+    // Self Type Errors (TCE250-TCE259)
+    TC_SELF_TYPE_OUTSIDE_CONTEXT = 'TCE250',
 }

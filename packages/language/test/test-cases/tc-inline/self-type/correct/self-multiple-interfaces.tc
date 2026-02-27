@@ -1,0 +1,36 @@
+// Self type in impl block implementing multiple interfaces
+
+type Comparable = interface {
+    fn compareTo(other: Comparable) -> i32
+}
+
+type Printable = interface {
+    fn display() -> u32
+}
+
+type DefaultComparable = impl Comparable (rank: i32) {
+    fn compareTo(other: Comparable) -> i32 {
+        return this.rank
+    }
+}
+
+type Entity = class Comparable, Printable {
+    let rank: i32
+    let id: u32
+
+    fn init(rank: i32, id: u32) {
+        this.rank = rank
+        this.id = id
+    }
+
+    impl DefaultComparable(rank)
+
+    fn display() -> u32 = this.id
+}
+
+fn test_multiple_interfaces() {
+    let e1 = new Entity(1, 100)
+    let e2 = new Entity(2, 200)
+    let cmp = e1.compareTo(e2)
+    let disp = e1.display()
+}

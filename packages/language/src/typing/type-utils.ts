@@ -881,7 +881,7 @@ export class TypeCTypeUtils {
      * Collects all effective methods from a class's impl blocks, applying generic
      * substitutions and filtering out methods shadowed by class override methods.
      */
-    private collectImplMethods(cls: ClassTypeDescription): MethodType[] {
+    collectImplMethods(cls: ClassTypeDescription): MethodType[] {
         const selfSubstitutions = new Map<string, TypeDescription>([['Self', cls]]);
         const implMethods = cls.implementations.map(implRef => {
             let implSubstitutions: Map<string, TypeDescription> | undefined;

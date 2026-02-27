@@ -5718,9 +5718,11 @@ export class TypeCTypeProvider {
 
         let resolvedType = this.typeUtils.resolveIfReference(type);
 
-        // For classes: check if they have getIterator() method
+        // For classes: check if they have getIterator() method (direct + impl methods)
         if (isClassType(resolvedType)) {
-            const getIteratorMethod = resolvedType.methods.find(m => m.names.includes('getIterator'));
+            const implMethods = this.typeUtils.collectImplMethods(resolvedType);
+            const allMethods = [...resolvedType.methods, ...implMethods];
+            const getIteratorMethod = allMethods.find(m => m.names.includes('getIterator'));
             if (getIteratorMethod) {
                 return this.extractIteratorTypes(getIteratorMethod.returnType);
             }
@@ -5775,6 +5777,21 @@ export class TypeCTypeProvider {
 
         // Structural approach: check if it has next() -> (U, V)
         let resolvedType = this.typeUtils.resolveIfReference(iteratorType);
+
+        // For class types: check direct methods + impl methods
+        if (isClassType(resolvedType)) {
+            const implMethods = this.typeUtils.collectImplMethods(resolvedType);
+            const allMethods = [...resolvedType.methods, ...implMethods];
+            const nextMethod = allMethods.find(m => m.names.includes('next'));
+            if (nextMethod && isTupleType(nextMethod.returnType) && nextMethod.returnType.elementTypes.length === 2) {
+                return {
+                    indexType: nextMethod.returnType.elementTypes[0],
+                    valueType: nextMethod.returnType.elementTypes[1]
+                };
+            }
+        }
+
+        // For interface types (including join types)
         const interfaceType = this.typeUtils.asInterfaceType(resolvedType);
         if (interfaceType) {
             const nextMethod = interfaceType.methods.find(m => m.names.includes('next'));

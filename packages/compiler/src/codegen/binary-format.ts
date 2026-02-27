@@ -99,7 +99,7 @@ function scalarSubTag(scalar: string): number {
         case 'f32': return 8;
         case 'f64': return 9;
         case 'bool': return 10;
-        default: return 0xFF;
+        default: throw new Error(`Unknown scalar type for binary encoding: '${scalar}'`);
     }
 }
 
@@ -114,7 +114,7 @@ function ptrSubTag(kind: string): number {
         case 'variant': return 6;
         case 'interface': return 7;
         case 'ffi_handle': return 8;
-        default: return 0xFF;
+        default: throw new Error(`Unknown pointer kind for binary encoding: '${kind}'`);
     }
 }
 
@@ -202,6 +202,24 @@ class BinaryWriter {
 
 export function encodeBinary(program: CompiledProgram): Uint8Array {
     const w = new BinaryWriter();
+
+    // --- Validate header field limits ---
+    const headerLimits: [string, number][] = [
+        ['strings', program.strings.length],
+        ['globals', program.globals.length],
+        ['structs', program.structs.length],
+        ['classes', program.classes.length],
+        ['functions', program.functions.length],
+        ['entryFuncIndex', program.entryFuncIndex],
+        ['numFieldSlots', program.numFieldSlots],
+        ['numMethodSlots', program.numMethodSlots],
+        ['numMethodNames', program.numMethodNames],
+    ];
+    for (const [name, value] of headerLimits) {
+        if (value > 0xFFFF) {
+            throw new Error(`Binary header overflow: ${name} = ${value} exceeds u16 range (max 65535)`);
+        }
+    }
 
     // --- Header ---
     w.writeU32(BINARY_MAGIC);

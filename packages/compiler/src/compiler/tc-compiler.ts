@@ -3571,11 +3571,8 @@ export class IRGenerator {
             return this.visitBinaryStringLiteral(node);
         }
 
-        // Default: return undef
-        const temp = this.tmp();
-        const nodeType = this.getNodeIRType(node);
-        this.func().undef(temp, nodeType);
-        return { register: temp, type: nodeType };
+        // Default: unhandled expression type
+        throw new Error(`Unhandled expression type in IR compiler: '${node.$type}'`);
     }
 
     // ============================================================================
@@ -4521,16 +4518,11 @@ export class IRGenerator {
 
         // Check if FFI call
         const objTd = this.getType(memberAccess.expr);
-        let resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        let resolvedObjTd = this.typeUtils.resolveDeepIfReference(objTd);
 
         // Unwrap nullable for method dispatch (handles obj?.method() calls)
         if (isNullableType(resolvedObjTd)) {
-            resolvedObjTd = resolvedObjTd.baseType;
-            // Re-resolve references after unwrapping nullable
-            // (type may be NullableType<ReferenceType<ClassType>>)
-            if (isReferenceType(resolvedObjTd)) {
-                resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
-            }
+            resolvedObjTd = this.typeUtils.resolveDeepIfReference(resolvedObjTd.baseType);
         }
 
         // Variant constructor via member access (e.g., AssertionResult.Ok())
@@ -4919,7 +4911,7 @@ export class IRGenerator {
         const obj = this.visitExpression(node.expr, undefined);
         const memberName = this.getReferenceName(memberRef);
         const objTd = this.getType(node.expr);
-        let resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        let resolvedObjTd = this.typeUtils.resolveDeepIfReference(objTd);
         const resultType = this.getNodeIRType(node);
 
         // Optional chaining: obj?.field — short-circuit to null if obj is null
@@ -4937,10 +4929,7 @@ export class IRGenerator {
             f.label(accessLabel);
             // Unwrap nullable for the actual field access
             if (isNullableType(resolvedObjTd)) {
-                resolvedObjTd = resolvedObjTd.baseType;
-                if (isReferenceType(resolvedObjTd)) {
-                    resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
-                }
+                resolvedObjTd = this.typeUtils.resolveDeepIfReference(resolvedObjTd.baseType);
             }
             const innerResult = this.emitMemberAccessInner(obj, resolvedObjTd, memberRef, memberName, resultType);
             f.mov(resultReg, innerResult.register, innerResult.type);
@@ -4952,10 +4941,7 @@ export class IRGenerator {
 
         // Unwrap nullable for non-optional access too (e.g., denulled values)
         if (isNullableType(resolvedObjTd)) {
-            resolvedObjTd = resolvedObjTd.baseType;
-            if (isReferenceType(resolvedObjTd)) {
-                resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
-            }
+            resolvedObjTd = this.typeUtils.resolveDeepIfReference(resolvedObjTd.baseType);
         }
 
         return this.emitMemberAccessInner(obj, resolvedObjTd, memberRef, memberName, resultType);
@@ -5695,6 +5681,8 @@ export class IRGenerator {
             const rawPatternTd = this.getType(pattern.type);
             const patternTd = isReferenceType(rawPatternTd) ? this.typeUtils.resolveIfReference(rawPatternTd) : rawPatternTd;
             if (isVariantConstructorType(patternTd)) {
+                // Ensure variant constructor shape is declared for field coloring
+                this.getOrDeclareStructShape(patternTd);
                 // Read tag from subject
                 const tagReg = this.tmp();
                 f.structGet(tagReg, subject.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
@@ -5790,6 +5778,10 @@ export class IRGenerator {
 
             const subjectTd = this.getType(pattern.$container.$container as AstNode);
             const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+            // Ensure struct shape is declared for field coloring
+            if (isStructType(resolvedSubjectTd) || isVariantConstructorType(resolvedSubjectTd)) {
+                this.getOrDeclareStructShape(resolvedSubjectTd);
+            }
 
             for (let i = 0; i < numFields; i++) {
                 const field = pattern.fields[i];
@@ -5854,6 +5846,8 @@ export class IRGenerator {
             // bind constructor fields to pattern variables recursively
             const patternTd = this.getType(pattern.type);
             if (isVariantConstructorType(patternTd) && pattern.params) {
+                // Ensure variant constructor shape is declared for field coloring
+                this.getOrDeclareStructShape(patternTd);
                 const vcConstructor = patternTd.baseVariant.constructors.find(c => c.name === patternTd.constructorName);
                 if (!vcConstructor) {
                     throw new Error(`Variant constructor '${patternTd.constructorName}' not found in variant type`);
@@ -5893,6 +5887,8 @@ export class IRGenerator {
                         if (failLabel) {
                             const nestedTd = this.getType(nestedPattern.type);
                             if (isVariantConstructorType(nestedTd)) {
+                                // Ensure variant constructor shape is declared for field coloring
+                                this.getOrDeclareStructShape(nestedTd);
                                 const tagReg = this.tmp();
                                 f.structGet(tagReg, fieldReg, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
                                 const expectedTag = this.getVariantConstructorTagFromType(nestedTd);
@@ -5962,6 +5958,10 @@ export class IRGenerator {
             // Struct pattern: bind field variables
             const subjectTd = this.getType(pattern.$container.$container as AstNode);
             const resolvedSubjectTd = this.typeUtils.resolveIfReference(subjectTd);
+            // Ensure struct shape is declared for field coloring
+            if (isStructType(resolvedSubjectTd) || isVariantConstructorType(resolvedSubjectTd)) {
+                this.getOrDeclareStructShape(resolvedSubjectTd);
+            }
 
             for (const field of pattern.fields ?? []) {
                 if (ast.isVariablePattern(field.pattern)) {
@@ -6317,6 +6317,8 @@ export class IRGenerator {
         // Variant constructor check: <expr> is Variant.Constructor
         if (isVariantConstructorType(resolvedTarget)) {
             const vcTd = resolvedTarget as VariantConstructorTypeDescription;
+            // Ensure variant constructor shape is declared for field coloring
+            this.getOrDeclareStructShape(vcTd);
             const tagReg = this.tmp();
             f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
             const expectedTag = this.getVariantConstructorTagFromType(vcTd);
@@ -6437,6 +6439,8 @@ export class IRGenerator {
                 // Safe cast to variant constructor: check tag, return null on mismatch
                 const f = this.func();
                 const vcTd = resolvedTargetTd as VariantConstructorTypeDescription;
+                // Ensure variant constructor shape is declared for field coloring
+                this.getOrDeclareStructShape(vcTd);
                 const tagReg = this.tmp();
                 f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
                 const expectedTag = this.getVariantConstructorTagFromType(vcTd);
@@ -6458,6 +6462,8 @@ export class IRGenerator {
                 // Force cast to variant constructor: check tag, throw on mismatch
                 const f = this.func();
                 const vcTd = resolvedTargetTd as VariantConstructorTypeDescription;
+                // Ensure variant constructor shape is declared for field coloring
+                this.getOrDeclareStructShape(vcTd);
                 const tagReg = this.tmp();
                 f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
                 const expectedTag = this.getVariantConstructorTagFromType(vcTd);
@@ -6871,6 +6877,8 @@ export class IRGenerator {
 
     private getStructFieldIndex(td: TypeDescription, fieldName: string): number {
         if (isStructType(td) || isVariantConstructorType(td)) {
+            // Ensure the struct shape is declared so field coloring knows about all fields
+            this.getOrDeclareStructShape(td);
             return this.getOrCreateFieldNameId(fieldName);
         }
         return 0;

@@ -377,6 +377,16 @@ function getDefinedType(inst: IRInstruction, _vreg: VReg): IRType {
         case 'global_load': return inst.type;
         case 'widen': return { tag: 'scalar', scalar: inst.to };
         case 'narrow': return { tag: 'scalar', scalar: inst.to };
+        case 'cast': {
+            // Determine result type from cast kind (destination type)
+            switch (inst.castKind) {
+                case 'i_f': case 'u_f': case 'd_f': return { tag: 'scalar', scalar: 'f32' };
+                case 'i_d': case 'u_d': case 'f_d': return { tag: 'scalar', scalar: 'f64' };
+                case 'f_i': case 'd_i': case 'u_i': return { tag: 'scalar', scalar: 'i64' };
+                case 'f_u': case 'd_u': case 'i_u': return { tag: 'scalar', scalar: 'u64' };
+                default: return { tag: 'scalar', scalar: 'i64' };
+            }
+        }
         case 'ffi_register': return { tag: 'ptr', kind: 'ffi_handle' };
         case 'phi': return inst.type;
         case 'undef': return inst.type;

@@ -190,6 +190,7 @@ function castOp(castKind: CastKind): Op {
         case 'u_i': return Op.CAST_U_I;
         case 'f_d': return Op.CAST_F_D;
         case 'd_f': return Op.CAST_D_F;
+        default: throw new Error(`No cast opcode for ${castKind}`);
     }
 }
 
@@ -298,30 +299,106 @@ export function selectInstructions(
     }
 
     function getUsedVRegs(inst: IRInstruction): VReg[] {
-        const uses = new Set<VReg>();
-        for (const [key, value] of Object.entries(inst as unknown as Record<string, unknown>)) {
-            if (key === 'kind' || key === 'dest' || key === 'dests') continue;
-            if (inst.kind === 'for_init' && key === 'base') continue; // base is defined
-
-            if (typeof value === 'string') {
-                uses.add(value);
-                continue;
-            }
-
-            if (Array.isArray(value)) {
-                for (const item of value) {
-                    if (typeof item === 'string') {
-                        uses.add(item);
-                    } else if (item && typeof item === 'object' && 'value' in item) {
-                        const pairValue = (item as { value?: unknown }).value;
-                        if (typeof pairValue === 'string') {
-                            uses.add(pairValue);
-                        }
-                    }
-                }
-            }
+        switch (inst.kind) {
+            case 'mov':
+                return [inst.src];
+            case 'add': case 'sub': case 'mul': case 'div': case 'mod':
+                return [inst.lhs, inst.rhs];
+            case 'neg':
+                return [inst.src];
+            case 'shl': case 'shr': case 'band': case 'bor': case 'bxor':
+                return [inst.lhs, inst.rhs];
+            case 'bnot':
+                return [inst.src];
+            case 'cmp_lt': case 'cmp_le': case 'cmp_gt': case 'cmp_ge':
+            case 'cmp_eq': case 'cmp_ne':
+            case 'cmp_eq_str': case 'cmp_ne_str':
+                return [inst.lhs, inst.rhs];
+            case 'is_null': case 'is_true': case 'is_false':
+                return [inst.src];
+            case 'and': case 'or':
+                return [inst.lhs, inst.rhs];
+            case 'not':
+                return [inst.src];
+            case 'istc': case 'isfc':
+                return [inst.src];
+            case 'br':
+                return [inst.condition];
+            case 'ret':
+                return [...inst.values];
+            case 'coro_ret':
+                return [...inst.values];
+            case 'coro_yield':
+                return [...inst.values];
+            case 'widen': case 'narrow': case 'cast':
+                return [inst.src];
+            case 'struct_get':
+                return [inst.src];
+            case 'struct_set':
+                return [inst.struct, inst.value];
+            case 'class_get':
+                return [inst.src];
+            case 'class_set':
+                return [inst.class, inst.value];
+            case 'class_get_method':
+                return [inst.class];
+            case 'interface_is_class':
+                return [inst.interface];
+            case 'interface_has_method':
+                return [inst.interface];
+            case 'array_alloc':
+                return [inst.size];
+            case 'array_get':
+                return [inst.array, inst.index];
+            case 'array_set':
+                return [inst.array, inst.index, inst.value];
+            case 'array_length':
+                return [inst.array];
+            case 'array_extend':
+                return [inst.array, inst.newSize];
+            case 'array_extend_from':
+                return [inst.dest, inst.src, inst.startIdx];
+            case 'array_slice':
+                return [inst.array, inst.start, inst.end];
+            case 'str_concat':
+                return [inst.str, inst.value];
+            case 'str_from_bytes':
+                return [inst.array];
+            case 'closure_push_env':
+                return [inst.closure, inst.value];
+            case 'coro_call':
+                return [inst.coro, ...inst.args];
+            case 'coro_alloc_from':
+                return [inst.closure];
+            case 'coro_reset': case 'coro_finish':
+                return [inst.coro];
+            case 'coro_state':
+                return [inst.coro];
+            case 'global_store':
+                return [inst.value];
+            case 'call':
+                return [...inst.args];
+            case 'call_method':
+                return [inst.object, ...inst.args];
+            case 'call_closure':
+                return [inst.closure, ...inst.args];
+            case 'call_ffi':
+                return [inst.handle, ...inst.args];
+            case 'ffi_close':
+                return [inst.handle];
+            case 'throw':
+                return [inst.value];
+            case 'for_init':
+                return [inst.init, inst.limit, inst.step];
+            case 'for_loop':
+                return [inst.base];
+            case 'exit':
+                return [inst.code];
+            case 'phi':
+                return inst.pairs.map(p => p.value);
+            default:
+                return [];
         }
-        return [...uses];
     }
 
     const useSitesByVReg = new Map<VReg, number[]>();
@@ -846,25 +923,43 @@ export function selectInstructions(
 
             // === Interface ===
             case 'interface_is_class': {
-                const dest = r(regMap, inst.dest);
                 const src = r(regMap, inst.interface);
-                // AD skip-on-true: if cls->uid == D, skip next instruction
-                // Boolean materialization: MOV_RI dest,1 / OP_INTERFACE_IS_C_I / MOV_RI dest,0
-                // If match: skip the MOV dest,0 → dest stays 1
-                // If no match: execute MOV dest,0 → dest becomes 0
-                emit(makeAD(Op.MOV_RI, dest, 1));
-                emit(makeAD(Op.OP_INTERFACE_IS_C_I, src, assertFitsU16(inst.classId, `Class UID for interface_is_class`)));
-                emit(makeAD(Op.MOV_RI, dest, 0));
+                const classIdU16 = assertFitsU16(inst.classId, `Class UID for interface_is_class`);
+                if (canFuseWithBranch(i)) {
+                    // Fuse with next br: skip-on-true skips the JMP to false
+                    const br = instructions[i + 1];
+                    if (br.kind !== 'br') break;
+                    emit(makeAD(Op.OP_INTERFACE_IS_C_I, src, classIdU16));
+                    emitJump(Op.JMP, 0, br.falseLabel);
+                    emitTrueLabelJump(i + 2, br.trueLabel);
+                    i++; // skip the br
+                } else {
+                    // Boolean materialization: MOV_RI dest,1 / OP / MOV_RI dest,0
+                    const dest = r(regMap, inst.dest);
+                    emit(makeAD(Op.MOV_RI, dest, 1));
+                    emit(makeAD(Op.OP_INTERFACE_IS_C_I, src, classIdU16));
+                    emit(makeAD(Op.MOV_RI, dest, 0));
+                }
                 break;
             }
             case 'interface_has_method': {
-                const dest = r(regMap, inst.dest);
                 const src = r(regMap, inst.interface);
-                // AD skip-on-true: if method nameId bit set in bitmap, skip next instruction
-                // Boolean materialization: MOV_RI dest,1 / OP_I_HAS_M_I / MOV_RI dest,0
-                emit(makeAD(Op.MOV_RI, dest, 1));
-                emit(makeAD(Op.OP_I_HAS_M_I, src, assertFitsU16(inst.methodId, `Method nameId for interface_has_method`)));
-                emit(makeAD(Op.MOV_RI, dest, 0));
+                const methodIdU16 = assertFitsU16(inst.methodId, `Method nameId for interface_has_method`);
+                if (canFuseWithBranch(i)) {
+                    // Fuse with next br: skip-on-true skips the JMP to false
+                    const br = instructions[i + 1];
+                    if (br.kind !== 'br') break;
+                    emit(makeAD(Op.OP_I_HAS_M_I, src, methodIdU16));
+                    emitJump(Op.JMP, 0, br.falseLabel);
+                    emitTrueLabelJump(i + 2, br.trueLabel);
+                    i++; // skip the br
+                } else {
+                    // Boolean materialization: MOV_RI dest,1 / OP / MOV_RI dest,0
+                    const dest = r(regMap, inst.dest);
+                    emit(makeAD(Op.MOV_RI, dest, 1));
+                    emit(makeAD(Op.OP_I_HAS_M_I, src, methodIdU16));
+                    emit(makeAD(Op.MOV_RI, dest, 0));
+                }
                 break;
             }
 
@@ -924,6 +1019,9 @@ export function selectInstructions(
             // === Closure ===
             case 'closure_alloc': {
                 const funcIdx = requireFuncIndex(inst.funcName, 'closure_alloc');
+                if (inst.envSize > 255) {
+                    throw new Error(`Closure environment size ${inst.envSize} exceeds u8 range (max 255) in '${functionName}'`);
+                }
                 const packed = (inst.offsetToArgs << 8) | (inst.envSize & 0xFF);
                 const combined = (BigInt(packed) << 32n) | BigInt(funcIdx);
                 const slot = pool.add64(combined);

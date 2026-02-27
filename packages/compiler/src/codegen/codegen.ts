@@ -36,9 +36,10 @@ function applyFieldColoring(program: IRProgram): void {
     for (const shape of program.structShapes) {
         for (const field of shape.fields) {
             const slot = coloring.slotMap.get(field.globalFieldId);
-            if (slot !== undefined) {
-                field.globalFieldId = slot;
+            if (slot === undefined) {
+                throw new Error(`Field coloring: no slot assigned for field nameId ${field.globalFieldId} in struct shape`);
             }
+            field.globalFieldId = slot;
         }
     }
 
@@ -47,9 +48,10 @@ function applyFieldColoring(program: IRProgram): void {
         for (const inst of fn.instructions) {
             if (inst.kind === 'struct_get' || inst.kind === 'struct_set') {
                 const slot = coloring.slotMap.get(inst.fieldId);
-                if (slot !== undefined) {
-                    inst.fieldId = slot;
+                if (slot === undefined) {
+                    throw new Error(`Field coloring: no slot assigned for field nameId ${inst.fieldId} in ${inst.kind} instruction (function '${fn.name}')`);
                 }
+                inst.fieldId = slot;
             }
         }
     }
@@ -75,9 +77,10 @@ function applyMethodColoring(program: IRProgram): Map<string, Set<number>> {
     for (const shape of program.classShapes) {
         for (const method of shape.methods) {
             const slot = coloring.slotMap.get(method.methodId);
-            if (slot !== undefined) {
-                method.methodId = slot;
+            if (slot === undefined) {
+                throw new Error(`Method coloring: no slot assigned for method nameId ${method.methodId} in class shape '${shape.id}'`);
             }
+            method.methodId = slot;
         }
     }
 
@@ -86,9 +89,10 @@ function applyMethodColoring(program: IRProgram): Map<string, Set<number>> {
         for (const inst of fn.instructions) {
             if (inst.kind === 'call_method') {
                 const slot = coloring.slotMap.get(inst.methodId);
-                if (slot !== undefined) {
-                    inst.methodId = slot;
+                if (slot === undefined) {
+                    throw new Error(`Method coloring: no slot assigned for method nameId ${inst.methodId} in call_method instruction (function '${fn.name}')`);
                 }
+                inst.methodId = slot;
             }
         }
     }

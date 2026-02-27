@@ -147,9 +147,7 @@ export class TypeCTypeUtils {
     // ============================================================================
 
     /**
-     * Resolves a type if it's a reference type, otherwise returns the type as-is.
-     * This is a convenience helper to avoid the common pattern:
-     * `isReferenceType(type) ? this.typeProvider().resolveReference(type) : type`
+     * Resolves a type if it's a reference type (one level), otherwise returns as-is.
      *
      * Note: When reporting errors, use the original type for better error messages
      * (avoids printing large resolved structs instead of the original type name).
@@ -162,12 +160,23 @@ export class TypeCTypeUtils {
     }
 
     /**
-     * Resolves chained reference aliases until a non-reference type is reached.
+     * Resolves a type through the full alias chain until a concrete
+     * (non-reference) type is reached. Use this when you need the
+     * underlying type kind (e.g., for type-kind dispatch with isClassType,
+     * isInterfaceType, etc.) through multi-level aliases.
      *
-     * This is stricter than resolveIfReference() and is used in places where
-     * wrapper inspection (e.g. Nullable) must see through alias chains.
+     * @param type The type to potentially resolve
+     * @returns The fully resolved concrete type, or the original type if not a reference
      */
-    private resolveReferenceChain(type: TypeDescription): TypeDescription {
+    resolveDeepIfReference(type: TypeDescription): TypeDescription {
+        return isReferenceType(type) ? this.resolveReferenceChain(type) : type;
+    }
+
+    /**
+     * Resolves chained reference aliases until a non-reference type is reached.
+     * Handles cycle detection and a depth limit of 64.
+     */
+    resolveReferenceChain(type: TypeDescription): TypeDescription {
         let current = type;
         const seenDeclarations = new Set<ast.TypeDeclaration>();
         const MAX_REFERENCE_RESOLUTION_DEPTH = 64;

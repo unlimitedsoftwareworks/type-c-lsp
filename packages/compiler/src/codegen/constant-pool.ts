@@ -30,6 +30,9 @@ export class ConstantPool {
         if (existing !== undefined) return existing;
 
         const offset = this.nextOffset++;
+        if (offset > 0xFFFF) {
+            throw new Error(`Constant pool overflow: offset ${offset} exceeds u16 range (max 65535). Function has too many constants.`);
+        }
         this.entries.push({ value: BigInt(value) & 0xFFFFFFFFn, width: 32, offset });
         this.dedup32.set(value, offset);
         return offset;
@@ -45,6 +48,9 @@ export class ConstantPool {
 
         const offset = this.nextOffset;
         this.nextOffset += 2;  // 64-bit takes 2 slots
+        if (offset > 0xFFFF) {
+            throw new Error(`Constant pool overflow: offset ${offset} exceeds u16 range (max 65535). Function has too many constants.`);
+        }
         this.entries.push({ value, width: 64, offset });
         this.dedup64.set(value, offset);
         return offset;

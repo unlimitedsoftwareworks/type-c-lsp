@@ -2368,10 +2368,12 @@ export class TypeCTypeUtils {
                     // CRITICAL: Handle string literal + string combinations FIRST
                     // String literals should widen to string when mixed with string type
                     // This enables: string ∪ "VarDecl" → string
-                    const hasString = nonNullTypes.some(t => t.kind === TypeKind.String);
-                    const hasStringLiterals = nonNullTypes.some(t => isStringLiteralType(t));
-                    const hasStringEnums = nonNullTypes.some(t => isStringEnumType(t));
-                    const allStringRelated = nonNullTypes.every(t =>
+                    // Resolve references so named string enums (e.g., FileOpenMode) are recognized
+                    const resolvedStringCandidates = nonNullTypes.map(t => this.resolveIfReference(t));
+                    const hasString = resolvedStringCandidates.some(t => t.kind === TypeKind.String);
+                    const hasStringLiterals = resolvedStringCandidates.some(t => isStringLiteralType(t));
+                    const hasStringEnums = resolvedStringCandidates.some(t => isStringEnumType(t));
+                    const allStringRelated = resolvedStringCandidates.every(t =>
                         t.kind === TypeKind.String || isStringLiteralType(t) || isStringEnumType(t)
                     );
                     

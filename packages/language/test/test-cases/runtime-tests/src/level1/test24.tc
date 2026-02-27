@@ -57,7 +57,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq(mode10, "execute" as FileOpenMode)
 }
 
-fn main() {
+fn test24() {
     let test_1 = new TestUnit("Test 1", "tests String Enum", test_case_1)
     let set = new UnitSet("STD Test 24", "Tests String Enum Data Type", [test_1])
     return set.run()

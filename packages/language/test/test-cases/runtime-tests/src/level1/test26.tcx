@@ -20,13 +20,13 @@
   */
 
 from std.unit.test import TestUnit, UnitSet
-import std.collections.array 
+from std.collections.array.array import * 
 
 fn test_case_1(rn: TestUnit) {
     // test 1, no short-circuit, direct access
-    let length = StdArray.create<u32>([1,2,3]) |> .length()
+    let length = (new StdArray<u32>([1,2,3])).length()
     rn.assert_eq(length, 3)
-    rn.assert_eq(StdArray.create<u32>([1,2,3]) |> pop(), 3)
+    rn.assert_eq(new StdArray<u32>([1,2,3]) |> pop(), 3)
 
     // test 2, no short-circuit, nullable access
     let e1 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>? |> ?. pop()

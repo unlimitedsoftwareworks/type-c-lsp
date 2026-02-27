@@ -384,6 +384,13 @@ export class TypeCTypeProvider {
             return this.getType(parent.method.header.returnType);
         }
 
+        // Type cast expression: expr as T
+        // The cast target provides contextual typing for the left operand,
+        // enabling compile-time validation of literals (e.g., ["read"] as FileOpenMode[])
+        if (ast.isTypeCastExpression(parent) && parent.left === node) {
+            return this.getType(parent.destType);
+        }
+
         // Function call argument
         // foo(expr)
         if (ast.isFunctionCall(parent)) {

@@ -87,7 +87,11 @@ export default async function(): Promise<void> {
         .action(async (folder, opts) => {
             try {
                 await generateAction(folder, opts);
-            } catch {
+            } catch (e) {
+                if (e instanceof Error) {
+                    console.error(chalk.red(e.message));
+                    if (e.stack) console.error(e.stack);
+                }
                 process.exit(-1);
             }
         });

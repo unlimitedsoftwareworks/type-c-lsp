@@ -1,0 +1,93 @@
+// Test cases for contextual typing through `as` cast expressions
+// The cast target type should provide contextual typing for the left operand,
+// just like a type annotation does for variable declarations.
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+type Color = "red" | "green" | "blue"
+
+type FileOpenMode = "read" | "write" | "append"
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+// Test 1: String enum array via cast (the motivating case)
+fn test1() {
+    let modes = ["read", "write"] as FileOpenMode[]
+}
+
+// Test 2: Single string enum via cast
+fn test2() {
+    let c = "red" as Color
+}
+
+// Test 3: Array of structs via cast
+fn test3() {
+    let points = [{x: 1.0f, y: 2.0f}, {x: 3.0f, y: 4.0f}] as Point[]
+}
+
+// Test 4: Variant constructor via cast
+fn test4() {
+    let r = Result.Ok(42) as Result<i32, string>
+}
+
+// Test 5: Array of variants via cast
+fn test5() {
+    let results = [Result.Ok(1), Result.Err("error")] as Result<i32, string>[]
+}
+
+// Test 6: Nested array via cast
+fn test6() {
+    let matrix = [[1, 2], [3, 4]] as i32[][]
+}
+
+// Test 7: Cast with nullable target
+fn test7() {
+    let p = {x: 1.0f, y: 2.0f} as Point?
+}
+
+// Test 8: Lambda via cast (parenthesized to avoid precedence issues)
+fn test8() {
+    let f = (fn(x: i32) = x + 1) as fn(a: i32) -> i32
+}
+
+// Test 9: Empty array with cast providing type context
+fn test9() {
+    let arr = [] as i32[]
+}
+
+// Test 10: Equivalent type annotation and cast should both work
+fn test10() {
+    // Type annotation (already works)
+    let a: FileOpenMode[] = ["read", "write", "append"]
+    // Cast (now works too)
+    let b = ["read", "write", "append"] as FileOpenMode[]
+}
+
+// Test 11: Nested struct in array via cast
+type Entity = struct {
+    position: Point,
+    health: i32
+}
+
+fn test11() {
+    let entities = [
+        {position: {x: 0.0f, y: 0.0f}, health: 100},
+        {position: {x: 1.0f, y: 1.0f}, health: 50}
+    ] as Entity[]
+}
+
+// Test 12: Option via cast
+fn test12() {
+    let opt = Option.Some(42) as Option<i32>
+}

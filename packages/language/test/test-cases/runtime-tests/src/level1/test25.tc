@@ -58,7 +58,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_obj_not_null(p6)
 }
 
-fn main() {
+fn test25() {
     let test_1 = new TestUnit("Test 1", "tests nullable var decl", test_case_1)
     let set = new UnitSet("STD Test 25", "Tests nullable variable declarations", [test_1])
     return set.run()

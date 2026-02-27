@@ -59,6 +59,7 @@ import {
     isStringType,
     isStringLiteralType,
     isEnumType,
+    isStringEnumType,
     isMetaClassType,
     isNamespaceType,
     getMinArity
@@ -66,6 +67,7 @@ import {
 import type {
     VariantConstructorTypeDescription,
     EnumTypeDescription,
+    StringEnumTypeDescription,
     ClassTypeDescription,
     InterfaceTypeDescription,
     StructTypeDescription,
@@ -530,6 +532,7 @@ export class IRGenerator {
                 }
                 return scalarType('u32');
             }
+            case TypeKind.StringEnum: return ptrType('string');
             case TypeKind.Function: return ptrType('closure');
             case TypeKind.Coroutine: return ptrType('coroutine');
             case TypeKind.FFI: return ptrType('ffi_handle');
@@ -3765,8 +3768,12 @@ export class IRGenerator {
             return { register: temp, type: boolType };
         }
         if (op === '==') {
-            if (this.isStringIRType(left.type)) {
-                this.func().cmpEqStr(temp, left.register, right.register);
+            if (this.isStringIRType(left.type) || this.isStringIRType(right.type)) {
+                if (leftTd.kind === TypeKind.Null || rightTd.kind === TypeKind.Null) {
+                    this.func().cmpEq(temp, left.register, right.register, 'ptr');
+                } else {
+                    this.func().cmpEqStr(temp, left.register, right.register);
+                }
             } else {
                 const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
                 const leftValue = this.coerceScalarExpression(left, operandType);
@@ -3777,8 +3784,12 @@ export class IRGenerator {
             return { register: temp, type: boolType };
         }
         if (op === '!=') {
-            if (this.isStringIRType(left.type)) {
-                this.func().cmpNeStr(temp, left.register, right.register);
+            if (this.isStringIRType(left.type) || this.isStringIRType(right.type)) {
+                if (leftTd.kind === TypeKind.Null || rightTd.kind === TypeKind.Null) {
+                    this.func().cmpNe(temp, left.register, right.register, 'ptr');
+                } else {
+                    this.func().cmpNeStr(temp, left.register, right.register);
+                }
             } else {
                 const operandType = this.resolveNumericOperandTypeForBinary(node, left, right);
                 const leftValue = this.coerceScalarExpression(left, operandType);
@@ -6311,7 +6322,48 @@ export class IRGenerator {
             const targetTd = this.getType(node.destType);
             const resolvedTargetTd = isReferenceType(targetTd) ? this.typeUtils.resolveIfReference(targetTd) : targetTd;
 
-            if (node.castType === 'as?' && isVariantConstructorType(resolvedTargetTd)) {
+            if (isStringEnumType(resolvedTargetTd) && (node.castType === 'as?' || node.castType === 'as!')) {
+                // Cast string to StringEnum: compare against each valid value
+                const f = this.func();
+                const seTd = resolvedTargetTd as StringEnumTypeDescription;
+                const okLabel = this.generateLabel('strenum_cast_ok');
+                const endLabel = this.generateLabel('strenum_cast_end');
+                const failLabel = this.generateLabel('strenum_cast_fail');
+
+                for (let i = 0; i < seTd.values.length; i++) {
+                    const value = seTd.values[i];
+                    const valReg = this.tmp();
+                    f.strConst(valReg, value);
+                    this.program.addStringConstant(value);
+                    const cmpReg = this.tmp();
+                    f.cmpEqStr(cmpReg, expr.register, valReg);
+                    const nextLabel = (i < seTd.values.length - 1)
+                        ? this.generateLabel('strenum_cast_next')
+                        : failLabel;
+                    f.br(cmpReg, okLabel, nextLabel);
+                    if (i < seTd.values.length - 1) {
+                        f.label(nextLabel);
+                    }
+                }
+
+                f.label(okLabel);
+                f.mov(temp, expr.register, targetType);
+                f.jmp(endLabel);
+
+                f.label(failLabel);
+                if (node.castType === 'as?') {
+                    // Safe cast: return null on mismatch
+                    f.constNull(temp);
+                } else {
+                    // Force cast (as!): throw on mismatch
+                    const errMsg = this.tmp();
+                    f.strConst(errMsg, "Invalid string enum cast");
+                    this.program.addStringConstant("Invalid string enum cast");
+                    f.throw(errMsg);
+                    f.undef(temp, targetType);
+                }
+                f.label(endLabel);
+            } else if (node.castType === 'as?' && isVariantConstructorType(resolvedTargetTd)) {
                 // Safe cast to variant constructor: check tag, return null on mismatch
                 const f = this.func();
                 const vcTd = resolvedTargetTd as VariantConstructorTypeDescription;

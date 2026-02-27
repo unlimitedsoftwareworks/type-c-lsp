@@ -1,0 +1,45 @@
+// Test cases for contextual typing errors through `as` cast expressions
+
+type Color = "red" | "green" | "blue"
+
+type FileOpenMode = "read" | "write" | "append"
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+// Test 1: Mixed incompatible types in array cast
+fn test1() {
+    /// @Error: Cannot infer common type
+    let arr = [1, "hello"] as i32[]
+}
+
+// Test 2: Wrong variant constructor argument type via cast
+fn test2() {
+    /// @Error: Invalid cast
+    let results = [Result.Ok("bad")] as Result<i32, string>[]
+}
+
+// Test 3: Completely unrelated types in cast with contextual typing
+fn test3() {
+    /// @Error: Invalid cast
+    let p = 42 as Point
+}
+
+// Test 4: Wrong element types in struct array cast
+fn test4() {
+    /// @Error: Invalid cast
+    let points = [{x: "bad", y: "bad"}] as Point[]
+}
+
+// Test 5: Wrong nested variant types
+fn test5() {
+    /// @Error: Invalid cast
+    let r = Result.Ok(Result.Err(42)) as Result<Result<i32, string>, string>
+}

@@ -335,7 +335,6 @@ UnaryExpression infers Expression:
     {infer MutateExpression} 'mutate' expr=Expression |
     {infer CoroutineExpression} 'coroutine' fn=Expression |
     {infer YieldExpression} style=('yield'|'yield!') expr=TupleExpression? |
-    {infer NewExpression} 'new' (instanceType=DataType<false>)? '(' Args? ')' |
     TypeCheckExpression;
 
 TypeCheckExpression infers Expression:
@@ -373,6 +372,7 @@ AtomicExpression infers Expression:
     LiteralExpression |
     LambdaExpression |
     { infer ThisExpression } 'this'  |
+    {infer NewExpression} 'new' (instanceType=DataType<false>)? '(' Args? ')' |
     DoExpression |
     QualifiedReference |
     ArrayConstructionExpression |

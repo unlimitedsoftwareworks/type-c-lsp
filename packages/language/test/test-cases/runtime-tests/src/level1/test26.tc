@@ -16,41 +16,41 @@
 
  /**
   * @file test.c
-  * Tests Pipe Operator
+  * Tests Method Chaining
   */
 
 from std.unit.test import TestUnit, UnitSet
-from std.collections.array.array import * 
+from std.collections.array.array import *
 
 fn test_case_1(rn: TestUnit) {
-    // test 1, no short-circuit, direct access
+    // test 1, direct access
     let length = (new StdArray<u32>([1,2,3])).length()
     rn.assert_eq(length, 3)
-    rn.assert_eq(new StdArray<u32>([1,2,3]) |> pop(), 3)
+    rn.assert_eq(new StdArray<u32>([1,2,3]).pop(), 3)
 
-    // test 2, no short-circuit, nullable access
-    let e1 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>? |> ?. pop()
+    // test 2, nullable access
+    let e1 = (new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>?)?.pop()
     rn.assert_eq(e1!.x ?? 10, 3)
 
-    // test 3, short-circuit, direct access
-    let length2 = StdArray.create<u32>([1,2,3,4])  |> length()
+    // test 3, direct access
+    let length2 = new StdArray<u32>([1,2,3,4]).length()
     rn.assert_eq(length2, 4)
 
-    // test 4, short-circuit, nullable access
-    let e2 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>? |>? pop()
+    // test 4, nullable access
+    let e2 = (new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) as Array<{x: u32}>?)?.pop()
     rn.assert_eq(e2?.x ?? 10, 3)
 }
 
 fn test_case_2(rn: TestUnit) {
-    let e1 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) |> pop() |> x
+    let e1 = new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]).pop().x
     rn.assert_eq(e1, 3)
-    let e2 = StdArray.create<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]) |> [0] |> x
+    let e2 = new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}])[0].x
     rn.assert_eq(e2, 1)
 }
 
-fn main() {
-    let test_1 = new TestUnit("Test 1", "tests pipe operator", test_case_1)
-    let test_2 = new TestUnit("Test 2", "tests pipe operator chaining", test_case_2)
-    let set = new UnitSet("STD Test 26", "Tests pipe Operator", [test_1, test_2])
+fn test26() {
+    let test_1 = new TestUnit("Test 1", "tests method chaining", test_case_1)
+    let test_2 = new TestUnit("Test 2", "tests method chaining with member access", test_case_2)
+    let set = new UnitSet("STD Test 26", "Tests Method Chaining", [test_1, test_2])
     return set.run()
 }

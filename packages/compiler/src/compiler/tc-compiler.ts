@@ -554,8 +554,30 @@ export class IRGenerator {
                     `Cannot lower ErrorType to IR (${type.toString()}) at ${this.getSourceLocation(type.node)}`
                 );
             case TypeKind.Self: return ptrType('class');
+            case TypeKind.Implementation: return ptrType('class');
             case TypeKind.Never: return voidType();
-            default: return voidType();
+            // Meta types used as namespace prefixes (e.g., SomeClass.staticMethod()) —
+            // these produce placeholder undef registers; the real dispatch happens elsewhere
+            case TypeKind.MetaVariant:
+            case TypeKind.MetaVariantConstructor:
+            case TypeKind.MetaEnum:
+            case TypeKind.MetaClass:
+            case TypeKind.Prototype:
+            case TypeKind.Namespace:
+            case TypeKind.ReturnType:
+            case TypeKind.TypeGuard:
+                return voidType();
+            // Generic type parameters are erased to pointers at runtime
+            case TypeKind.Generic: return ptrType('struct');
+            // Intersection types at runtime are concrete values satisfying all constraints
+            case TypeKind.Join: return ptrType('struct');
+            // These types should not reach IR generation — they are constraint-only or unresolved
+            case TypeKind.Union:
+            case TypeKind.Any:
+            case TypeKind.Unset:
+                throw new Error(`Type '${type.kind}' should not reach IR generation`);
+            default:
+                throw new Error(`Unhandled TypeKind in convertTypeDescriptionToIR: '${type.kind}'`);
         }
     }
 
@@ -4897,8 +4919,56 @@ export class IRGenerator {
         const obj = this.visitExpression(node.expr, undefined);
         const memberName = this.getReferenceName(memberRef);
         const objTd = this.getType(node.expr);
-        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        let resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
         const resultType = this.getNodeIRType(node);
+
+        // Optional chaining: obj?.field — short-circuit to null if obj is null
+        if (node.isNullable) {
+            const f = this.func();
+            const resultReg = this.tmp();
+            const nullCheckReg = this.tmp();
+            const accessLabel = this.generateLabel('opt_access');
+            const endLabel = this.generateLabel('opt_end');
+
+            f.constNull(resultReg);
+            f.isNull(nullCheckReg, obj.register);
+            f.br(nullCheckReg, endLabel, accessLabel);
+
+            f.label(accessLabel);
+            // Unwrap nullable for the actual field access
+            if (isNullableType(resolvedObjTd)) {
+                resolvedObjTd = resolvedObjTd.baseType;
+                if (isReferenceType(resolvedObjTd)) {
+                    resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
+                }
+            }
+            const innerResult = this.emitMemberAccessInner(obj, resolvedObjTd, memberRef, memberName, resultType);
+            f.mov(resultReg, innerResult.register, innerResult.type);
+            f.jmp(endLabel);
+
+            f.label(endLabel);
+            return { register: resultReg, type: resultType };
+        }
+
+        // Unwrap nullable for non-optional access too (e.g., denulled values)
+        if (isNullableType(resolvedObjTd)) {
+            resolvedObjTd = resolvedObjTd.baseType;
+            if (isReferenceType(resolvedObjTd)) {
+                resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
+            }
+        }
+
+        return this.emitMemberAccessInner(obj, resolvedObjTd, memberRef, memberName, resultType);
+    }
+
+    private emitMemberAccessInner(
+        obj: ExpressionResult,
+        resolvedObjTd: TypeDescription,
+        memberRef: ast.IdentifiableReference,
+        memberName: string,
+        resultType: IRType
+    ): ExpressionResult {
+        const temp = this.tmp();
 
         // Array .length
         if (isArrayType(resolvedObjTd) && memberName === 'length') {
@@ -6384,6 +6454,31 @@ export class IRGenerator {
                 f.label(nullLabel);
                 f.constNull(temp);
                 f.label(endLabel);
+            } else if (node.castType === 'as!' && isVariantConstructorType(resolvedTargetTd)) {
+                // Force cast to variant constructor: check tag, throw on mismatch
+                const f = this.func();
+                const vcTd = resolvedTargetTd as VariantConstructorTypeDescription;
+                const tagReg = this.tmp();
+                f.structGet(tagReg, expr.register, this.getOrCreateFieldNameId('$tag'), scalarType('u8'));
+                const expectedTag = this.getVariantConstructorTagFromType(vcTd);
+                const expectedTagReg = this.tmp();
+                f.constInt(expectedTagReg, expectedTag, 'u8');
+                const cmpReg = this.tmp();
+                f.cmpEq(cmpReg, tagReg, expectedTagReg, 'u8');
+                const okLabel = this.generateLabel('force_cast_ok');
+                const failLabel = this.generateLabel('force_cast_fail');
+                const endLabel = this.generateLabel('force_cast_end');
+                f.br(cmpReg, okLabel, failLabel);
+                f.label(okLabel);
+                f.mov(temp, expr.register, targetType);
+                f.jmp(endLabel);
+                f.label(failLabel);
+                const errMsg = this.tmp();
+                f.strConst(errMsg, "Invalid variant cast");
+                this.program.addStringConstant("Invalid variant cast");
+                f.throw(errMsg);
+                f.undef(temp, targetType);
+                f.label(endLabel);
             } else {
                 // Regular pointer cast: just mov
                 this.func().mov(temp, expr.register, targetType);
@@ -6539,9 +6634,54 @@ export class IRGenerator {
         const f = this.func();
         const obj = this.visitExpression(node.expr, undefined);
         const objTd = this.getType(node.expr);
-        const resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
+        let resolvedObjTd = isReferenceType(objTd) ? this.typeUtils.resolveIfReference(objTd) : objTd;
         const resultType = this.getNodeIRType(node);
 
+        // Optional chaining: obj?.{field: value} — short-circuit to null if obj is null
+        if (node.isNullable) {
+            const resultReg = this.tmp();
+            const nullCheckReg = this.tmp();
+            const updateLabel = this.generateLabel('opt_update');
+            const endLabel = this.generateLabel('opt_update_end');
+
+            f.constNull(resultReg);
+            f.isNull(nullCheckReg, obj.register);
+            f.br(nullCheckReg, endLabel, updateLabel);
+
+            f.label(updateLabel);
+            // Unwrap nullable for the actual update
+            if (isNullableType(resolvedObjTd)) {
+                resolvedObjTd = resolvedObjTd.baseType;
+                if (isReferenceType(resolvedObjTd)) {
+                    resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
+                }
+            }
+            const innerResult = this.emitObjectUpdateInner(f, obj, resolvedObjTd, resultType, node);
+            f.mov(resultReg, innerResult.register, innerResult.type);
+            f.jmp(endLabel);
+
+            f.label(endLabel);
+            return { register: resultReg, type: resultType };
+        }
+
+        // Unwrap nullable for non-optional access too (e.g., denulled values)
+        if (isNullableType(resolvedObjTd)) {
+            resolvedObjTd = resolvedObjTd.baseType;
+            if (isReferenceType(resolvedObjTd)) {
+                resolvedObjTd = this.typeUtils.resolveIfReference(resolvedObjTd);
+            }
+        }
+
+        return this.emitObjectUpdateInner(f, obj, resolvedObjTd, resultType, node);
+    }
+
+    private emitObjectUpdateInner(
+        f: ReturnType<typeof this.func>,
+        obj: ExpressionResult,
+        resolvedObjTd: TypeDescription,
+        resultType: IRType,
+        node: ast.ObjectUpdate
+    ): ExpressionResult {
         // Clone the struct/class then set the updated fields
         if (isStructType(resolvedObjTd) || isVariantType(resolvedObjTd) || isVariantConstructorType(resolvedObjTd)) {
             const shapeId = this.getOrDeclareStructShape(resolvedObjTd);

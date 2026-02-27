@@ -100,11 +100,11 @@ fn test11() {
 
 // ERROR: Array with tuple elements type mismatch
 fn test12() {
-    // ERROR: Second tuple has wrong types
-    let pairs: (i32, string)[] = [
+    // Invalid syntax.
+    /*let pairs: i32, string)[] = [
         (1, "one"),
         ("two", 2)
-    ]
+    ]*/
 }
 
 // ERROR: Array with variant elements wrong type

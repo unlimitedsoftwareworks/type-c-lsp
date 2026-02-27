@@ -46,25 +46,50 @@ export abstract class TypeCTypedValidation extends TypeCBaseValidation {
      * Registered for many AST node types to catch type errors during inference.
      */
     checkExpressionForErrors = (node: AstNode, accept: ValidationAcceptor): void => {
+        // Trigger type inference (side effect: populates diagnostic map)
         const exprType = this.typeProvider.getType(node);
 
-        // Check if this expression's type is an error
-        if (isErrorType(exprType)) {
+        // Report only SOURCE errors from the diagnostic map.
+        // This prevents cascading: propagated error types from sub-expressions
+        // won't produce duplicate diagnostics at every parent node.
+        const diagnostics = this.typeProvider.getTypeDiagnostics(node);
+        for (const diag of diagnostics) {
+            accept('error', diag.message, {
+                node,
+                code: diag.code || ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        }
+
+        // Fallback for errors not yet recorded in the diagnostic map.
+        // Report if this is the originating node, or if the origin node
+        // has no diagnostics recorded (meaning no one else will report it).
+        if (diagnostics.length === 0 && isErrorType(exprType)) {
             const message = exprType.message;
 
-            // Skip internal error types used during type inference
             if (message === '__recursion_placeholder__' ||
                 message === '__contextual_placeholder__' ||
                 message?.includes('placeholder')) {
                 return;
             }
 
-            // Report the error
-            accept('error', message || 'Type error', {
-                node,
-                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
-            });
-            return; // Don't check for errors field if type is already error
+            const originNode = exprType.node;
+            const originHasDiagnostics = originNode
+                ? this.typeProvider.getTypeDiagnostics(originNode).length > 0
+                : false;
+
+            if (originNode === node || !originHasDiagnostics) {
+                accept('error', message || 'Type error', {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+
+                // Mark the origin as "handled" so subsequent expressions in the
+                // chain that propagate the same error don't report it again.
+                if (originNode && originNode !== node) {
+                    this.typeProvider.recordTypeError(originNode, message || 'Type error');
+                }
+            }
+            return;
         }
 
         const baseExpr = this.typeUtils.resolveIfReference(exprType);
@@ -79,18 +104,7 @@ export abstract class TypeCTypedValidation extends TypeCBaseValidation {
             }
         }
 
-        // CRITICAL: For variant-constructor types, also check the baseVariant's errors
-        if (isVariantConstructorType(baseExpr) && baseExpr.baseVariant.errors && baseExpr.baseVariant.errors.length > 0) {
-            for (const errorMsg of baseExpr.baseVariant.errors) {
-                accept('error', errorMsg, {
-                    node,
-                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
-                });
-            }
-        }
-
         // For variant-constructor types, also check the baseVariant's errors
-        // This catches errors in the variant definition that affect the constructor
         if (isVariantConstructorType(baseExpr) && baseExpr.baseVariant.errors && baseExpr.baseVariant.errors.length > 0) {
             for (const errorMsg of baseExpr.baseVariant.errors) {
                 accept('error', errorMsg, {

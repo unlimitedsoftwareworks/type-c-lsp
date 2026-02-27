@@ -2129,6 +2129,17 @@ export class TypeCTypeUtils {
         // Continue with non-never types
         types = nonNeverTypes;
 
+        // Filter out error types — they should not cascade into "Cannot infer common type" errors.
+        // If some types are valid and some are errors, use the valid ones.
+        const nonErrorTypes = types.filter(t => !isErrorType(t));
+        if (nonErrorTypes.length === 0) {
+            return types[0]; // all errors — return first
+        }
+        if (nonErrorTypes.length === 1) {
+            return nonErrorTypes[0];
+        }
+        types = nonErrorTypes;
+
         // Handle type guards specially
         // Type guards can be unified with each other (if same parameter) or with bool
         const typeGuards = types.filter(isTypeGuardType);
@@ -3608,6 +3619,11 @@ export class TypeCTypeUtils {
     ): TypeCheckResult {
         // No constraint means any type is valid
         if (!constraint) {
+            return success();
+        }
+
+        // Error types pass all checks to prevent cascading
+        if (isErrorType(concreteType)) {
             return success();
         }
 

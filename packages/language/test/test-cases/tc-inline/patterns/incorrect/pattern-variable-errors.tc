@@ -21,7 +21,6 @@ fn testNonArrayAsArray(val: u32) {
     match val {
         /// @Error(TCE120): Pattern expects array type
         [
-            /// @Error(TCE120): Pattern expects array type, but got 'u32'
             first, 
             second,
             1,
@@ -35,9 +34,7 @@ fn testNonArrayAsArray(val: u32) {
 fn testNonStructAsStruct(val: u32) {
     match val {
         /// @Error(TCE120): Pattern expects struct type
-        {x: xVal, 
-        /// @Error(TCE120): Pattern expects struct type
-        y: yVal} => {},
+        {x: xVal, y: yVal} => {},
         _ => {}
     }
 }
@@ -54,7 +51,7 @@ fn testWrongParamCount(result: Result<u32, string>) {
 // Field not found in struct pattern
 fn testFieldNotFound(p: Point) {
     match p {
-        /// @Error(TCE120): Field 'z' not found in struct type
+        /// @Error(TCE120): Field 'z' not found
         {x: xVal, y: yVal, z: zVal} => {},
         _ => {}
     }

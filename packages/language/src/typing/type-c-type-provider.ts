@@ -62,6 +62,11 @@ import {
 import { TypeCTypeFactory } from './type-factory.js';
 import { TypeCTypeUtils } from './type-utils.js';
 
+export interface SourceDiagnostic {
+    message: string;
+    code?: string;
+}
+
 /**
  * Main type provider service.
  * Provides type inference for all AST nodes in Type-C.
@@ -75,6 +80,12 @@ export class TypeCTypeProvider {
 
     /** Cache for pattern validation errors detected during type inference */
     private readonly patternValidationErrorCache: DocumentCache<AstNode, { message: string } | undefined>;
+
+    /** Per-node source diagnostics recorded during type inference.
+     *  Only "source" errors (where the error originates) are stored here,
+     *  not propagated/cascaded errors from sub-expressions. */
+    private readonly diagnosticMap: DocumentCache<AstNode, SourceDiagnostic[]>;
+
     private overloadResolutionDepth = 0;
 
     /** Guard against re-entrant getExpectedType calls for the same node */
@@ -149,6 +160,7 @@ export class TypeCTypeProvider {
         this.typeCache = new DocumentCache(services.shared);
         this.expectedTypeCache = new DocumentCache(services.shared);
         this.patternValidationErrorCache = new DocumentCache(services.shared);
+        this.diagnosticMap = new DocumentCache(services.shared);
         this.typeUtils = services.typing.TypeUtils;
         // Use lazy getter to avoid circular dependency
         this.typeFactory = services.typing.TypeFactory;
@@ -214,6 +226,7 @@ export class TypeCTypeProvider {
         this.typeCache.clear(documentUri);
         this.expectedTypeCache.clear(documentUri);
         this.patternValidationErrorCache.clear(documentUri);
+        this.diagnosticMap.clear(documentUri);
     }
 
     /**
@@ -233,6 +246,26 @@ export class TypeCTypeProvider {
     private setPatternValidationError(node: AstNode, message: string): void {
         const documentUri = AstUtils.getDocument(node).uri;
         this.patternValidationErrorCache.set(documentUri, node, { message });
+    }
+
+    /**
+     * Records a source diagnostic for an AST node.
+     * Only call this for errors that ORIGINATE at this node, not for propagated errors.
+     */
+    recordTypeError(node: AstNode, message: string, code?: string): void {
+        const documentUri = AstUtils.getDocument(node).uri;
+        const existing = this.diagnosticMap.get(documentUri, node, () => []);
+        existing.push({ message, code });
+        this.diagnosticMap.set(documentUri, node, existing);
+    }
+
+    /**
+     * Gets all source diagnostics recorded for a node during type inference.
+     * Used by the validator to report errors only at their origin.
+     */
+    getTypeDiagnostics(node: AstNode): SourceDiagnostic[] {
+        const documentUri = AstUtils.getDocument(node).uri;
+        return this.diagnosticMap.get(documentUri, node, () => []);
     }
 
     /**
@@ -762,13 +795,9 @@ export class TypeCTypeProvider {
 
                 // Check if it's a class type - if not, return error for validation
                 if (!isClassType(resolvedClassType)) {
-                    // Return error type that will be caught by validations
-                    // This allows the validation system to report proper error messages
-                    return this.typeFactory.createErrorType(
-                        `Cannot use 'new' with non-class type '${resolvedClassType.toString()}'`,
-                        undefined,
-                        parent
-                    );
+                    const newErrMsg = `Cannot use 'new' with non-class type '${resolvedClassType.toString()}'`;
+                    this.recordTypeError(parent, newErrMsg);
+                    return this.typeFactory.createErrorType(newErrMsg, undefined, parent);
                 }
 
                 // Look for init methods
@@ -1910,6 +1939,7 @@ export class TypeCTypeProvider {
     private inferReferenceType(node: ast.ReferenceType): TypeDescription {
         const declaration: AstNode | undefined = node?.field?.ref;
         if (!declaration) {
+            this.recordTypeError(node, 'Unresolved type reference');
             return this.typeFactory.createErrorType('Unresolved type reference', undefined, node);
         }
 
@@ -2435,6 +2465,7 @@ export class TypeCTypeProvider {
         if (node.initializer) {
             inferredType = this.inferExpression(node.initializer);
         } else {
+            this.recordTypeError(node, 'Variable has no type annotation or initializer');
             return this.typeFactory.createErrorType('Variable has no type annotation or initializer', undefined, node);
         }
 
@@ -2541,7 +2572,9 @@ export class TypeCTypeProvider {
         if (node == undefined) {
             console.log("undefined node")
         }
-        return this.typeFactory.createErrorType(`Cannot infer type for expression: ${node.$type}`, undefined, node);
+        const inferExprMsg = `Cannot infer type for expression: ${node.$type}`;
+        this.recordTypeError(node, inferExprMsg);
+        return this.typeFactory.createErrorType(inferExprMsg, undefined, node);
     }
 
     /**
@@ -2651,11 +2684,13 @@ export class TypeCTypeProvider {
         // Langium cross-references have a .ref property pointing to the target AST node
         const ref = node.reference;
         if (!ref || !('ref' in ref) || !ref.ref) {
+            this.recordTypeError(node, 'Unresolved reference');
             return this.typeFactory.createErrorType('Unresolved reference', undefined, node);
         }
 
         const refNode = ref.ref;
         if (!refNode) {
+            this.recordTypeError(node, 'Invalid reference node');
             return this.typeFactory.createErrorType('Invalid reference node', undefined, node);
         }
         let type = this.getType(refNode);
@@ -2672,11 +2707,9 @@ export class TypeCTypeProvider {
                 const genericParams = type.genericParameters || [];
 
                 if (genericParams.length !== node.genericArgs.length) {
-                    return this.typeFactory.createErrorType(
-                        `Generic argument count mismatch: expected ${genericParams.length}, got ${node.genericArgs.length}`,
-                        undefined,
-                        node
-                    );
+                    const countMsg = `Generic argument count mismatch: expected ${genericParams.length}, got ${node.genericArgs.length}`;
+                    this.recordTypeError(node, countMsg);
+                    return this.typeFactory.createErrorType(countMsg, undefined, node);
                 }
 
                 // Build substitution map and validate constraints
@@ -2698,11 +2731,9 @@ export class TypeCTypeProvider {
                         : param.constraint;
                     const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, constraint);
                     if (!constraintCheck.success) {
-                        return this.typeFactory.createErrorType(
-                            constraintCheck.message || `Type argument does not satisfy generic constraint`,
-                            undefined,
-                            node
-                        );
+                        const constraintMsg = constraintCheck.message || `Type argument does not satisfy generic constraint`;
+                        this.recordTypeError(node, constraintMsg);
+                        return this.typeFactory.createErrorType(constraintMsg, undefined, node);
                     }
                 }
 
@@ -2724,11 +2755,9 @@ export class TypeCTypeProvider {
             }
 
             // If not a function type, having generic args is an error
-            return this.typeFactory.createErrorType(
-                `Cannot apply generic arguments to non-generic type '${type.toString()}'`,
-                undefined,
-                node
-            );
+            const nonGenericMsg = `Cannot apply generic arguments to non-generic type '${type.toString()}'`;
+            this.recordTypeError(node, nonGenericMsg);
+            return this.typeFactory.createErrorType(nonGenericMsg, undefined, node);
         }
 
         if (isVariantType(type) && ast.isTypeDeclaration(node.reference.ref)) {
@@ -2800,6 +2829,7 @@ export class TypeCTypeProvider {
 
     private inferUnaryExpression(node: ast.UnaryExpression): TypeDescription {
         const exprType = this.inferExpression(node.expr);
+        if (isErrorType(exprType)) return exprType;
 
         // Check for operator overloads on classes/interfaces FIRST
         // Classes/interfaces can override the return type of any operator (including !)
@@ -3198,6 +3228,7 @@ export class TypeCTypeProvider {
      */
     private inferMemberAccess(node: ast.MemberAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
         const memberName = node.element?.$refText || '';
 
         // Track if the base is nullable (for optional chaining propagation)
@@ -3369,6 +3400,7 @@ export class TypeCTypeProvider {
             }
 
             // Member not found in the class type
+            this.recordTypeError(node, `Member '${memberName}' not found`);
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
@@ -3501,6 +3533,7 @@ export class TypeCTypeProvider {
             }
 
             // Member not found in the impl type or its interfaces
+            this.recordTypeError(node, `Member '${memberName}' not found`);
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
@@ -3571,6 +3604,7 @@ export class TypeCTypeProvider {
         // Normal case: Get the target node via Langium's linker (handles overload resolution)
         const targetRef = node.element.ref;
         if (!targetRef) {
+            this.recordTypeError(node, `Member '${memberName}' not found`);
             return this.typeFactory.createErrorType(`Member '${memberName}' not found`, undefined, node);
         }
 
@@ -3749,8 +3783,12 @@ export class TypeCTypeProvider {
     private inferFunctionCall(node: ast.FunctionCall): TypeDescription {
         let fnType = this.inferExpression(node.expr);
 
+        if (isErrorType(fnType)) return fnType;
+
         // Resolve reference types first
         fnType = this.typeUtils.resolveIfReference(fnType);
+
+        if (isErrorType(fnType)) return fnType;
 
         // Only unwrap nullable function types if they come from optional chaining
         // Check if ANY part of the expression chain uses optional chaining (?.)
@@ -3814,12 +3852,9 @@ export class TypeCTypeProvider {
                             : param.constraint;
                         const constraintCheck = this.typeUtils.validateGenericConstraint(concreteType, constraint);
                         if (!constraintCheck.success) {
-                            // Return error immediately if constraint not satisfied
-                            return this.typeFactory.createErrorType(
-                                constraintCheck.message || `Type argument does not satisfy generic constraint`,
-                                undefined,
-                                node
-                            );
+                            const fnConstraintMsg = constraintCheck.message || `Type argument does not satisfy generic constraint`;
+                            this.recordTypeError(node, fnConstraintMsg);
+                            return this.typeFactory.createErrorType(fnConstraintMsg, undefined, node);
                         }
                     }
                     
@@ -3930,11 +3965,9 @@ export class TypeCTypeProvider {
                             : param.constraint;
                         const constraintCheck = this.typeUtils.validateGenericConstraint(inferredType, constraint);
                         if (!constraintCheck.success) {
-                            return this.typeFactory.createErrorType(
-                                constraintCheck.message || `Inferred type does not satisfy generic constraint`,
-                                undefined,
-                                node
-                            );
+                            const inferConstraintMsg = constraintCheck.message || `Inferred type does not satisfy generic constraint`;
+                            this.recordTypeError(node, inferConstraintMsg);
+                            return this.typeFactory.createErrorType(inferConstraintMsg, undefined, node);
                         }
                     }
                 }
@@ -3948,11 +3981,9 @@ export class TypeCTypeProvider {
                 if (firstErrorSubstitution) {
                     const [genericName, candidateType] = firstErrorSubstitution;
                     const errorType = isErrorType(candidateType) ? candidateType : undefined;
-                    return this.typeFactory.createErrorType(
-                        errorType?.message || `Cannot infer type argument for generic parameter '${genericName}'`,
-                        undefined,
-                        node
-                    );
+                    const inferArgMsg = errorType?.message || `Cannot infer type argument for generic parameter '${genericName}'`;
+                    this.recordTypeError(node, inferArgMsg);
+                    return this.typeFactory.createErrorType(inferArgMsg, undefined, node);
                 }
             }
 
@@ -4121,11 +4152,9 @@ export class TypeCTypeProvider {
 
             // If no call operator found, this is an error
             const typeName = baseClassType ? 'Class' : 'Interface';
-            return this.typeFactory.createErrorType(
-                `${typeName} type does not have a call operator '()'. ${baseClassType ? "Use 'new' for constructors." : ''}`,
-                undefined,
-                node
-            );
+            const noCallMsg = `${typeName} type does not have a call operator '()'. ${baseClassType ? "Use 'new' for constructors." : ''}`;
+            this.recordTypeError(node, noCallMsg);
+            return this.typeFactory.createErrorType(noCallMsg, undefined, node);
         }
 
         if (isMetaVariantConstructorType(fnType)) {
@@ -4133,11 +4162,9 @@ export class TypeCTypeProvider {
             return isOptionalCall ? this.typeFactory.createNullableType(returnType, node) : returnType;
         }
 
-        return this.typeFactory.createErrorType(
-            `Cannot call value of type '${fnType.toString()}'. Only functions, callable classes/interfaces, and variant constructors can be called.`,
-            undefined,
-            node
-        );
+        const callErrMsg = `Cannot call value of type '${fnType.toString()}'. Only functions, callable classes/interfaces, and variant constructors can be called.`;
+        this.recordTypeError(node, callErrMsg);
+        return this.typeFactory.createErrorType(callErrMsg, undefined, node);
     }
 
     /**
@@ -4255,9 +4282,11 @@ export class TypeCTypeProvider {
 
     private inferIndexAccess(node: ast.IndexAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+        if (isErrorType(baseType)) return baseType;
 
         // CRITICAL: Handle generic types with constraints for index operators
         // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
@@ -4276,14 +4305,17 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
+        this.recordTypeError(node, 'Type does not implement index access operator `[]`');
         return this.typeFactory.createErrorType('Type does not implement index access operator `[]`', undefined, node);
     }
 
     private inferIndexSet(node: ast.IndexSet): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+        if (isErrorType(baseType)) return baseType;
 
         // CRITICAL: Handle generic types with constraints for index operators
         // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
@@ -4307,9 +4339,11 @@ export class TypeCTypeProvider {
 
     private inferReverseIndexAccess(node: ast.ReverseIndexAccess): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+        if (isErrorType(baseType)) return baseType;
 
         // CRITICAL: Handle generic types with constraints for index operators
         // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
@@ -4327,14 +4361,17 @@ export class TypeCTypeProvider {
             return operatorOverload;
         }
 
+        this.recordTypeError(node, 'Type does not implement reverse index access operator `[-]`');
         return this.typeFactory.createErrorType('Type does not implement reverse index access operator `[-]`', undefined, node);
     }
 
     private inferReverseIndexSet(node: ast.ReverseIndexSet): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
         if (isReferenceType(baseType)) {
             baseType = this.resolveReference(baseType);
         }
+        if (isErrorType(baseType)) return baseType;
 
         // CRITICAL: Handle generic types with constraints for index operators
         // If base type is a generic type parameter (e.g., T in fn<T: Indexable<K, V>>),
@@ -4357,6 +4394,7 @@ export class TypeCTypeProvider {
 
     private inferPostfixOp(node: ast.PostfixOp): TypeDescription {
         const exprType = this.inferExpression(node.expr);
+        if (isErrorType(exprType)) return exprType;
 
         // Check for operator overload on classes/interfaces
         // ++ and -- are unary operators (no parameters)
@@ -4383,6 +4421,7 @@ export class TypeCTypeProvider {
      */
     private inferObjectUpdate(node: ast.ObjectUpdate): TypeDescription {
         let baseType = this.inferExpression(node.expr);
+        if (isErrorType(baseType)) return baseType;
 
         // Track if the base is nullable (for optional chaining propagation)
         let baseIsNullable = false;
@@ -4435,11 +4474,9 @@ export class TypeCTypeProvider {
             }
 
             // No context available - cannot infer type
-            return this.typeFactory.createErrorType(
-                'Cannot infer type of empty array literal. Provide a type annotation (e.g., let x: T[] = [])',
-                undefined,
-                node
-            );
+            const emptyArrMsg = 'Cannot infer type of empty array literal. Provide a type annotation (e.g., let x: T[] = [])';
+            this.recordTypeError(node, emptyArrMsg);
+            return this.typeFactory.createErrorType(emptyArrMsg, undefined, node);
         }
 
         // Infer element types from all elements, handling spread expressions specially
@@ -4455,11 +4492,9 @@ export class TypeCTypeProvider {
                 }
 
                 // If not an array, return an error type (will be validated separately)
-                return this.typeFactory.createErrorType(
-                    `Array spread requires an array type, but got '${spreadType.toString()}'`,
-                    undefined,
-                    v
-                );
+                const spreadMsg = `Array spread requires an array type, but got '${spreadType.toString()}'`;
+                this.recordTypeError(v, spreadMsg);
+                return this.typeFactory.createErrorType(spreadMsg, undefined, v);
             }
 
             // Regular expression element
@@ -4489,9 +4524,8 @@ export class TypeCTypeProvider {
 
         const commonType = this.typeUtils.getCommonType(elementTypes);
 
-        // If getCommonType returns an error, return it directly instead of wrapping in array
-        // This ensures type errors are properly propagated to validation
         if (isErrorType(commonType)) {
+            this.recordTypeError(node, commonType.message || 'Type error');
             return commonType;
         }
 
@@ -4634,11 +4668,9 @@ export class TypeCTypeProvider {
 
             // Check if the number of expressions matches the number of fields
             if (expressions.length !== expectedStruct.fields.length) {
-                return this.typeFactory.createErrorType(
-                    `Anonymous struct has ${expressions.length} value(s), but expected struct type has ${expectedStruct.fields.length} field(s)`,
-                    undefined,
-                    node
-                );
+                const anonStructSizeMsg = `Anonymous struct has ${expressions.length} value(s), but expected struct type has ${expectedStruct.fields.length} field(s)`;
+                this.recordTypeError(node, anonStructSizeMsg);
+                return this.typeFactory.createErrorType(anonStructSizeMsg, undefined, node);
             }
 
             // Map expressions to struct fields in order
@@ -4657,12 +4689,10 @@ export class TypeCTypeProvider {
         }
 
         // No expected type or not a struct - cannot infer
-        return this.typeFactory.createErrorType(
-            `Cannot infer type of anonymous struct literal {${node.expressions?.length ?? 0} values}. ` +
-            `Anonymous struct literals require a known struct type context (e.g., from return type or variable annotation)`,
-            undefined,
-            node
-        );
+        const anonStructCtxMsg = `Cannot infer type of anonymous struct literal {${node.expressions?.length ?? 0} values}. ` +
+            `Anonymous struct literals require a known struct type context (e.g., from return type or variable annotation)`;
+        this.recordTypeError(node, anonStructCtxMsg);
+        return this.typeFactory.createErrorType(anonStructCtxMsg, undefined, node);
     }
 
     private inferNewExpression(node: ast.NewExpression): TypeDescription {
@@ -4842,7 +4872,11 @@ export class TypeCTypeProvider {
         const typesToUse = nonPlaceholders.length > 0 ? nonPlaceholders : allTypes;
 
         // Find the common type (not a union!)
-        return this.typeUtils.getCommonType(typesToUse);
+        const result = this.typeUtils.getCommonType(typesToUse);
+        if (isErrorType(result)) {
+            this.recordTypeError(node, result.message || 'Type error');
+        }
+        return result;
     }
 
     /**
@@ -4882,7 +4916,11 @@ export class TypeCTypeProvider {
         const typesToUse = nonPlaceholders.length > 0 ? nonPlaceholders : allTypes;
 
         // Find the common type (not a union!)
-        return this.typeUtils.getCommonType(typesToUse);
+        const result = this.typeUtils.getCommonType(typesToUse);
+        if (isErrorType(result)) {
+            this.recordTypeError(node, result.message || 'Type error');
+        }
+        return result;
     }
 
     private inferLetInExpression(node: ast.LetInExpression): TypeDescription {
@@ -4940,6 +4978,7 @@ export class TypeCTypeProvider {
             return this.getType(implNode);
         }
 
+        this.recordTypeError(node, 'this outside of class or impl');
         return this.typeFactory.createErrorType('this outside of class or impl', undefined, node);
     }
 
@@ -4972,11 +5011,9 @@ export class TypeCTypeProvider {
             return this.typeFactory.createSelfType(superTypes, node);
         }
 
-        return this.typeFactory.createErrorType(
-            "Type 'Self' can only be used inside a class, interface, or implementation block",
-            undefined,
-            node
-        );
+        const selfErrMsg = "Type 'Self' can only be used inside a class, interface, or implementation block";
+        this.recordTypeError(node, selfErrMsg);
+        return this.typeFactory.createErrorType(selfErrMsg, undefined, node);
     }
 
     private inferYieldExpression(node: ast.YieldExpression): TypeDescription {
@@ -4997,11 +5034,13 @@ export class TypeCTypeProvider {
             );
         }
 
+        this.recordTypeError(node, 'Coroutine of non-function');
         return this.typeFactory.createErrorType('Coroutine of non-function', undefined, node);
     }
 
     private inferDenullExpression(node: ast.DenullExpression): TypeDescription {
         const exprType = this.inferExpression(node.expr);
+        if (isErrorType(exprType)) return exprType;
 
         if (isNullableType(exprType)) {
             return exprType.baseType;
@@ -5257,6 +5296,7 @@ export class TypeCTypeProvider {
             return this.typeFactory.createErrorType('Unknown foreach statement');
         }
         const collectionType = this.inferExpression(foreachStmt.collection);
+        if (isErrorType(collectionType)) return collectionType;
 
         // Determine if this is the index or value variable
         const isIndexVar = foreachStmt.indexVar === node;
@@ -5281,12 +5321,10 @@ export class TypeCTypeProvider {
             }
         }
 
-        return this.typeFactory.createErrorType(
-            `Type '${collectionType.toString()}' is not iterable. ` +
-            `Expected array type or type implementing Iterable<U, V>`,
-            undefined,
-            node
-        );
+        const iterErrMsg = `Type '${collectionType.toString()}' is not iterable. ` +
+            `Expected array type or type implementing Iterable<U, V>`;
+        this.recordTypeError(node, iterErrMsg);
+        return this.typeFactory.createErrorType(iterErrMsg, undefined, node);
     }
 
     /**
@@ -5714,7 +5752,7 @@ export class TypeCTypeProvider {
      * Returns {indexType: U, valueType: V} if the type has a getIterator() method
      * that returns Iterator<U, V>.
      */
-    private extractIterableInterface(type: TypeDescription): { indexType: TypeDescription; valueType: TypeDescription } | undefined {
+    extractIterableInterface(type: TypeDescription): { indexType: TypeDescription; valueType: TypeDescription } | undefined {
 
         let resolvedType = this.typeUtils.resolveIfReference(type);
 

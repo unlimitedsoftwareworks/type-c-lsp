@@ -3219,53 +3219,107 @@ export class IRGenerator {
         this.enterScope();
 
         if (ast.isForEachIterator(node)) {
-            // foreach (item in collection)
             const collection = this.visitExpression(node.collection, undefined);
-            const lenReg = this.tmp();
-            f.arrayLength(lenReg, collection.register);
-
-            const idxReg = this.allocateVariable(`%foreach_idx`, scalarType('u64'));
-            f.constInt(idxReg, 0, 'u64');
-
-            const stepReg = this.tmp();
-            f.constInt(stepReg, 1, 'u64');
-
-            const loopStart = this.generateLabel('foreach_start');
-            const loopBody = this.generateLabel('foreach_body');
-            const loopUpdate = this.generateLabel('foreach_update');
-            const loopEnd = this.generateLabel('foreach_end');
-
-            // continue should execute the update step before re-checking the condition
-            this.pushLoop(loopEnd, loopUpdate);
-
-            f.label(loopStart);
-            const cmpReg = this.tmp();
-            f.cmpLt(cmpReg, idxReg, lenReg, 'u64');
-            f.br(cmpReg, loopBody, loopEnd);
-
-            f.label(loopBody);
-
-            // Get element type from the collection's TypeDescription
             const collTd = this.getType(node.collection);
-            let elemIRType: IRType = voidType();
+
             if (isArrayType(collTd)) {
-                elemIRType = this.convertTypeDescriptionToIR(collTd.elementType);
+                // Native array path: use array_length / array_get directly
+                const lenReg = this.tmp();
+                f.arrayLength(lenReg, collection.register);
+
+                const idxReg = this.allocateVariable(`%foreach_idx`, scalarType('u64'));
+                f.constInt(idxReg, 0, 'u64');
+
+                const stepReg = this.tmp();
+                f.constInt(stepReg, 1, 'u64');
+
+                const loopStart = this.generateLabel('foreach_start');
+                const loopBody = this.generateLabel('foreach_body');
+                const loopUpdate = this.generateLabel('foreach_update');
+                const loopEnd = this.generateLabel('foreach_end');
+
+                this.pushLoop(loopEnd, loopUpdate);
+
+                f.label(loopStart);
+                const cmpReg = this.tmp();
+                f.cmpLt(cmpReg, idxReg, lenReg, 'u64');
+                f.br(cmpReg, loopBody, loopEnd);
+
+                f.label(loopBody);
+
+                const elemIRType = this.convertTypeDescriptionToIR(collTd.elementType);
+
+                // Bind index variable if present (foreach i, v in arr)
+                if (node.indexVar && node.indexVar.name) {
+                    const indexVarReg = this.allocateVariable(node.indexVar.name, scalarType('u64'));
+                    f.mov(indexVarReg, idxReg, scalarType('u64'));
+                }
+
+                // Bind loop variable
+                const varName = node.valueVar.name ?? '_';
+                const elemReg = this.allocateVariable(varName, elemIRType);
+                f.arrayGet(elemReg, collection.register, idxReg, elemIRType);
+
+                this.visitBlockStatement(node.body);
+
+                f.label(loopUpdate);
+                f.add(idxReg, idxReg, stepReg, 'u64');
+                f.jmp(loopStart);
+
+                f.label(loopEnd);
+                this.popLoop();
+            } else {
+                // Iterator protocol path: getIterator() -> hasNext() / next()
+                const iterableInfo = this.typeProvider.extractIterableInterface(collTd);
+                const indexIRType = iterableInfo ? this.convertTypeDescriptionToIR(iterableInfo.indexType) : scalarType('u64');
+                const valueIRType = iterableInfo ? this.convertTypeDescriptionToIR(iterableInfo.valueType) : voidType();
+
+                // Call getIterator() on the collection
+                const getIteratorId = this.getOrCreateMethodNameId('getIterator');
+                const iteratorReg = this.tmp();
+                f.callMethod([iteratorReg], collection.register, getIteratorId, [], [], [ptrType('class')]);
+
+                const loopStart = this.generateLabel('foreach_iter_start');
+                const loopBody = this.generateLabel('foreach_iter_body');
+                const loopUpdate = this.generateLabel('foreach_iter_update');
+                const loopEnd = this.generateLabel('foreach_iter_end');
+
+                this.pushLoop(loopEnd, loopUpdate);
+
+                // Loop condition: hasNext()
+                f.label(loopStart);
+                const hasNextId = this.getOrCreateMethodNameId('hasNext');
+                const hasNextReg = this.tmp();
+                f.callMethod([hasNextReg], iteratorReg, hasNextId, [], [], [scalarType('bool')]);
+                f.br(hasNextReg, loopBody, loopEnd);
+
+                f.label(loopBody);
+
+                // Call next() -> (indexType, valueType)
+                const nextId = this.getOrCreateMethodNameId('next');
+                const nextIdxReg = this.tmp();
+                const nextValReg = this.tmp();
+                f.callMethod([nextIdxReg, nextValReg], iteratorReg, nextId, [], [], [indexIRType, valueIRType]);
+
+                // Bind index variable if present
+                if (node.indexVar && node.indexVar.name) {
+                    const indexVarReg = this.allocateVariable(node.indexVar.name, indexIRType);
+                    f.mov(indexVarReg, nextIdxReg, indexIRType);
+                }
+
+                // Bind value variable
+                const varName = node.valueVar.name ?? '_';
+                const elemReg = this.allocateVariable(varName, valueIRType);
+                f.mov(elemReg, nextValReg, valueIRType);
+
+                this.visitBlockStatement(node.body);
+
+                f.label(loopUpdate);
+                f.jmp(loopStart);
+
+                f.label(loopEnd);
+                this.popLoop();
             }
-
-            // Bind loop variable
-            const varName = node.valueVar.name ?? '_';
-            const elemReg = this.allocateVariable(varName, elemIRType);
-            f.arrayGet(elemReg, collection.register, idxReg, elemIRType);
-
-            this.visitBlockStatement(node.body);
-
-            // Increment index
-            f.label(loopUpdate);
-            f.add(idxReg, idxReg, stepReg, 'u64');
-            f.jmp(loopStart);
-
-            f.label(loopEnd);
-            this.popLoop();
         } else if (ast.isForRangeIterator(node)) {
             // foreach (i in start..end)
             const startResult = this.visitExpression(node.start, undefined);
@@ -5378,7 +5432,7 @@ export class IRGenerator {
             const target = ref.reference?.ref;
             if (!target) continue;
 
-            if (ast.isFunctionParameter(target) || ast.isVariableDeclSingle(target)) {
+            if (ast.isFunctionParameter(target) || ast.isVariableDeclSingle(target) || ast.isIteratorVar(target) || ast.isVariablePattern(target) || ast.isDestructuringElement(target)) {
                 const name = this.getReferenceName(target);
                 if (paramNames.has(name)) continue;
                 if (localNames.has(name)) continue;

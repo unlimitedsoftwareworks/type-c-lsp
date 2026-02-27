@@ -876,10 +876,8 @@ export class IRGenerator {
     ): { methodId: number; returnType: TypeDescription } | undefined {
         let resolved = isReferenceType(lhsTd) ? this.typeUtils.resolveIfReference(lhsTd) : lhsTd;
 
-        // Unwrap nullable
-        if (isNullableType(resolved)) {
-            resolved = resolved.baseType;
-        }
+        // Do NOT unwrap nullable — operator overloads should not apply to nullable types.
+        // The programmer must explicitly denull (x! == y) to use operator overloads.
 
         // Resolve generic constraints (e.g., T: Addable → Addable)
         resolved = this.typeUtils.resolveIfGeneric(resolved);

@@ -1,0 +1,21 @@
+// Test that duplicate prototypes inside namespaces are caught
+
+namespace Math {
+    type Vec2 = struct {
+        x: f32,
+        y: f32
+    }
+
+    prototype Vec2 {
+        fn length() -> f32 {
+            return this.x * this.x + this.y * this.y
+        }
+    }
+
+    /// @Error: Duplicate prototype for struct 'Vec2'
+    prototype Vec2 {
+        fn area() -> f32 {
+            return this.x * this.y
+        }
+    }
+}

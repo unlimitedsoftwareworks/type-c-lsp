@@ -1,0 +1,313 @@
+from std.unit.test import TestUnit, UnitSet
+
+// ============================================================================
+// Struct Prototypes — Class Integration + Advanced Scenarios
+// ============================================================================
+
+// --- 1. Class that uses struct with prototype ---
+// Tests prototype methods and operators called on struct fields of a class.
+
+type Vec2F = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Vec2F {
+    fn + (other: Vec2F) -> Vec2F {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+
+    fn - (other: Vec2F) -> Vec2F {
+        return { x: this.x - other.x, y: this.y - other.y }
+    }
+
+    fn scale(s: f32) -> Vec2F {
+        return { x: this.x * s, y: this.y * s }
+    }
+
+    fn length_sq() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+
+    fn neg() -> Vec2F {
+        return { x: -this.x, y: -this.y }
+    }
+}
+
+type Particle = class {
+    let pos: Vec2F
+    let vel: Vec2F
+
+    fn init(px: f32, py: f32, vx: f32, vy: f32) {
+        this.pos = { x: px, y: py }
+        this.vel = { x: vx, y: vy }
+    }
+
+    fn step(dt: f32) -> void {
+        this.pos = this.pos + this.vel.scale(dt)
+    }
+
+    fn getPos() -> Vec2F {
+        return this.pos
+    }
+
+    fn getVel() -> Vec2F {
+        return this.vel
+    }
+
+    fn getSpeed_sq() -> f32 {
+        return this.vel.length_sq()
+    }
+
+    fn reverse() -> void {
+        this.vel = this.vel.neg()
+    }
+}
+
+fn test_class_with_prototype(rn: TestUnit) {
+    let p = new Particle(0.0f, 0.0f, 10.0f, 5.0f)
+
+    // initial position
+    rn.assert_f32_eq_pre(p.getPos().x, 0.0f, 0.001f)
+    rn.assert_f32_eq_pre(p.getPos().y, 0.0f, 0.001f)
+
+    // step by dt=1
+    p.step(1.0f)
+    rn.assert_f32_eq_pre(p.getPos().x, 10.0f, 0.001f)
+    rn.assert_f32_eq_pre(p.getPos().y, 5.0f, 0.001f)
+
+    // step again by dt=0.5
+    p.step(0.5f)
+    rn.assert_f32_eq_pre(p.getPos().x, 15.0f, 0.001f)
+    rn.assert_f32_eq_pre(p.getPos().y, 7.5f, 0.001f)
+
+    // speed_sq = 10^2 + 5^2 = 125
+    rn.assert_f32_eq_pre(p.getSpeed_sq(), 125.0f, 0.001f)
+
+    // reverse velocity and step
+    p.reverse()
+    p.step(1.0f)
+    // pos = (15, 7.5) + (-10, -5) = (5, 2.5)
+    rn.assert_f32_eq_pre(p.getPos().x, 5.0f, 0.001f)
+    rn.assert_f32_eq_pre(p.getPos().y, 2.5f, 0.001f)
+}
+
+// --- 2. Generic class using struct with prototype ---
+// Tests prototype methods/operators on struct values obtained from a generic class.
+
+type Transform<T> = class {
+    let value: T
+
+    fn init(v: T) {
+        this.value = v
+    }
+
+    fn get() -> T {
+        return this.value
+    }
+
+    fn set(v: T) -> void {
+        this.value = v
+    }
+}
+
+fn test_generic_class_with_prototype(rn: TestUnit) {
+    let t = new Transform<Vec2F>({ x: 1.0f, y: 2.0f })
+
+    let v = t.get()
+    rn.assert_f32_eq_pre(v.x, 1.0f, 0.001f)
+    rn.assert_f32_eq_pre(v.y, 2.0f, 0.001f)
+
+    // Use prototype method on value retrieved from generic class
+    let scaled = t.get().scale(3.0f)
+    rn.assert_f32_eq_pre(scaled.x, 3.0f, 0.001f)
+    rn.assert_f32_eq_pre(scaled.y, 6.0f, 0.001f)
+
+    // Use prototype operator on value retrieved from generic class
+    let a = t.get()
+    let b: Vec2F = { x: 10.0f, y: 20.0f }
+    let sum = a + b
+    rn.assert_f32_eq_pre(sum.x, 11.0f, 0.001f)
+    rn.assert_f32_eq_pre(sum.y, 22.0f, 0.001f)
+
+    // Modify via set, verify with get
+    t.set({ x: 5.0f, y: 5.0f })
+    rn.assert_f32_eq_pre(t.get().length_sq(), 50.0f, 0.001f)
+}
+
+// --- 3. Multiple classes sharing the same struct prototype ---
+// Tests that different classes using the same struct type all work with the prototype.
+
+type RigidBody = class {
+    let pos: Vec2F
+    let mass: f32
+
+    fn init(px: f32, py: f32, m: f32) {
+        this.pos = { x: px, y: py }
+        this.mass = m
+    }
+
+    fn applyForce(f: Vec2F, dt: f32) -> void {
+        // acceleration = force / mass, dv = a * dt
+        let accel = f.scale(1.0f / this.mass)
+        this.pos = this.pos + accel.scale(dt)
+    }
+
+    fn getPos() -> Vec2F {
+        return this.pos
+    }
+}
+
+fn test_shared_prototype(rn: TestUnit) {
+    // Both Particle and RigidBody use Vec2F prototype
+    let p = new Particle(0.0f, 0.0f, 5.0f, 0.0f)
+    let rb = new RigidBody(10.0f, 0.0f, 2.0f)
+
+    p.step(1.0f)
+    rn.assert_f32_eq_pre(p.getPos().x, 5.0f, 0.001f)
+
+    rb.applyForce({ x: 10.0f, y: 0.0f }, 1.0f)
+    // pos = (10,0) + (10/2)*1 = (10,0) + (5,0) = (15,0)
+    rn.assert_f32_eq_pre(rb.getPos().x, 15.0f, 0.001f)
+
+    // Prototype operators work across different class contexts
+    let diff = p.getPos() - rb.getPos()
+    rn.assert_f32_eq_pre(diff.x, -10.0f, 0.001f)
+}
+
+// --- 4. Prototype method called in a generic function ---
+// Tests prototype methods called on struct values passed to generic functions.
+
+fn sum_pairs(a: Vec2F, b: Vec2F) -> Vec2F {
+    return a + b
+}
+
+fn apply_scale(v: Vec2F, s: f32) -> Vec2F {
+    return v.scale(s)
+}
+
+fn test_prototype_in_functions(rn: TestUnit) {
+    let a: Vec2F = { x: 1.0f, y: 2.0f }
+    let b: Vec2F = { x: 3.0f, y: 4.0f }
+
+    let s = sum_pairs(a, b)
+    rn.assert_f32_eq_pre(s.x, 4.0f, 0.001f)
+    rn.assert_f32_eq_pre(s.y, 6.0f, 0.001f)
+
+    let scaled = apply_scale(a, 5.0f)
+    rn.assert_f32_eq_pre(scaled.x, 5.0f, 0.001f)
+    rn.assert_f32_eq_pre(scaled.y, 10.0f, 0.001f)
+
+    // Nested: scale the result of a sum
+    let nested = apply_scale(sum_pairs(a, b), 2.0f)
+    rn.assert_f32_eq_pre(nested.x, 8.0f, 0.001f)
+    rn.assert_f32_eq_pre(nested.y, 12.0f, 0.001f)
+}
+
+// --- 5. Generic struct prototype ---
+// Tests prototype methods on generic structs with monomorphization.
+
+type Pair<T> = struct {
+    first: T,
+    second: T
+}
+
+prototype Pair {
+    fn swap() -> Pair<T> {
+        return { first: this.second, second: this.first }
+    }
+
+    fn getFirst() -> T {
+        return this.first
+    }
+}
+
+fn test_generic_struct_proto(rn: TestUnit) {
+    // Pair<u32> instantiation
+    let p: Pair<u32> = { first: 1u32, second: 2u32 }
+    let swapped = p.swap()
+    rn.assert_eq(swapped.first, 2u32)
+    rn.assert_eq(swapped.second, 1u32)
+    rn.assert_eq(p.getFirst(), 1u32)
+
+    // Pair<f32> instantiation — different type, same prototype
+    let pf: Pair<f32> = { first: 10.0f, second: 20.0f }
+    let swappedf = pf.swap()
+    rn.assert_f32_eq_pre(swappedf.first, 20.0f, 0.001f)
+    rn.assert_f32_eq_pre(swappedf.second, 10.0f, 0.001f)
+    rn.assert_f32_eq_pre(pf.getFirst(), 10.0f, 0.001f)
+}
+
+// --- 6. Generic struct prototype method called through functions ---
+
+fn swapPair(p: Pair<u32>) -> Pair<u32> {
+    return p.swap()
+}
+
+fn getFirstString(p: Pair<string>) -> string {
+    return p.getFirst()
+}
+
+fn test_generic_proto_through_functions(rn: TestUnit) {
+    // Prototype method through a non-generic function
+    let p: Pair<u32> = { first: 100u32, second: 200u32 }
+    let s = swapPair(p)
+    rn.assert_eq(s.first, 200u32)
+    rn.assert_eq(s.second, 100u32)
+
+    // Different instantiation through a different function
+    let p2: Pair<string> = { first: "hello", second: "world" }
+    let f = getFirstString(p2)
+
+    // Nested function calls with prototypes
+    let double_swap = swapPair(swapPair(p))
+    rn.assert_eq(double_swap.first, 100u32)
+    rn.assert_eq(double_swap.second, 200u32)
+}
+
+// --- 8. Generic struct prototype with method chaining ---
+
+type Builder<T> = struct {
+    items: T,
+    count: u32
+}
+
+prototype Builder {
+    fn addOne() -> Builder<T> {
+        return { items: this.items, count: this.count + 1u32 }
+    }
+
+    fn getCount() -> u32 {
+        return this.count
+    }
+}
+
+fn test_generic_proto_chaining(rn: TestUnit) {
+    let b: Builder<string> = { items: "hello", count: 0u32 }
+
+    // Chaining prototype methods
+    let b2 = b.addOne().addOne().addOne()
+    rn.assert_eq(b2.getCount(), 3u32)
+
+    // Different instantiation
+    let b3: Builder<u32> = { items: 42u32, count: 5u32 }
+    let b4 = b3.addOne().addOne()
+    rn.assert_eq(b4.getCount(), 7u32)
+}
+
+// --- Entry point ---
+
+fn test30() -> u32 {
+    let t1 = new TestUnit("class + proto", "Class using struct fields with prototype", test_class_with_prototype)
+    let t2 = new TestUnit("generic class + proto", "Generic class holding struct with prototype", test_generic_class_with_prototype)
+    let t3 = new TestUnit("shared proto", "Multiple classes sharing struct prototype", test_shared_prototype)
+    let t4 = new TestUnit("proto in funcs", "Prototype methods called from functions", test_prototype_in_functions)
+    let t5 = new TestUnit("generic struct proto", "Generic struct prototype with monomorphization", test_generic_struct_proto)
+    let t6 = new TestUnit("generic proto fn", "Generic struct prototype methods through functions", test_generic_proto_through_functions)
+    let t7 = new TestUnit("generic proto chain", "Generic struct prototype with method chaining", test_generic_proto_chaining)
+
+    let set = new UnitSet("Struct Prototypes — Class Integration",
+                          "Prototype interactions with classes, generic classes, and functions",
+                          [t1, t2, t3, t4, t5, t6, t7])
+    return set.run()
+}

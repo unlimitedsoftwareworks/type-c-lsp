@@ -1,0 +1,214 @@
+from std.unit.test import TestUnit, UnitSet
+
+// ============================================================================
+// Struct Prototypes — Stress Tests
+// ============================================================================
+
+// --- Vec3: full arithmetic + dot + cross + scalar ops ---
+
+type Vec3 = struct {
+    x: f32,
+    y: f32,
+    z: f32
+}
+
+prototype Vec3 {
+    fn dot(other: Vec3) -> f32 {
+        return this.x * other.x + this.y * other.y + this.z * other.z
+    }
+
+    fn length_sq() -> f32 {
+        return this.dot(this)
+    }
+
+    fn scale(s: f32) -> Vec3 {
+        return { x: this.x * s, y: this.y * s, z: this.z * s }
+    }
+
+    fn negate() -> Vec3 {
+        return { x: -this.x, y: -this.y, z: -this.z }
+    }
+
+    fn + (other: Vec3) -> Vec3 {
+        return { x: this.x + other.x, y: this.y + other.y, z: this.z + other.z }
+    }
+
+    fn - (other: Vec3) -> Vec3 {
+        return { x: this.x - other.x, y: this.y - other.y, z: this.z - other.z }
+    }
+}
+
+fn test_vec3(rn: TestUnit) {
+    let a: Vec3 = { x: 1.0f, y: 2.0f, z: 3.0f }
+    let b: Vec3 = { x: 4.0f, y: 5.0f, z: 6.0f }
+
+    // dot: 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
+    rn.assert_f32_eq_pre(a.dot(b), 32.0f, 0.001f)
+
+    // length_sq of a: 1 + 4 + 9 = 14
+    rn.assert_f32_eq_pre(a.length_sq(), 14.0f, 0.001f)
+
+    // scale
+    let scaled = a.scale(3.0f)
+    rn.assert_f32_eq_pre(scaled.x, 3.0f, 0.001f)
+    rn.assert_f32_eq_pre(scaled.y, 6.0f, 0.001f)
+    rn.assert_f32_eq_pre(scaled.z, 9.0f, 0.001f)
+
+    // negate
+    let neg = a.negate()
+    rn.assert_f32_eq_pre(neg.x, -1.0f, 0.001f)
+    rn.assert_f32_eq_pre(neg.y, -2.0f, 0.001f)
+    rn.assert_f32_eq_pre(neg.z, -3.0f, 0.001f)
+
+    // operator +
+    let sum = a + b
+    rn.assert_f32_eq_pre(sum.x, 5.0f, 0.001f)
+    rn.assert_f32_eq_pre(sum.y, 7.0f, 0.001f)
+    rn.assert_f32_eq_pre(sum.z, 9.0f, 0.001f)
+
+    // operator -
+    let diff = b - a
+    rn.assert_f32_eq_pre(diff.x, 3.0f, 0.001f)
+    rn.assert_f32_eq_pre(diff.y, 3.0f, 0.001f)
+    rn.assert_f32_eq_pre(diff.z, 3.0f, 0.001f)
+
+    // chained operators: (a + b) - a == b
+    let chain = (a + b) - a
+    rn.assert_f32_eq_pre(chain.x, b.x, 0.001f)
+    rn.assert_f32_eq_pre(chain.y, b.y, 0.001f)
+    rn.assert_f32_eq_pre(chain.z, b.z, 0.001f)
+
+    // method calling method: length_sq via dot
+    let c: Vec3 = { x: 2.0f, y: 0.0f, z: 0.0f }
+    rn.assert_f32_eq_pre(c.length_sq(), 4.0f, 0.001f)
+}
+
+// --- Deeper alias chain: type C = B = A (struct) ---
+
+type BaseVec = struct {
+    x: f32,
+    y: f32
+}
+
+type MidVec = BaseVec
+type TopVec = MidVec
+
+prototype TopVec {
+    fn sum() -> f32 {
+        return this.x + this.y
+    }
+
+    fn + (other: TopVec) -> TopVec {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+}
+
+fn test_deep_alias(rn: TestUnit) {
+    let a: TopVec = { x: 3.0f, y: 7.0f }
+    let b: TopVec = { x: 1.0f, y: 2.0f }
+
+    rn.assert_f32_eq_pre(a.sum(), 10.0f, 0.001f)
+
+    let s = a + b
+    rn.assert_f32_eq_pre(s.x, 4.0f, 0.001f)
+    rn.assert_f32_eq_pre(s.y, 9.0f, 0.001f)
+}
+
+// --- Integer accumulator: multiple operators + method chaining ---
+
+type Acc = struct {
+    val: i64
+}
+
+prototype Acc {
+    fn add(n: i64) -> Acc {
+        return { val: this.val + n }
+    }
+
+    fn mul(n: i64) -> Acc {
+        return { val: this.val * n }
+    }
+
+    fn sub(n: i64) -> Acc {
+        return { val: this.val - n }
+    }
+
+    fn get() -> i64 {
+        return this.val
+    }
+
+    fn + (other: Acc) -> Acc {
+        return { val: this.val + other.val }
+    }
+
+    fn - (other: Acc) -> Acc {
+        return { val: this.val - other.val }
+    }
+}
+
+fn test_accumulator(rn: TestUnit) {
+    let a: Acc = { val: 10i64 }
+
+    // method chaining
+    let r = a.add(5i64).mul(2i64).sub(3i64)
+    rn.assert_eq<i64>(r.get(), 27i64)
+
+    // operator chaining
+    let b: Acc = { val: 3i64 }
+    let c: Acc = { val: 7i64 }
+    let s = a + b + c
+    rn.assert_eq<i64>(s.get(), 20i64)
+
+    // mixed: operator then method
+    let d = (a + b).mul(2i64)
+    rn.assert_eq<i64>(d.get(), 26i64)
+
+    // original unchanged
+    rn.assert_eq<i64>(a.get(), 10i64)
+}
+
+// --- Namespace with alias prototype ---
+
+namespace Math2D {
+    type Vector = struct {
+        x: f64,
+        y: f64
+    }
+
+    type Vec = Vector
+
+    prototype Vec {
+        fn dot(other: Vec) -> f64 {
+            return this.x * other.x + this.y * other.y
+        }
+
+        fn + (other: Vec) -> Vec {
+            return { x: this.x + other.x, y: this.y + other.y }
+        }
+    }
+}
+
+fn test_namespace_alias(rn: TestUnit) {
+    let a: Math2D.Vec = { x: 3.0, y: 4.0 }
+    let b: Math2D.Vec = { x: 1.0, y: 2.0 }
+
+    // dot: 3*1 + 4*2 = 11
+    rn.assert_f64_eq_pre(a.dot(b), 11.0, 0.001)
+
+    let s = a + b
+    rn.assert_f64_eq_pre(s.x, 4.0, 0.001)
+    rn.assert_f64_eq_pre(s.y, 6.0, 0.001)
+}
+
+// --- Entry point ---
+
+fn test29() -> u32 {
+    let t1 = new TestUnit("vec3 ops", "Vec3 arithmetic and method-calling-method", test_vec3)
+    let t2 = new TestUnit("deep alias", "Prototype on type C = B = A chain", test_deep_alias)
+    let t3 = new TestUnit("accumulator", "Method chaining + operator chaining on Acc", test_accumulator)
+    let t4 = new TestUnit("namespace alias", "Prototype on alias inside namespace", test_namespace_alias)
+
+    let set = new UnitSet("Struct Prototypes — Stress Tests", "Advanced prototype scenarios",
+                          [t1, t2, t3, t4])
+    return set.run()
+}

@@ -1,0 +1,18 @@
+// Test that struct prototypes work correctly inside namespaces
+
+namespace Math {
+    type Vec2 = struct {
+        x: f32,
+        y: f32
+    }
+
+    prototype Vec2 {
+        fn length() -> f32 {
+            return this.x * this.x + this.y * this.y
+        }
+
+        fn add(other: Vec2) -> Vec2 {
+            return { x: this.x + other.x, y: this.y + other.y }
+        }
+    }
+}

@@ -1,0 +1,26 @@
+// Test type errors in generic struct prototype methods
+
+type Pair<T> = struct {
+    first: T,
+    second: T
+}
+
+prototype Pair {
+    // Returning string fields when T is generic — string is not assignable to T
+    /// @Error(TCE045): Method return type mismatch
+    fn badSwap() -> Pair<T> {
+        return { first: "oops", second: "nope" }
+    }
+}
+
+type Box<T> = struct {
+    value: T
+}
+
+prototype Box {
+    // Parameter type mismatch: u32 literal is not assignable to generic T
+    /// @Error(TCE045): Method return type mismatch
+    fn broken() -> Box<T> {
+        return { value: 42u32 }
+    }
+}

@@ -1,0 +1,13 @@
+// Test that generic parameters on prototype declarations are rejected
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+/// @Error: Generic parameters on prototype declarations are not supported
+prototype Point<T> {
+    fn length() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+}

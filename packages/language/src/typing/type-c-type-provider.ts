@@ -149,6 +149,26 @@ export class TypeCTypeProvider {
      */
     private readonly inferringImplMethods = new Map<ast.ClassMethod, ast.ImplementationType>();
 
+    /**
+     * Tracks struct prototype declarations currently being inferred to prevent
+     * false "Duplicate prototype" errors from re-entrant DocumentCache calls.
+     *
+     * When `inferStructPrototypeDeclaration(node)` processes a method whose return
+     * type resolution triggers `getType(node)` again (re-entrant call), the
+     * DocumentCache's factory is invoked a second time before the first call has
+     * finished. The placeholder is already in `structPrototypeByUri`, so without
+     * this guard the duplicate check would fire incorrectly.
+     */
+    private readonly inferringPrototypes = new Set<ast.StructPrototypeDeclaration>();
+
+    /**
+     * Registry of struct prototype methods, keyed first by document URI (for easy
+     * invalidation), then by the `ast.TypeDeclaration` that the prototype targets.
+     * Each TypeDeclaration has its own independent prototype — `prototype Point` and
+     * `prototype POINT` (where `type POINT = Point`) are completely separate.
+     */
+    private structPrototypeByUri = new Map<string, Map<ast.TypeDeclaration, { methods: MethodType[], node: ast.StructPrototypeDeclaration }>>();
+
     /** Services for accessing Langium infrastructure */
     protected readonly services: TypeCServices;
 
@@ -227,6 +247,7 @@ export class TypeCTypeProvider {
         this.expectedTypeCache.clear(documentUri);
         this.patternValidationErrorCache.clear(documentUri);
         this.diagnosticMap.clear(documentUri);
+        this.structPrototypeByUri.delete(documentUri.toString());
     }
 
     /**
@@ -995,14 +1016,17 @@ export class TypeCTypeProvider {
      * // Returns: [BuiltinSymbolID("length"), BuiltinSymbolFn("slice"), ...]
      * ```
      */
-    getIdentifiableFields(type: TypeDescription): AstNode[] {
+    getIdentifiableFields(type: TypeDescription, protoLookupDecl?: ast.TypeDeclaration): AstNode[] {
         const nodes: AstNode[] = [];
 
-        // Reference types - resolve and recurse
+        // Reference types - resolve and recurse, preserving the TypeDeclaration for prototype lookup.
+        // Use the OUTERMOST alias (protoLookupDecl if already set) rather than intermediate ones,
+        // so that for `type Z = Vec2`, `z.method()` uses prototype Z, not prototype Vec2.
         if (isReferenceType(type)) {
             const resolvedType = this.resolveReference(type);
-            // Recursively get fields from the resolved type
-            return this.getIdentifiableFields(resolvedType);
+            const decl = protoLookupDecl
+                ?? (ast.isTypeDeclaration(type.declaration) ? type.declaration : undefined);
+            return this.getIdentifiableFields(resolvedType, decl);
         }
 
         if (isNamespaceType(type)) {
@@ -1175,7 +1199,16 @@ export class TypeCTypeProvider {
         // Struct fields (including join types that resolve to structs)
         const structType = this.services.typing.TypeUtils.asStructType(type);
         if (structType) {
-            nodes.push(...structType.fields.map(e => e.node))
+            nodes.push(...structType.fields.map(e => e.node));
+            // Also include prototype methods for autocompletion.
+            // Use protoLookupDecl (the declared alias) so `prototype Z` methods appear
+            // for `z: Z` but NOT for `v: Vec2` even if `type Z = Vec2`.
+            if (protoLookupDecl) {
+                const proto = this.getStructPrototypeMethods(protoLookupDecl);
+                if (proto) {
+                    nodes.push(...proto.node.methods);
+                }
+            }
         }
 
         if (isMetaVariantType(type)) {
@@ -1230,6 +1263,7 @@ export class TypeCTypeProvider {
         if (ast.isInterfaceType(node)) return this.inferInterfaceType(node);
         if (ast.isClassType(node)) return this.inferClassType(node);
         if (ast.isImplementationType(node)) return this.inferImplementationType(node);
+        if (ast.isStructPrototypeDeclaration(node)) return this.inferStructPrototypeDeclaration(node);
         if (ast.isSelfType(node)) return this.inferSelfType(node);
         if (ast.isFunctionType(node)) return this.inferFunctionType(node);
         if (ast.isCoroutineType(node)) return this.inferCoroutineType(node);
@@ -1807,6 +1841,174 @@ export class TypeCTypeProvider {
         }
     }
 
+    /**
+     * Infers a struct prototype declaration, registering its methods for later lookup
+     * during member access and operator resolution.
+     */
+    private inferStructPrototypeDeclaration(node: ast.StructPrototypeDeclaration): TypeDescription {
+        const targetDecl = node.target?.ref;
+        if (!targetDecl || !ast.isTypeDeclaration(targetDecl)) {
+            this.recordTypeError(node, 'Invalid prototype target');
+            return this.typeFactory.createVoidType(node);
+        }
+
+        const definition = targetDecl.definition;
+
+        // Validate that the prototype target resolves to a struct type.
+        // The target may be a direct struct (type Vec2 = struct { ... })
+        // or a type alias (type Z = Vec2, type Pt = Point).
+        // Prototypes are bound to the TypeDeclaration reference, NOT the underlying struct —
+        // `prototype Point` and `prototype POINT` (where `type POINT = Point`) are independent.
+        const isStructBased = (() => {
+            if (ast.isStructType(definition)) return true;
+            const resolved = this.typeUtils.resolveDeepIfReference(this.getType(definition));
+            return isStructType(resolved);
+        })();
+
+        if (!isStructBased) {
+            const msg = `Prototype target '${targetDecl.name}' is not a struct type`;
+            this.recordTypeError(node, msg);
+            return this.typeFactory.createVoidType(node);
+        }
+
+        const docUri = AstUtils.getDocument(node).uri.toString();
+
+        // Re-entrant call guard: if we're already inferring this exact prototype node,
+        // return early to prevent infinite recursion. This happens when method return-type
+        // resolution triggers getType(protoDecl) before the first inference call finishes.
+        // (DocumentCache does not prevent re-entrant factory calls.)
+        if (this.inferringPrototypes.has(node)) {
+            return this.typeFactory.createVoidType(node);
+        }
+
+        // NOTE: Duplicate prototype detection is handled by the validator
+        // (checkStructPrototypeDeclaration), NOT here. This method may be called multiple
+        // times for the same node when Langium's WorkspaceCache invalidates the typeCache
+        // between validation passes. In that case we simply overwrite the registry entry.
+
+        // Mark as in-progress BEFORE registering the placeholder so any re-entrant call
+        // hits the guard above rather than proceeding with a second registration.
+        this.inferringPrototypes.add(node);
+
+        // Register a placeholder BEFORE processing methods so that any re-entrant
+        // getStructPrototypeMethods call on the same TypeDeclaration finds the (empty) entry
+        // rather than triggering inference again.
+        if (!this.structPrototypeByUri.has(docUri)) {
+            this.structPrototypeByUri.set(docUri, new Map());
+        }
+        const methods: MethodType[] = [];
+        this.structPrototypeByUri.get(docUri)!.set(targetDecl, { methods, node });
+
+        const seenNames = new Set<string>();
+
+        try {
+            for (const classMethod of node.methods) {
+                const methodHeader = classMethod.method;
+                if (!methodHeader) continue;
+
+                if (classMethod.isStatic) {
+                    this.recordTypeError(classMethod, 'Static methods are not allowed in struct prototypes');
+                    continue;
+                }
+                if (classMethod.isOverride) {
+                    this.recordTypeError(classMethod, 'Override methods are not allowed in struct prototypes');
+                    continue;
+                }
+
+                for (const name of methodHeader.names) {
+                    if (seenNames.has(name)) {
+                        this.recordTypeError(classMethod, `Duplicate method '${name}' in prototype for '${targetDecl.name}'`);
+                    }
+                    seenNames.add(name);
+                }
+
+                const genericParams = (methodHeader.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
+                const params = methodHeader.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
+                    arg.name ?? '',
+                    arg.type ? this.getType(arg.type) : this.getType(arg.defaultValue),
+                    arg.isMut,
+                    !!arg.defaultValue
+                )) ?? [];
+
+                let returnType: TypeDescription;
+                if (methodHeader.header?.returnType) {
+                    returnType = this.getType(methodHeader.header.returnType);
+                } else if (classMethod.expr) {
+                    returnType = this.getType(classMethod.expr);
+                } else if (classMethod.body) {
+                    returnType = this.inferReturnTypeFromBody(classMethod.body);
+                } else {
+                    returnType = this.typeFactory.createVoidType(classMethod);
+                }
+
+                methods.push({
+                    names: methodHeader.names,
+                    parameters: params,
+                    returnType,
+                    node: methodHeader,
+                    genericParameters: genericParams,
+                    isStatic: false,
+                    isOverride: false,
+                    isLocal: classMethod.isLocal ?? false
+                });
+            }
+        } finally {
+            // Always remove from the in-progress set, even if inference throws.
+            this.inferringPrototypes.delete(node);
+        }
+
+        // methods array is already stored by reference in the registry placeholder above.
+        // No need to re-register; the array was mutated in-place during the loop.
+        return this.typeFactory.createVoidType(node);
+    }
+
+    /**
+     * Looks up prototype methods for a named struct type by its TypeDeclaration.
+     * Prototypes are unique per TypeDeclaration reference — `prototype Point` and
+     * `prototype POINT` (where `type POINT = Point`) are completely independent.
+     *
+     * Lazily triggers inference if the prototype hasn't been processed yet.
+     *
+     * @param typeDecl The TypeDeclaration whose prototype to look up
+     * @returns Prototype info (methods + AST node), or undefined if none registered
+     */
+    public getStructPrototypeMethods(typeDecl: ast.TypeDeclaration): { methods: MethodType[], node: ast.StructPrototypeDeclaration } | undefined {
+        const document = AstUtils.getDocument(typeDecl);
+        const uriStr = document.uri.toString();
+
+        // Check if already in registry
+        const uriMap = this.structPrototypeByUri.get(uriStr);
+        if (uriMap?.has(typeDecl)) {
+            return uriMap.get(typeDecl);
+        }
+
+        // Not yet computed — find and trigger inference of the StructPrototypeDeclaration
+        // that targets this exact TypeDeclaration. Search the full document AST
+        // so namespace-scoped prototypes (e.g., namespace Geo { prototype Rect }) are found.
+        const moduleRoot = document.parseResult?.value;
+        if (!moduleRoot || !ast.isModule(moduleRoot)) return undefined;
+
+        const findPrototype = (definitions: AstNode[]): ast.StructPrototypeDeclaration | undefined => {
+            for (const def of definitions) {
+                if (ast.isStructPrototypeDeclaration(def) && def.target?.ref === typeDecl) {
+                    return def;
+                }
+                if (ast.isNamespaceDecl(def)) {
+                    const found = findPrototype(def.definitions);
+                    if (found) return found;
+                }
+            }
+            return undefined;
+        };
+
+        const protoDecl = findPrototype(moduleRoot.definitions);
+        if (protoDecl) {
+            this.getType(protoDecl); // triggers inferStructPrototypeDeclaration, populates registry
+        }
+
+        return this.structPrototypeByUri.get(uriStr)?.get(typeDecl);
+    }
+
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
@@ -2028,9 +2230,14 @@ export class TypeCTypeProvider {
 
         // If there are generic arguments, substitute them
         if (refType.genericArgs.length > 0 && refType.declaration.genericParameters) {
-            // MONOMORPHIZATION: Register class instantiation
+            // MONOMORPHIZATION: Register class/struct instantiation
             if (ast.isClassType(refType.declaration.definition)) {
                 this.services.typing.MonomorphizationRegistry.registerClassInstantiation(
+                    refType.declaration,
+                    refType.genericArgs
+                );
+            } else if (ast.isStructType(refType.declaration.definition)) {
+                this.services.typing.MonomorphizationRegistry.registerStructInstantiation(
                     refType.declaration,
                     refType.genericArgs
                 );
@@ -2958,8 +3165,9 @@ export class TypeCTypeProvider {
         rhsTypes: TypeDescription[],
         node: AstNode
     ): TypeDescription | undefined {
-        // Resolve reference types first
-        let resolvedLhs = this.typeUtils.resolveIfReference(lhsType);
+        // Resolve reference types first — use deep resolution so that multi-level aliases
+        // like `type Z = Vec2` (Z_ref → Vec2_ref → StructTypeDescription) are fully unwrapped.
+        let resolvedLhs = this.typeUtils.resolveDeepIfReference(lhsType);
 
         // Unwrap nullable types
         if (isNullableType(resolvedLhs)) {
@@ -2978,11 +3186,19 @@ export class TypeCTypeProvider {
             genericSubstitutions = this.buildGenericSubstitutions(lhsType);
         }
 
-        // Check if it's a class or interface type (only these can have operator overloads)
+        // Check if it's a class, interface, or struct type (these can have operator overloads)
         const classType = isClassType(resolvedLhs) ? resolvedLhs : undefined;
         const interfaceType = this.typeUtils.asInterfaceType(resolvedLhs);
+        const structType = isStructType(resolvedLhs) ? resolvedLhs : undefined;
 
-        if (!classType && !interfaceType) {
+        // For struct prototypes, extract the TypeDeclaration from the ORIGINAL lhsType
+        // (before deep-resolution) so we look up the declared alias's prototype, not the
+        // underlying struct's. e.g., `z1 + z2` where `z1: Z` uses `prototype Z`, not `prototype Vec2`.
+        const structProtoDecl = isReferenceType(lhsType) && ast.isTypeDeclaration(lhsType.declaration)
+            ? lhsType.declaration
+            : undefined;
+
+        if (!classType && !interfaceType && !structType) {
             return undefined;
         }
 
@@ -3053,6 +3269,17 @@ export class TypeCTypeProvider {
             }
         }
 
+        if (structType && structProtoDecl) {
+            const proto = this.getStructPrototypeMethods(structProtoDecl);
+            if (proto) {
+                for (const method of proto.methods) {
+                    if (method.names.includes(operator)) {
+                        methods.push(method);
+                    }
+                }
+            }
+        }
+
         if (methods.length === 0) {
             // No operator overload found
             return undefined;
@@ -3085,17 +3312,26 @@ export class TypeCTypeProvider {
             return applySubstitutions(argBasedCandidates[0]);
         }
 
+        // Helper to substitute generics in a parameter type for matching
+        const resolveParamType = (paramType: TypeDescription): TypeDescription => {
+            let resolved = paramType;
+            if (genericSubstitutions && genericSubstitutions.size > 0) {
+                resolved = this.typeUtils.substituteGenerics(resolved, genericSubstitutions);
+            }
+            return resolved;
+        };
+
         // Multiple candidates - find best match
         // First try exact match
         for (const method of argBasedCandidates) {
-            if (method.parameters.every((param, index) => this.typeUtils.areTypesEqual(rhsTypes[index], param.type).success)) {
+            if (method.parameters.every((param, index) => this.typeUtils.areTypesEqual(rhsTypes[index], resolveParamType(param.type)).success)) {
                 return applySubstitutions(method);
             }
         }
 
         // Then try assignable match
         for (const method of argBasedCandidates) {
-            if (method.parameters.every((param, index) => this.typeUtils.isAssignable(rhsTypes[index], param.type).success)) {
+            if (method.parameters.every((param, index) => this.typeUtils.isAssignable(rhsTypes[index], resolveParamType(param.type)).success)) {
                 return applySubstitutions(method);
             }
         }
@@ -3259,11 +3495,17 @@ export class TypeCTypeProvider {
         // Keep track of generic substitutions if we have a reference type with concrete args
         let genericSubstitutions: Map<string, TypeDescription> | undefined;
 
+        // Track the TypeDeclaration used to annotate the base expression so we can look up
+        // prototype methods using the declared type (not the resolved struct). This preserves
+        // alias identity: `prototype Z` methods are only accessible on values declared as `Z`,
+        // not on values declared as `Vec2` even though `type Z = Vec2`.
+        let protoLookupDecl: ast.TypeDeclaration | undefined;
+
         // CRITICAL FIX: Check if reference type points to a class or impl being inferred BEFORE resolving
         // This prevents triggering full inference of nested classes/impls during member access
         if (isReferenceType(baseType)) {
             const refDecl = baseType.declaration;
-            
+
             // Check if this reference points to a class currently being inferred
             if (refDecl && ast.isTypeDeclaration(refDecl) && ast.isClassType(refDecl.definition)) {
                 const targetClassNode = refDecl.definition;
@@ -3321,11 +3563,23 @@ export class TypeCTypeProvider {
                 }
             }
             else {
-                // Not a class or impl reference - resolve normally
+                // Not a class or impl reference — could be a struct prototype target.
+                // Save the TypeDeclaration BEFORE resolving so prototype lookup uses the
+                // declared alias (Z, Pt, ...) not the underlying struct type.
                 const refType = baseType;
+                if (ast.isTypeDeclaration(refType.declaration)) {
+                    protoLookupDecl = refType.declaration;
+                }
                 genericSubstitutions = this.buildGenericSubstitutions(refType);
                 baseType = this.resolveAndSubstituteReference(refType);
             }
+        }
+
+        // If we resolved a type alias (e.g., type Z = Vec2), one step gives ReferenceType(Vec2)
+        // rather than the struct directly. Deep-resolve to reach the struct, while keeping
+        // protoLookupDecl fixed on the original alias so prototype lookup stays correct.
+        if (protoLookupDecl && isReferenceType(baseType)) {
+            baseType = this.typeUtils.resolveDeepIfReference(baseType);
         }
 
         // If base type is a variant constructor type (e.g., Option<u32>.Some), extract generic substitutions
@@ -3605,6 +3859,32 @@ export class TypeCTypeProvider {
                     }
                 }
                 return fieldType;
+            }
+
+            // Field not found — check prototype methods.
+            // Use the TypeDeclaration that the value was declared with (protoLookupDecl),
+            // preserving alias identity: `prototype Z` is only found for `z: Z`, not for `v: Vec2`.
+            const proto = protoLookupDecl ? this.getStructPrototypeMethods(protoLookupDecl) : undefined;
+            if (proto) {
+                const method = proto.methods.find(m => m.names.includes(memberName));
+                if (method) {
+                    let memberType: TypeDescription = this.typeFactory.createFunctionType(
+                        method.parameters,
+                        method.returnType,
+                        'fn',
+                        method.genericParameters,
+                        method.node
+                    );
+                    if (genericSubstitutions && genericSubstitutions.size > 0) {
+                        memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
+                    }
+                    if (node.isNullable || baseIsNullable) {
+                        if (!this.typeUtils.isTypeBasic(memberType)) {
+                            memberType = this.typeFactory.createNullableType(memberType, node);
+                        }
+                    }
+                    return memberType;
+                }
             }
         }
 
@@ -4983,6 +5263,26 @@ export class TypeCTypeProvider {
         const implNode = AstUtils.getContainerOfType(node, ast.isImplementationType);
         if (implNode) {
             return this.getType(implNode);
+        }
+
+        // Find enclosing struct prototype declaration.
+        // Return a reference to the prototype's target TypeDeclaration so that `this`
+        // preserves the alias identity — `this` inside `prototype Z` has type `Z`,
+        // not the underlying struct. This ensures prototype method lookup uses Z's
+        // prototype (not the struct's or Vec2's prototype).
+        const protoNode = AstUtils.getContainerOfType(node, ast.isStructPrototypeDeclaration);
+        if (protoNode) {
+            const targetDecl = protoNode.target?.ref;
+            if (targetDecl && ast.isTypeDeclaration(targetDecl)) {
+                // Build generic args from the target struct's type parameters.
+                // For `type Pair<T> = struct { ... }; prototype Pair { ... }`,
+                // `this` has type `Pair<T>` (not `Pair<>`) so that field types
+                // involving T resolve correctly within the prototype body.
+                const genericArgs = (targetDecl.genericParameters ?? []).map(
+                    gp => this.inferGenericType(gp) as TypeDescription
+                );
+                return this.typeFactory.createReferenceType(targetDecl, genericArgs, node);
+            }
         }
 
         this.recordTypeError(node, 'this outside of class or impl');

@@ -1,0 +1,31 @@
+// Test that a prototype can target a type alias (type Z = Vec2).
+// The prototype applies to the underlying struct type.
+
+type Vec2 = struct {
+    x: f32,
+    y: f32
+}
+
+// Z is an alias — prototype Z is valid and applies to Z-typed values
+type Z = Vec2
+
+prototype Z {
+    fn length() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+
+    fn + (other: Z) -> Z {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+}
+
+fn main() -> void {
+    let z1: Z = { x: 1.0f, y: 2.0f }
+    let z2: Z = { x: 3.0f, y: 4.0f }
+
+    /// @Type(len): f32
+    let len = z1.length()
+
+    /// @Type(sum): Z
+    let sum = z1 + z2
+}

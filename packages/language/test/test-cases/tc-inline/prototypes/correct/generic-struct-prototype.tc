@@ -1,0 +1,83 @@
+// Test generic struct prototypes — T resolves inside prototype bodies
+// and return types substitute correctly for multiple instantiations
+
+type Pair<T> = struct {
+    first: T,
+    second: T
+}
+
+prototype Pair {
+    fn swap() -> Pair<T> {
+        return { first: this.second, second: this.first }
+    }
+
+    fn getFirst() -> T {
+        return this.first
+    }
+
+    fn withFirst(v: T) -> Pair<T> {
+        return { first: v, second: this.second }
+    }
+}
+
+type Wrapper<K, V> = struct {
+    key: K,
+    value: V
+}
+
+prototype Wrapper {
+    fn getKey() -> K {
+        return this.key
+    }
+
+    fn getValue() -> V {
+        return this.value
+    }
+
+    fn mapValue(newVal: V) -> Wrapper<K, V> {
+        return { key: this.key, value: newVal }
+    }
+}
+
+fn main() -> void {
+    // ---- Pair<u32> instantiation ----
+    let p1: Pair<u32> = { first: 1u32, second: 2u32 }
+
+    /// @Type(swapped1): Pair<u32>
+    let swapped1 = p1.swap()
+
+    /// @Type(f1): u32
+    let f1 = p1.getFirst()
+
+    // Method with generic parameter
+    /// @Type(replaced1): Pair<u32>
+    let replaced1 = p1.withFirst(99u32)
+
+    // ---- Pair<string> instantiation — different type args, no conflict ----
+    let p2: Pair<string> = { first: "hello", second: "world" }
+
+    /// @Type(swapped2): Pair<string>
+    let swapped2 = p2.swap()
+
+    /// @Type(f2): string
+    let f2 = p2.getFirst()
+
+    // ---- Method chaining with generic prototype ----
+    /// @Type(chained): Pair<u32>
+    let chained = p1.swap().swap()
+
+    /// @Type(chainedFirst): u32
+    let chainedFirst = p1.swap().getFirst()
+
+    // ---- Wrapper<string, u32> — multi-param generic ----
+    let w: Wrapper<string, u32> = { key: "age", value: 30u32 }
+
+    /// @Type(k): string
+    let k = w.getKey()
+
+    /// @Type(v): u32
+    let v = w.getValue()
+
+    /// @Type(mapped): Wrapper<string, u32>
+    let mapped = w.mapValue(42u32)
+}

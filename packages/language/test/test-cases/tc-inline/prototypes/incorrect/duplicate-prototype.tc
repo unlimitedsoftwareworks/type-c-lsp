@@ -1,0 +1,19 @@
+// Test that a duplicate prototype for the same struct produces an error
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Point {
+    fn length() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+}
+
+/// @Error: Duplicate prototype for struct 'Point'
+prototype Point {
+    fn area() -> f32 {
+        return this.x * this.y
+    }
+}

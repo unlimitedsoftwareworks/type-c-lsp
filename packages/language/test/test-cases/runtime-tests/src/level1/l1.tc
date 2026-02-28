@@ -26,7 +26,9 @@ from level1.test24 import test24
 from level1.test25 import test25
 from level1.test26 import test26
 from level1.test27 import test27
-//from level1.test28 import test28
+from level1.test28 import test28
+from level1.test29 import test29
+from level1.test30 import test30
 
 fn l1() {
     let funcs = [
@@ -57,8 +59,10 @@ fn l1() {
         test24,
         test25,
         test26,
-        test27
-        //test28
+        test27,
+        test28,
+        test29,
+        test30
     ]
 
     foreach f in funcs {

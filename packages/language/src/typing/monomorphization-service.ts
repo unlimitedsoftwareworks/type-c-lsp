@@ -58,6 +58,19 @@ export interface MethodInstantiation {
 }
 
 /**
+ * Represents a concrete instantiation of a generic struct (for struct prototypes).
+ * Example: Pair<u32>, Pair<string>
+ */
+export interface StructInstantiation {
+    /** The generic struct declaration */
+    readonly declaration: ast.TypeDeclaration;
+    /** Concrete type arguments for this instantiation */
+    readonly typeArgs: readonly TypeDescription[];
+    /** Canonical key for this instantiation (e.g., "Pair<u32>") */
+    readonly key: string;
+}
+
+/**
  * Represents a concrete instantiation of a generic function.
  * Example: sort<u32>, map<string>
  */
@@ -86,6 +99,9 @@ export class MonomorphizationRegistry {
     /** Map of function instantiation keys to their details */
     private functions = new Map<string, FunctionInstantiation>();
 
+    /** Map of struct instantiation keys to their details */
+    private structs = new Map<string, StructInstantiation>();
+
     /**
      * Clears all registered instantiations.
      * Useful for testing or when recompiling.
@@ -94,6 +110,7 @@ export class MonomorphizationRegistry {
         this.classes.clear();
         this.methods.clear();
         this.functions.clear();
+        this.structs.clear();
     }
 
     // ============================================================================
@@ -347,6 +364,67 @@ export class MonomorphizationRegistry {
     }
 
     // ============================================================================
+    // Struct Instantiation Registration
+    // ============================================================================
+
+    /**
+     * Registers a concrete instantiation of a generic struct.
+     *
+     * Called during type checking when a generic struct is used with concrete type arguments.
+     * For example, when seeing `let p: Pair<u32> = ...`.
+     *
+     * @param decl The generic struct declaration
+     * @param typeArgs Concrete type arguments (must match generic parameter count)
+     * @returns Canonical key for this instantiation
+     */
+    registerStructInstantiation(
+        decl: ast.TypeDeclaration,
+        typeArgs: readonly TypeDescription[]
+    ): string {
+        const qualifiedName = this.getQualifiedDeclName(decl);
+        if (!decl.genericParameters || decl.genericParameters.length === 0) {
+            return qualifiedName;
+        }
+
+        if (typeArgs.some(arg => this.containsErrorType(arg))) {
+            return qualifiedName;
+        }
+
+        if (typeArgs.some(arg => this.containsGenericType(arg))) {
+            return qualifiedName;
+        }
+
+        const key = this.makeStructKey(decl, typeArgs);
+
+        if (!this.structs.has(key)) {
+            this.structs.set(key, {
+                declaration: decl,
+                typeArgs: [...typeArgs],
+                key
+            });
+        }
+
+        return key;
+    }
+
+    /**
+     * Creates a canonical key for a struct instantiation.
+     * Format: QualifiedStructName<Type1,Type2,...>
+     */
+    private makeStructKey(
+        decl: ast.TypeDeclaration,
+        typeArgs: readonly TypeDescription[]
+    ): string {
+        const qualifiedName = this.getQualifiedDeclName(decl);
+        if (typeArgs.length === 0) {
+            return qualifiedName;
+        }
+
+        const typeArgStrings = typeArgs.map(t => this.canonicalizeType(t));
+        return `${qualifiedName}<${typeArgStrings.join(',')}>`;
+    }
+
+    // ============================================================================
     // Retrieval Methods (for Code Generation)
     // ============================================================================
 
@@ -408,6 +486,21 @@ export class MonomorphizationRegistry {
     }
 
     /**
+     * Returns all registered struct instantiations.
+     * Used during code generation to produce specialized struct prototype methods.
+     */
+    getAllStructInstantiations(): StructInstantiation[] {
+        return Array.from(this.structs.values());
+    }
+
+    /**
+     * Gets a specific struct instantiation by its key.
+     */
+    getStructInstantiation(key: string): StructInstantiation | undefined {
+        return this.structs.get(key);
+    }
+
+    /**
      * Checks if a class instantiation exists.
      */
     hasClassInstantiation(key: string): boolean {
@@ -422,11 +515,13 @@ export class MonomorphizationRegistry {
         classCount: number;
         methodCount: number;
         functionCount: number;
+        structCount: number;
     } {
         return {
             classCount: this.classes.size,
             methodCount: this.methods.size,
-            functionCount: this.functions.size
+            functionCount: this.functions.size,
+            structCount: this.structs.size
         };
     }
 

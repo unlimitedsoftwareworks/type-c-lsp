@@ -1,0 +1,52 @@
+// Test basic struct prototype declarations
+
+type Vec2 = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Vec2 {
+    // Method with this access
+    fn length() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+
+    // Method with parameter
+    fn add(other: Vec2) -> Vec2 {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+
+    // Method that mutates this
+    fn scale(factor: f32) -> void {
+        this.x = this.x * factor
+        this.y = this.y * factor
+    }
+
+    // Operator overload
+    fn + (other: Vec2) -> Vec2 {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+
+    fn - (other: Vec2) -> Vec2 {
+        return { x: this.x - other.x, y: this.y - other.y }
+    }
+}
+
+fn main() -> void {
+    let v1: Vec2 = { x: 1.0f, y: 2.0f }
+    let v2: Vec2 = { x: 3.0f, y: 4.0f }
+
+    // Method calls via member access
+    /// @Type(len): f32
+    let len = v1.length()
+
+    /// @Type(sum): Vec2
+    let sum = v1.add(v2)
+
+    // Operator overloads
+    /// @Type(added): Vec2
+    let added = v1 + v2
+
+    /// @Type(subbed): Vec2
+    let subbed = v2 - v1
+}

@@ -6,14 +6,15 @@ entry Module:
 interface Program {
     imports: Import[];
     definitions: (
-        NamespaceDecl | 
-        FunctionDeclaration | 
-        TypeDeclaration | 
-        ExternFFIDecl | 
+        NamespaceDecl |
+        FunctionDeclaration |
+        TypeDeclaration |
+        ExternFFIDecl |
         VariableDeclarationStatement |
         ClassType |
         ImplementationType |
-        BuiltinDefinition
+        BuiltinDefinition |
+        StructPrototypeDeclaration
     )[];
 }
 
@@ -32,7 +33,7 @@ SubModule:
     reference=[IdentifiableReference:ID] ('.' nestedPath+=ID)* ('as' alias=ID)?;
 
 fragment GlobalDefinition:
-    definitions+=(NamespaceDecl | FnDecl<true> | CFnDecl<true> | TypeDecl<true> | VariableDeclarationStatement<true> | ExternFFIDecl | BuiltinDefinition) ;
+    definitions+=(NamespaceDecl | FnDecl<true> | CFnDecl<true> | TypeDecl<true> | VariableDeclarationStatement<true> | ExternFFIDecl | BuiltinDefinition | StructPrototypeDeclaration) ;
 
 ExternFFIDecl:
     (isLocal?='local')? 'extern' name=ID 'from' dynlib=STRING '='? '{' 
@@ -808,6 +809,19 @@ WildCardPattern:
 BuiltinDefinition:
     'prototype' 'for' name=('array' | 'coroutine' | 'string') '{' symbols+=BuiltinSymbol (symbols+=BuiltinSymbol)* '}'
 ;
+
+/**
+ * Struct prototype declarations bind methods and operator overloads to named struct types.
+ * Example:
+ *   prototype Vector {
+ *       fn add(v2: Vector) -> Vector { ... }
+ *       fn +(v2: Vector) -> Vector = this.add(v2)
+ *   }
+ */
+StructPrototypeDeclaration:
+    'prototype' target=[TypeDeclaration:ID] GenericDecl? '{'
+        methods+=ClassMethod*
+    '}';
 
 BuiltinSymbol:
     {infer BuiltinSymbolID} name=ID ':' type=DataType<false> |

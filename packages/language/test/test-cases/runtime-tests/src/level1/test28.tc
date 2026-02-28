@@ -1,0 +1,187 @@
+from std.unit.test import TestUnit, UnitSet
+
+// ============================================================================
+// Struct Prototypes
+// ============================================================================
+
+// --- Vec2: basic method + operator overloads ---
+
+type Vec2 = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Vec2 {
+    fn dot(other: Vec2) -> f32 {
+        return this.x * other.x + this.y * other.y
+    }
+
+    fn length_sq() -> f32 {
+        return this.x * this.x + this.y * this.y
+    }
+
+    fn scale(s: f32) -> Vec2 {
+        return { x: this.x * s, y: this.y * s }
+    }
+
+    fn + (other: Vec2) -> Vec2 {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+
+    fn - (other: Vec2) -> Vec2 {
+        return { x: this.x - other.x, y: this.y - other.y }
+    }
+
+}
+
+fn test_vec2_methods(rn: TestUnit) {
+    let a: Vec2 = { x: 3.0f, y: 4.0f }
+    let b: Vec2 = { x: 1.0f, y: 2.0f }
+
+    // length_sq: 3^2 + 4^2 = 25
+    rn.assert_f32_eq_pre(a.length_sq(), 25.0f, 0.001f)
+
+    // dot: 3*1 + 4*2 = 11
+    rn.assert_f32_eq_pre(a.dot(b), 11.0f, 0.001f)
+
+    // scale
+    let scaled = a.scale(2.0f)
+    rn.assert_f32_eq_pre(scaled.x, 6.0f, 0.001f)
+    rn.assert_f32_eq_pre(scaled.y, 8.0f, 0.001f)
+}
+
+fn test_vec2_operators(rn: TestUnit) {
+    let a: Vec2 = { x: 3.0f, y: 4.0f }
+    let b: Vec2 = { x: 1.0f, y: 2.0f }
+
+    let sum = a + b
+    rn.assert_f32_eq_pre(sum.x, 4.0f, 0.001f)
+    rn.assert_f32_eq_pre(sum.y, 6.0f, 0.001f)
+
+    let diff = a - b
+    rn.assert_f32_eq_pre(diff.x, 2.0f, 0.001f)
+    rn.assert_f32_eq_pre(diff.y, 2.0f, 0.001f)
+}
+
+// --- Counter: stateless "method" with chaining via return ---
+
+type Counter = struct {
+    value: i32
+}
+
+prototype Counter {
+    fn increment() -> Counter {
+        return { value: this.value + 1i32 }
+    }
+
+    fn decrement() -> Counter {
+        return { value: this.value - 1i32 }
+    }
+
+    fn add(n: i32) -> Counter {
+        return { value: this.value + n }
+    }
+
+    fn get() -> i32 {
+        return this.value
+    }
+}
+
+fn test_counter(rn: TestUnit) {
+    let c: Counter = { value: 0i32 }
+
+    let c1 = c.increment()
+    rn.assert_eq<i32>(c1.get(), 1i32)
+
+    let c2 = c1.increment().increment()
+    rn.assert_eq<i32>(c2.get(), 3i32)
+
+    let c3 = c2.decrement()
+    rn.assert_eq<i32>(c3.get(), 2i32)
+
+    let c4 = c3.add(10i32)
+    rn.assert_eq<i32>(c4.get(), 12i32)
+
+    // original is unchanged (structs are value types)
+    rn.assert_eq<i32>(c.get(), 0i32)
+}
+
+// --- Alias prototype: prototype declared on a type alias ---
+
+type Point = struct {
+    x: f32,
+    y: f32
+}
+
+type Pt = Point
+
+prototype Pt {
+    fn manhattan(other: Pt) -> f32 {
+        let dx = this.x - other.x
+        let dy = this.y - other.y
+        return (if dx >= 0.0f => dx else -dx) + (if dy >= 0.0f => dy else -dy)
+    }
+
+    fn + (other: Pt) -> Pt {
+        return { x: this.x + other.x, y: this.y + other.y }
+    }
+}
+
+fn test_alias_prototype(rn: TestUnit) {
+    let p1: Pt = { x: 1.0f, y: 2.0f }
+    let p2: Pt = { x: 4.0f, y: 6.0f }
+
+    // manhattan distance: |1-4| + |2-6| = 3 + 4 = 7
+    rn.assert_f32_eq_pre(p1.manhattan(p2), 7.0f, 0.001f)
+
+    let sum = p1 + p2
+    rn.assert_f32_eq_pre(sum.x, 5.0f, 0.001f)
+    rn.assert_f32_eq_pre(sum.y, 8.0f, 0.001f)
+}
+
+// --- Namespace prototype ---
+
+namespace Geo {
+    type Rect = struct {
+        w: f32,
+        h: f32
+    }
+
+    prototype Rect {
+        fn area() -> f32 {
+            return this.w * this.h
+        }
+
+        fn perimeter() -> f32 {
+            return 2.0f * (this.w + this.h)
+        }
+
+        fn scale(s: f32) -> Geo.Rect {
+            return { w: this.w * s, h: this.h * s }
+        }
+    }
+}
+
+fn test_namespace_prototype(rn: TestUnit) {
+    let r: Geo.Rect = { w: 3.0f, h: 4.0f }
+
+    rn.assert_f32_eq_pre(r.area(), 12.0f, 0.001f)
+    rn.assert_f32_eq_pre(r.perimeter(), 14.0f, 0.001f)
+
+    let r2 = r.scale(2.0f)
+    rn.assert_f32_eq_pre(r2.area(), 48.0f, 0.001f)
+}
+
+// --- Entry point ---
+
+fn test28() -> u32 {
+    let t1 = new TestUnit("vec2 methods", "Prototype instance methods on Vec2", test_vec2_methods)
+    let t2 = new TestUnit("vec2 operators", "Prototype operator overloads on Vec2", test_vec2_operators)
+    let t3 = new TestUnit("counter chaining", "Prototype method chaining via return values", test_counter)
+    let t4 = new TestUnit("alias prototype", "Prototype declared on a type alias", test_alias_prototype)
+    let t5 = new TestUnit("namespace prototype", "Prototype declared inside a namespace", test_namespace_prototype)
+
+    let set = new UnitSet("Struct Prototypes", "Extension methods and operator overloads via prototype declarations",
+                          [t1, t2, t3, t4, t5])
+    return set.run()
+}

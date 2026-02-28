@@ -73,7 +73,8 @@ import type {
     StructTypeDescription,
     ArrayTypeDescription,
     FFITypeDescription,
-    NullableTypeDescription
+    NullableTypeDescription,
+    MethodType
 } from 'type-c-language/types';
 import {
     TypeCTypeProvider,
@@ -873,8 +874,13 @@ export class IRGenerator {
         lhsTd: TypeDescription,
         operator: string,
         rhsTypes: TypeDescription[]
-    ): { methodId: number; returnType: TypeDescription } | undefined {
-        let resolved = isReferenceType(lhsTd) ? this.typeUtils.resolveIfReference(lhsTd) : lhsTd;
+    ): { methodId: number; funcName?: string; returnType: TypeDescription } | undefined {
+        // Extract TypeDeclaration from the original lhsTd BEFORE resolving (for struct prototype lookup)
+        const structProtoDecl = isReferenceType(lhsTd) && ast.isTypeDeclaration(lhsTd.declaration)
+            ? lhsTd.declaration
+            : undefined;
+
+        let resolved = isReferenceType(lhsTd) ? this.typeUtils.resolveDeepIfReference(lhsTd) : lhsTd;
 
         // Do NOT unwrap nullable — operator overloads should not apply to nullable types.
         // The programmer must explicitly denull (x! == y) to use operator overloads.
@@ -883,6 +889,10 @@ export class IRGenerator {
         resolved = this.typeUtils.resolveIfGeneric(resolved);
 
         if (!isClassType(resolved) && !isInterfaceType(resolved)) {
+            // Check struct prototype operators (direct call, no vtable)
+            if (isStructType(resolved) && structProtoDecl) {
+                return this.resolveStructPrototypeOperator(structProtoDecl, operator, rhsTypes, lhsTd);
+            }
             return undefined;
         }
 
@@ -978,6 +988,90 @@ export class IRGenerator {
         return undefined;
     }
 
+    /**
+     * Resolves an operator overload for a struct prototype method.
+     * Returns a direct call descriptor (no vtable) for struct prototype operators.
+     */
+    private resolveStructPrototypeOperator(
+        typeDecl: ast.TypeDeclaration,
+        operator: string,
+        rhsTypes: TypeDescription[],
+        objType?: TypeDescription
+    ): { methodId: number; funcName: string; returnType: TypeDescription } | undefined {
+        const proto = this.typeProvider.getStructPrototypeMethods(typeDecl);
+        if (!proto) return undefined;
+
+        const operatorAliases = this.getOperatorAliases(operator);
+        const candidates = proto.methods.filter(m =>
+            m.names.some(n => operatorAliases.includes(n)) &&
+            rhsTypes.length >= getMinArity(m.parameters) &&
+            rhsTypes.length <= m.parameters.length
+        );
+        if (candidates.length === 0) return undefined;
+
+        // Prioritize exact operator name match over aliases (e.g., prefer `fn +` over `fn add`)
+        // and check type compatibility to avoid selecting wrong overload
+        let method: MethodType | undefined;
+        // 1. Exact name + exact type match
+        for (const c of candidates) {
+            if (c.names.includes(operator) &&
+                c.parameters.every((p, i) => this.typeUtils.areTypesEqual(rhsTypes[i], p.type).success)) {
+                method = c; break;
+            }
+        }
+        // 2. Exact name + assignable type match
+        if (!method) {
+            for (const c of candidates) {
+                if (c.names.includes(operator) &&
+                    c.parameters.every((p, i) => this.typeUtils.isAssignable(rhsTypes[i], p.type).success)) {
+                    method = c; break;
+                }
+            }
+        }
+        // 3. Alias name + exact type match
+        if (!method) {
+            for (const c of candidates) {
+                if (c.parameters.every((p, i) => this.typeUtils.areTypesEqual(rhsTypes[i], p.type).success)) {
+                    method = c; break;
+                }
+            }
+        }
+        // 4. Alias name + assignable type match
+        if (!method) {
+            for (const c of candidates) {
+                if (c.parameters.every((p, i) => this.typeUtils.isAssignable(rhsTypes[i], p.type).success)) {
+                    method = c; break;
+                }
+            }
+        }
+        // 5. Fallback: first candidate
+        if (!method) method = candidates[0];
+        const protoDecl = proto.node;
+        const structDecl = protoDecl.target?.ref;
+        if (!structDecl) return undefined;
+
+        const structName = objType
+            ? this.getStructPrototypeIRName(structDecl, objType)
+            : this.getQualifiedDeclName(structDecl);
+        const methodName = method.names[0] ?? operator;
+        const funcName = this.monoMorph.mangleName(`${structName}::${methodName}`);
+
+        // Substitute generics in return type for generic structs
+        let returnType = method.returnType;
+        if (objType && isReferenceType(objType) && objType.genericArgs.length > 0 &&
+            structDecl.genericParameters?.length) {
+            const subs = new Map<string, TypeDescription>();
+            structDecl.genericParameters.forEach((param, index) => {
+                if (index < objType.genericArgs.length) {
+                    subs.set(param.name, objType.genericArgs[index]);
+                }
+            });
+            returnType = this.typeUtils.substituteGenerics(returnType, subs);
+        }
+
+        return { methodId: -1, funcName, returnType };
+    }
+
     private getOperatorAliases(operator: string): readonly string[] {
         switch (operator) {
             case '+':
@@ -1040,11 +1134,12 @@ export class IRGenerator {
     }
 
     /**
-     * Emit a callMethod for an operator overload and return the result.
+     * Emit an operator overload call and return the result.
+     * Supports both vtable dispatch (class/interface) and direct call (struct prototype).
      */
     private emitOperatorCall(
         obj: ExpressionResult,
-        methodId: number,
+        overload: { methodId: number; funcName?: string },
         returnTd: TypeDescription,
         argRegs: VReg[],
         argTypes: IRType[]
@@ -1054,7 +1149,12 @@ export class IRGenerator {
         const retTypes = retType.tag === 'void' ? [] : [retType];
         const dests = retType.tag === 'void' ? [] : [this.tmp()];
 
-        f.callMethod(dests, obj.register, methodId, argRegs, argTypes, retTypes);
+        if (overload.funcName) {
+            // Direct call for struct prototype methods (no vtable)
+            f.call(dests, overload.funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+        } else {
+            f.callMethod(dests, obj.register, overload.methodId, argRegs, argTypes, retTypes);
+        }
 
         if (dests.length > 0) {
             return { register: dests[0], type: retTypes[0] };
@@ -1288,6 +1388,7 @@ export class IRGenerator {
         }
         this.generateGlobalSymbols(node);
         this.generateClasses(node);
+        this.generateStructPrototypeMethods(node);
         this.generateFunctions(node);
     }
 
@@ -1914,6 +2015,211 @@ export class IRGenerator {
         this.context.labelCounter = prevLabel;
         this.context.scopeDepth = prevScope;
         this.context.doExprStack = prevDoExprStack;
+    }
+
+    /**
+     * Generate standalone IR functions for all methods in all struct prototype declarations
+     * within the given module/namespace node.
+     * For generic structs, generates one monomorphized copy per concrete instantiation.
+     */
+    private generateStructPrototypeMethods(node: ast.Module | ast.NamespaceDecl): void {
+        const protos = AstUtils.streamContents(node)
+            .filter(ast.isStructPrototypeDeclaration)
+            .toArray();
+
+        for (const protoDecl of protos) {
+            const structDecl = protoDecl.target?.ref;
+            if (!structDecl) continue;
+
+            const isGeneric = structDecl.genericParameters && structDecl.genericParameters.length > 0;
+
+            if (isGeneric) {
+                // Monomorphize: generate one copy per concrete instantiation
+                const allInstantiations = this.monoMorph.getAllStructInstantiations();
+                const structInstantiations = allInstantiations.filter(
+                    inst => inst.declaration === structDecl
+                );
+
+                for (const inst of structInstantiations) {
+                    const substitutions = new Map<string, TypeDescription>();
+                    structDecl.genericParameters.forEach((param, index) => {
+                        if (index < inst.typeArgs.length) {
+                            substitutions.set(param.name, inst.typeArgs[index]);
+                        }
+                    });
+
+                    this.pushSubstitutions(substitutions);
+                    try {
+                        this.generateStructPrototypeMethodsForDecl(protoDecl, structDecl);
+                    } finally {
+                        this.popSubstitutions();
+                    }
+                }
+            } else {
+                // Non-generic: generate directly
+                this.generateStructPrototypeMethodsForDecl(protoDecl, structDecl);
+            }
+        }
+    }
+
+    /**
+     * Build a monomorphization key for a struct declaration using the current substitutions.
+     * Format: QualifiedName<Type1,Type2,...>
+     */
+    private makeStructKey(
+        structDecl: ast.TypeDeclaration,
+        substitutions: Map<string, TypeDescription>
+    ): string {
+        const qualifiedName = this.getQualifiedDeclName(structDecl);
+        if (substitutions.size === 0) return qualifiedName;
+        const typeArgStrings = structDecl.genericParameters
+            .map(param => {
+                const type = substitutions.get(param.name);
+                return type ? type.toString() : param.name;
+            });
+        return `${qualifiedName}<${typeArgStrings.join(',')}>`;
+    }
+
+    /**
+     * Resolve the correct IR name for a struct prototype method at a call site.
+     * For generic structs, builds the monomorphized name from the object's type args.
+     */
+    private getStructPrototypeIRName(
+        structDecl: ast.TypeDeclaration,
+        objType: TypeDescription
+    ): string {
+        if (isReferenceType(objType) && objType.genericArgs.length > 0 &&
+            structDecl.genericParameters?.length) {
+            const substitutions = new Map<string, TypeDescription>();
+            structDecl.genericParameters.forEach((param, index) => {
+                if (index < objType.genericArgs.length) {
+                    substitutions.set(param.name, objType.genericArgs[index]);
+                }
+            });
+            return this.makeStructKey(structDecl, substitutions);
+        }
+        return this.getQualifiedDeclName(structDecl);
+    }
+
+    /**
+     * Generate IR functions for all methods in a single struct prototype declaration.
+     * Uses the current substitution stack for generic parameter resolution.
+     */
+    private generateStructPrototypeMethodsForDecl(
+        protoDecl: ast.StructPrototypeDeclaration,
+        structDecl: ast.TypeDeclaration
+    ): void {
+        const substitutions = this.getCurrentSubstitutions();
+        const structName = substitutions.size > 0
+            ? this.monoMorph.mangleName(this.makeStructKey(structDecl, substitutions))
+            : this.getQualifiedDeclName(structDecl);
+
+        for (const classMethod of protoDecl.methods) {
+            if (!classMethod.method) continue;
+            const methodHeader = classMethod.method;
+
+            // Skip generic methods — not yet supported for struct prototypes
+            if (methodHeader.genericParameters && methodHeader.genericParameters.length > 0) {
+                continue;
+            }
+
+            const methodName = classMethod.method.names?.[0] ?? 'unknown';
+            const fullMethodName = this.monoMorph.mangleName(`${structName}::${methodName}`);
+
+            this.debugIR(`  Generating struct prototype method: ${fullMethodName}`);
+
+            // Build params: implicit 'this' (by-ref struct pointer) + user params
+            const params: FunctionParam[] = [
+                { name: 'this', type: ptrType('struct') }
+            ];
+            for (const param of methodHeader.header.args) {
+                const paramType = param.type
+                    ? this.convertTypeWithSubstitution(param.type)
+                    : voidType();
+                params.push({ name: param.name ?? '', type: paramType });
+            }
+
+            // Return types
+            const returnTypes: IRType[] = [];
+            if (methodHeader.header.returnType) {
+                const retTd = this.getType(methodHeader.header.returnType);
+                if (isTupleType(retTd)) {
+                    for (const elem of retTd.elementTypes) {
+                        returnTypes.push(this.convertTypeDescriptionToIR(elem));
+                    }
+                } else {
+                    returnTypes.push(this.convertTypeWithSubstitution(methodHeader.header.returnType));
+                }
+            } else if (classMethod.expr && ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+                for (const elem of classMethod.expr.expressions) {
+                    const elemTd = this.getType(elem);
+                    returnTypes.push(this.convertTypeDescriptionToIR(elemTd));
+                }
+            }
+
+            const lirFunc = this.program.createFunction(fullMethodName, params, returnTypes);
+
+            // Save and set context
+            const prevFunction = this.context.currentFunction;
+            const prevVars = new Map(this.context.variables);
+            const prevTemp = this.context.tempCounter;
+            const prevLabel = this.context.labelCounter;
+            const prevScope = this.context.scopeDepth;
+            const prevDoExprStack = this.context.doExprStack;
+
+            this.context.currentFunction = lirFunc;
+            this.context.variables.clear();
+            this.context.tempCounter = 0;
+            this.context.labelCounter = 0;
+            this.context.scopeDepth = 0;
+            this.context.doExprStack = [];
+
+            // Map 'this' (struct pointer)
+            this.context.variables.set('this', { register: 'this', type: ptrType('struct') });
+
+            // Map user parameters
+            for (const param of methodHeader.header.args) {
+                const paramType = param.type
+                    ? this.convertTypeWithSubstitution(param.type)
+                    : voidType();
+                this.context.variables.set(param.name ?? '', { register: param.name ?? '', type: paramType });
+            }
+
+            // Generate body
+            if (classMethod.body) {
+                this.visitBlockStatement(classMethod.body);
+            } else if (classMethod.expr) {
+                if (ast.isTupleExpression(classMethod.expr) && classMethod.expr.expressions.length > 1) {
+                    const values: VReg[] = [];
+                    const types: IRType[] = [];
+                    for (const elem of classMethod.expr.expressions) {
+                        const r = this.visitExpression(elem, undefined);
+                        values.push(r.register);
+                        types.push(r.type);
+                    }
+                    lirFunc.ret(values, types);
+                } else {
+                    const result = this.visitExpression(classMethod.expr, undefined);
+                    lirFunc.ret([result.register], [result.type]);
+                }
+            }
+
+            // Ensure function ends with a return
+            const lastInst = lirFunc.instructions[lirFunc.instructions.length - 1];
+            if (!lastInst || (lastInst.kind !== 'ret' && lastInst.kind !== 'exit')) {
+                lirFunc.ret();
+            }
+
+            this.debugIRFunction(lirFunc);
+
+            // Restore context
+            this.context.currentFunction = prevFunction;
+            this.context.variables = prevVars;
+            this.context.tempCounter = prevTemp;
+            this.context.labelCounter = prevLabel;
+            this.context.scopeDepth = prevScope;
+            this.context.doExprStack = prevDoExprStack;
+        }
     }
 
     /**
@@ -3643,7 +3949,7 @@ export class IRGenerator {
                 const right = this.visitExpression(node.right, undefined);
                 const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    left, overload.methodId, inferredRetTd,
+                    left, overload, inferredRetTd,
                     [right.register], [right.type]
                 );
             }
@@ -3670,7 +3976,7 @@ export class IRGenerator {
         if (overload) {
             const inferredRetTd = this.getType(node);
             return this.emitOperatorCall(
-                left, overload.methodId, inferredRetTd,
+                left, overload, inferredRetTd,
                 [right.register], [right.type]
             );
         }
@@ -3915,7 +4221,7 @@ export class IRGenerator {
         if (overload) {
             const inferredRetTd = this.getType(node);
             const result = this.emitOperatorCall(
-                lhsResult, overload.methodId, inferredRetTd,
+                lhsResult, overload, inferredRetTd,
                 [rhsResult.register], [rhsResult.type]
             );
             this.storeBack(lhs, result);
@@ -4033,7 +4339,7 @@ export class IRGenerator {
                     const allArgIRTypes = [...indexResults.map(r => r.type), value.type];
                     this.emitOperatorCall(
                         { register: array.register, type: array.type },
-                        overload.methodId, overload.returnType,
+                        overload, overload.returnType,
                         allArgRegs, allArgIRTypes
                     );
                 } else {
@@ -4060,7 +4366,7 @@ export class IRGenerator {
         if (overload) {
             const inferredRetTd = this.getType(node);
             return this.emitOperatorCall(
-                operand, overload.methodId, inferredRetTd,
+                operand, overload, inferredRetTd,
                 [], []
             );
         }
@@ -4130,7 +4436,7 @@ export class IRGenerator {
             this.func().mov(temp, operand.register, operand.type);
             const inferredRetTd = this.getType(node);
             const newResult = this.emitOperatorCall(
-                operand, overload.methodId, inferredRetTd,
+                operand, overload, inferredRetTd,
                 [], []
             );
             this.storeBack(node.expr, newResult);
@@ -4470,7 +4776,7 @@ export class IRGenerator {
                 // which properly resolves generics from the class's monomorphized type.
                 const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    objResult, overload.methodId, inferredRetTd,
+                    objResult, overload, inferredRetTd,
                     argRegs, argTypes
                 );
             }
@@ -4562,6 +4868,20 @@ export class IRGenerator {
                 }
                 return { register: this.tmp(), type: voidType() };
             }
+        }
+
+        // Struct prototype method call — direct call (no vtable), 'this' passed as first arg
+        if (memberRef && ast.isClassMethod(memberRef) && ast.isStructPrototypeDeclaration(memberRef.$container) && isStructType(resolvedObjTd)) {
+            const protoDecl = memberRef.$container as ast.StructPrototypeDeclaration;
+            const structDecl = protoDecl.target?.ref;
+            const structName = structDecl ? this.getStructPrototypeIRName(structDecl, objTd) : 'unknown';
+            const methodName = memberRef.method?.names?.[0] ?? this.getReferenceName(memberRef);
+            const funcName = this.monoMorph.mangleName(`${structName}::${methodName}`);
+            f.call(dests, funcName, [obj.register, ...argRegs], [obj.type, ...argTypes], retTypes);
+            if (dests.length > 0) {
+                return { register: dests[0], type: retTypes[0] };
+            }
+            return { register: this.tmp(), type: voidType() };
         }
 
         // Struct/variant field with callable type — load field and call as closure/coroutine
@@ -5048,7 +5368,7 @@ export class IRGenerator {
             if (overload) {
                 const inferredRetTd = this.getType(node);
                 return this.emitOperatorCall(
-                    obj, overload.methodId, inferredRetTd,
+                    obj, overload, inferredRetTd,
                     indexResults.map(r => r.register),
                     indexResults.map(r => r.type)
                 );
@@ -6537,7 +6857,7 @@ export class IRGenerator {
                 const allArgRegs = [...indexResults.map(r => r.register), value.register];
                 const allArgIRTypes = [...indexResults.map(r => r.type), value.type];
                 return this.emitOperatorCall(
-                    obj, overload.methodId, overload.returnType,
+                    obj, overload, overload.returnType,
                     allArgRegs, allArgIRTypes
                 );
             }
@@ -6569,7 +6889,7 @@ export class IRGenerator {
         const overload = this.resolveOperatorMethod(objTd, '[-]', [indexTd]);
         if (overload) {
             return this.emitOperatorCall(
-                obj, overload.methodId, overload.returnType,
+                obj, overload, overload.returnType,
                 [index.register], [index.type]
             );
         }
@@ -6610,7 +6930,7 @@ export class IRGenerator {
         const overload = this.resolveOperatorMethod(objTd, '[-]=', [indexTd, valueTd]);
         if (overload) {
             return this.emitOperatorCall(
-                obj, overload.methodId, overload.returnType,
+                obj, overload, overload.returnType,
                 [index.register, value.register], [index.type, value.type]
             );
         }

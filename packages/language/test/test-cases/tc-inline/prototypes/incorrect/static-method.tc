@@ -1,0 +1,17 @@
+// Test that static methods in prototypes produce an error
+
+type Rect = struct {
+    width: f32,
+    height: f32
+}
+
+prototype Rect {
+    /// @Error: Static methods are not allowed in struct prototypes
+    static fn create(w: f32, h: f32) -> Rect {
+        return { width: w, height: h }
+    }
+
+    fn area() -> f32 {
+        return this.width * this.height
+    }
+}

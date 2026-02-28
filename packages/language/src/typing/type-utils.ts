@@ -494,8 +494,8 @@ export class TypeCTypeUtils {
         // Struct to named struct reference (structural typing)
         // Anonymous struct {x: 5.0, y: 10.0} can be assigned to Point if structurally compatible
         if (fromStruct && isReferenceType(to)) {
-            // Resolve the reference to get the actual struct type
-            const resolvedTo = this.typeProvider().resolveReference(to);
+            // Resolve the reference to get the actual struct type (deep to handle alias chains)
+            const resolvedTo = this.resolveDeepIfReference(to);
             const toResolvedStruct = this.asStructType(resolvedTo);
             
             if (toResolvedStruct) {

@@ -1,0 +1,10 @@
+// Test that prototype on a non-struct type produces an error
+
+type MyClass = class {
+    let x: u32
+}
+
+/// @Error: is not a struct type
+prototype MyClass {
+    fn greet() -> void {}
+}

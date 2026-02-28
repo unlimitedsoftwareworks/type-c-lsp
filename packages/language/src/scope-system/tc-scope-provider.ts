@@ -394,6 +394,23 @@ export class TypeCScopeProvider extends DefaultScopeProvider {
             }
         }
 
+        // Inject the target struct's generic parameters when inside a StructPrototypeDeclaration.
+        // This allows `prototype Pair { fn swap() -> Pair<T> { ... } }` to reference T
+        // from `type Pair<T> = struct { ... }`.
+        // Must be done here (not in scope computation) because target?.ref requires linking.
+        // Guard: skip when resolving the prototype's own `target` reference to avoid cycles.
+        const protoNode = AstUtils.getContainerOfType(context.container, ast.isStructPrototypeDeclaration);
+        if (protoNode && context.container !== protoNode) {
+            const targetDecl = protoNode.target?.ref;
+            if (targetDecl && ast.isTypeDeclaration(targetDecl) && targetDecl.genericParameters?.length) {
+                const document = AstUtils.getDocument(context.container);
+                const genericDescs = targetDecl.genericParameters.map(gp =>
+                    this.descriptions.createDescription(gp, gp.name, document)
+                );
+                scopes.push(stream(genericDescs));
+            }
+        }
+
         let result: Scope = this.getGlobalScope(referenceType, context);
         for (let i = scopes.length - 1; i >= 0; i--) {
             result = this.createScope(scopes[i], result);

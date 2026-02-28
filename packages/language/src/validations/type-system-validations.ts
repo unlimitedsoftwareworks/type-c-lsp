@@ -83,6 +83,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             MatchCasePattern: this.checkPatternErrors,
             ObjectUpdate: [this.checkObjectUpdateFields, this.checkOptionalChainingBasicType],
             SelfType: this.checkSelfTypeContext,
+            StructPrototypeDeclaration: this.checkStructPrototypeDeclaration,
         };
     }
 
@@ -99,6 +100,13 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
     checkBinaryExpression = (node: ast.BinaryExpression, accept: ValidationAcceptor): void => {
         let leftType = this.typeProvider.getType(node.left);
         let rightType = this.typeProvider.getType(node.right);
+
+        // Save the original (pre-resolution) reference for struct prototype lookup BEFORE
+        // resolveIfReference strips the alias identity and generic args.
+        const leftOriginalRef = leftType;
+        const leftOriginalDecl = isReferenceType(leftType) && ast.isTypeDeclaration(leftType.declaration)
+            ? leftType.declaration
+            : undefined;
 
         // Resolve references to check for class types
         leftType = this.typeUtils.resolveIfReference(leftType);
@@ -318,6 +326,62 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             }
         }
         
+        // Check if LEFT operand is a struct type with a prototype that defines this operator.
+        // Use leftOriginalDecl (captured before resolveIfReference) so prototype lookup
+        // respects alias identity: `prototype Z` is only found for `z: Z`, not `v: Vec2`.
+        const deepLeftType = this.typeUtils.resolveDeepIfReference(leftType);
+        const deepRightType = this.typeUtils.resolveDeepIfReference(rightType);
+        if (isStructType(deepLeftType) && leftOriginalDecl) {
+            const proto = this.typeProvider.getStructPrototypeMethods(leftOriginalDecl);
+            if (proto) {
+                const operatorMethods = proto.methods.filter(m => m.names.includes(node.op));
+                if (operatorMethods.length > 0) {
+                    // Build generic substitutions from the original reference type
+                    // e.g., GVec<f32> → {T: f32} so that +(GVec<T>) becomes +(GVec<f32>)
+                    let structGenSubs: Map<string, TypeDescription> | undefined;
+                    if (isReferenceType(leftOriginalRef) && leftOriginalRef.genericArgs.length > 0 &&
+                        leftOriginalDecl.genericParameters?.length) {
+                        structGenSubs = new Map();
+                        const refArgs = leftOriginalRef.genericArgs;
+                        leftOriginalDecl.genericParameters.forEach((param, i) => {
+                            if (i < refArgs.length) {
+                                structGenSubs!.set(param.name, refArgs[i]);
+                            }
+                        });
+                    }
+
+                    const hasMatchingOverload = operatorMethods.some(method => {
+                        if (method.parameters.length !== 1) return false;
+                        let paramType = method.parameters[0].type;
+                        if (structGenSubs && structGenSubs.size > 0) {
+                            paramType = this.typeUtils.substituteGenerics(paramType, structGenSubs);
+                        }
+                        return this.isTypeCompatible(deepRightType, paramType).success;
+                    });
+                    if (!hasMatchingOverload) {
+                        const errorCode = ErrorCode.TC_BINARY_OP_INCOMPATIBLE_TYPES;
+                        const availableOverloads = operatorMethods
+                            .map(m => {
+                                let params = m.parameters.map(p => {
+                                    let pt = p.type;
+                                    if (structGenSubs && structGenSubs.size > 0) {
+                                        pt = this.typeUtils.substituteGenerics(pt, structGenSubs);
+                                    }
+                                    return pt.toString();
+                                }).join(', ');
+                                return `${node.op}(${params})`;
+                            })
+                            .join(' or ');
+                        accept('error',
+                            `Binary operator '${node.op}' error: Struct prototype has operator overloads, but none match the right operand type '${rightType.toString()}'. Available: ${availableOverloads}`,
+                            { node, code: errorCode }
+                        );
+                    }
+                    return;
+                }
+            }
+        }
+
         // Check if EITHER operand is a generic type with a constraint that defines this operator
         // This allows both T + T and T + Constraint and Constraint + T patterns
         // Note: We also look up the constraint from the AST declaration as a fallback,
@@ -2774,6 +2838,70 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             node,
             code: ErrorCode.TC_SELF_TYPE_OUTSIDE_CONTEXT
         });
+    };
+
+    /**
+     * Trigger inference of struct prototype declarations and report any recorded errors.
+     * Errors can be on the prototype declaration itself (non-struct target)
+     * or on individual method nodes (static/override not allowed).
+     *
+     * Duplicate prototype detection is done here (not during inference) because
+     * Langium's WorkspaceCache may invalidate the typeCache between validation passes,
+     * causing inferStructPrototypeDeclaration to be called multiple times for the same
+     * node. Moving the check here uses stable AST sibling relationships instead.
+     */
+    checkStructPrototypeDeclaration = (node: ast.StructPrototypeDeclaration, accept: ValidationAcceptor): void => {
+        // Generic parameters on prototype declarations are not supported
+        if (node.genericParameters.length > 0) {
+            accept('error', 'Generic parameters on prototype declarations are not supported', {
+                node,
+                code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        }
+
+        // Detect genuine duplicate prototypes: check for a preceding sibling
+        // StructPrototypeDeclaration with the same target in the same scope.
+        // Use $container directly (Module or NamespaceDecl) — do NOT climb to the
+        // top-level Module, because a prototype inside a namespace is not in
+        // module.definitions and indexOf() would return -1, silently skipping the check.
+        const container = node.$container;
+        if (ast.isModule(container) || ast.isNamespaceDecl(container)) {
+            const definitions = container.definitions;
+            const selfIdx = definitions.indexOf(node);
+            const hasPrevious = selfIdx > 0 && definitions
+                .slice(0, selfIdx)
+                .some(d => ast.isStructPrototypeDeclaration(d) && d.target?.ref === node.target?.ref);
+            if (hasPrevious) {
+                const targetName = node.target?.ref?.name ?? '?';
+                accept('error', `Duplicate prototype for struct '${targetName}'`, {
+                    node,
+                    code: ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
+
+        // Trigger inference (side effect: populates diagnosticMap for prototype + methods)
+        this.typeProvider.getType(node);
+
+        // Report node-level errors (e.g. non-struct target)
+        const protoDiags = this.typeProvider.getTypeDiagnostics(node);
+        for (const diag of protoDiags) {
+            accept('error', diag.message, {
+                node,
+                code: diag.code || ErrorCode.TC_EXPRESSION_TYPE_ERROR
+            });
+        }
+
+        // Report method-level errors (static/override not allowed, duplicate method names)
+        for (const method of node.methods) {
+            const methodDiags = this.typeProvider.getTypeDiagnostics(method);
+            for (const diag of methodDiags) {
+                accept('error', diag.message, {
+                    node: method,
+                    code: diag.code || ErrorCode.TC_EXPRESSION_TYPE_ERROR
+                });
+            }
+        }
     };
 
 

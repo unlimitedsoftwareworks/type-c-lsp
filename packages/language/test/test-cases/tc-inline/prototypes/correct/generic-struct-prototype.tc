@@ -39,6 +39,36 @@ prototype Wrapper {
     }
 }
 
+// ---- Operator constraints should propagate into prototype methods ----
+type Vec2<T || (T + T) -> T, (T * T) -> T> = struct {
+    x: T,
+    y: T
+}
+
+prototype Vec2 {
+    fn + (other: Vec2<T>) -> Vec2<T> {
+        return {
+            x: this.x + other.x,
+            y: this.y + other.y
+        }
+    }
+
+    fn dot(other: Vec2<T>) -> T {
+        return this.x * other.x + this.y * other.y
+    }
+}
+
+fn testVec2Ops() {
+    let a: Vec2<f32> = { x: 1.0f, y: 2.0f }
+    let b: Vec2<f32> = { x: 3.0f, y: 4.0f }
+
+    /// @Type(sum): Vec2<f32>
+    let sum = a + b
+
+    /// @Type(d): f32
+    let d = a.dot(b)
+}
+
 fn main() -> void {
     // ---- Pair<u32> instantiation ----
     let p1: Pair<u32> = { first: 1u32, second: 2u32 }

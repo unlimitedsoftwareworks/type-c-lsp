@@ -655,10 +655,11 @@ interface MethodHeader {
     genericParameters?: GenericType[];
     operatorConstraints?: OperatorConstraint[];
     names: string[];
+    isPure: boolean;
 }
 
 MethodHeader<withinClass> returns MethodHeader:
-    'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader<true> ) | <!withinClass> header=InterfaceFnHeader );
+    (<!withinClass> isPure?='pure')? 'fn' MethodNames ((<withinClass> GenericDecl? header=FnHeader<true> ) | <!withinClass> header=InterfaceFnHeader );
 
 fragment ClassAttributesDecl:
     'let' attributes+=ClassAttributeDecl (',' attributes+=ClassAttributeDecl)*;

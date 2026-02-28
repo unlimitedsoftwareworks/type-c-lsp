@@ -1,0 +1,24 @@
+// Test: aliasing `this` to a local variable to bypass purity checks
+
+type PureReader = interface {
+    pure fn read() -> i32
+}
+
+/// @Error(TCE007): method 'read' is declared as 'pure' in the interface
+type AliasedMutator = class PureReader {
+    let value: i32
+
+    fn init(v: i32) {
+        this.value = v
+    }
+
+    // Aliases `this` and mutates through the alias
+    fn read() -> i32 {
+        let x = this
+        x.value = x.value + 1i32
+        return x.value
+    }
+}
+
+/// @Error(TCE007): method 'read' is declared as 'pure' in the interface, but the implementing method mutates 'this'. Pure methods must not modify any fields of 'this'.
+let r: PureReader = new AliasedMutator(10i32)

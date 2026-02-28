@@ -53,7 +53,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
     getChecks(): ValidationChecks<ast.TypeCAstType> {
         return {
             BinaryExpression: [this.checkBinaryExpression, this.checkNullishCoalescing, this.checkExpressionForErrors],
-            FunctionCall: [this.checkFunctionCall, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
+            FunctionCall: [this.checkFunctionCall, this.checkMutatingMethodOnConst, this.checkOptionalChainingBasicType, this.checkExpressionForErrors],
             ReturnStatement: this.checkReturnStatement,
             YieldExpression: this.checkYieldExpression,
             LambdaExpression: this.checkLambdaExpression,
@@ -2396,6 +2396,15 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 }
             } else if (ast.isTypeDeclaration(current)) {
                 return current.operatorConstraints;
+            } else if (ast.isStructPrototypeDeclaration(current)) {
+                // Prototypes are siblings of the TypeDeclaration, not children.
+                // Follow the target reference to pick up the type's operator constraints.
+                const targetDecl = current.target?.ref;
+                if (targetDecl && ast.isTypeDeclaration(targetDecl)) {
+                    if (targetDecl.operatorConstraints && targetDecl.operatorConstraints.length > 0) {
+                        return targetDecl.operatorConstraints;
+                    }
+                }
             }
             current = current.$container;
         }
@@ -2903,6 +2912,104 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             }
         }
     };
+
+    /**
+     * Checks if a mutating method is being called on a const variable.
+     * Only enforced for concrete types (class, struct with prototype) where
+     * method bodies can be analyzed for mutations. For interface-typed values,
+     * purity is unknown unless explicitly declared with `pure`.
+     */
+    checkMutatingMethodOnConst = (node: ast.FunctionCall, accept: ValidationAcceptor): void => {
+        // Only applies to method calls (callee is MemberAccess)
+        if (!ast.isMemberAccess(node.expr)) return;
+
+        const memberAccess = node.expr;
+        const baseExpr = memberAccess.expr;
+
+        // Check if the base expression is const
+        const constError = this.checkIfBaseIsConst(baseExpr);
+        if (!constError) return;
+
+        // Get the base type, unwrap reference and nullable
+        let baseType = this.typeProvider.getType(baseExpr);
+        baseType = this.typeUtils.resolveIfReference(baseType);
+        if (isNullableType(baseType)) {
+            baseType = this.typeUtils.resolveIfReference(baseType.baseType);
+        }
+
+        // Only enforce purity on concrete types where we can analyze method bodies.
+        // For interface-typed values, we can't determine purity without explicit `pure` annotation.
+        if (isInterfaceType(baseType)) {
+            // For interfaces, only flag if the method is explicitly NOT pure
+            // (i.e., the interface doesn't declare it as pure).
+            // Since interface methods default to isPure:false, we only error
+            // when a method IS found and is explicitly not pure... but we can't
+            // distinguish "not declared pure" from "declared not pure", so we skip.
+            // The `pure` keyword on interfaces only affects the compatibility check.
+            return;
+        }
+
+        const methodName = memberAccess.element?.$refText ?? '';
+        const methodType = this.findMethodOnType(baseType, methodName);
+
+        if (!methodType || methodType.isPure) return;  // pure is OK
+
+        accept('error',
+            `Cannot call mutating method '${methodName}' on a const value. ` +
+            `Consider making the variable non-const or ensuring the method doesn't modify 'this'.`,
+            { node: node.expr, code: ErrorCode.TC_MUTATING_METHOD_ON_CONST }
+        );
+    };
+
+    /**
+     * Resolves a method by name from a type description.
+     * Handles class types, interface types, struct prototype types, and nullable/reference wrappers.
+     */
+    private findMethodOnType(type: TypeDescription, name: string): MethodType | undefined {
+        // Unwrap reference types
+        if (isReferenceType(type)) {
+            const resolved = this.typeUtils.resolveIfReference(type);
+            return this.findMethodOnType(resolved, name);
+        }
+
+        // Unwrap nullable types
+        if (isNullableType(type)) {
+            return this.findMethodOnType(type.baseType, name);
+        }
+
+        // Class types: search direct methods
+        if (isClassType(type)) {
+            const method = type.methods.find(m => m.names.includes(name));
+            if (method) return method;
+            // Also check implementation methods
+            for (const impl of type.implementations) {
+                const resolved = this.typeUtils.resolveIfReference(impl);
+                if (isImplementationType(resolved)) {
+                    const implMethod = resolved.methods.find(m => m.names.includes(name));
+                    if (implMethod) return implMethod;
+                }
+            }
+            return undefined;
+        }
+
+        // Interface types: search methods
+        if (isInterfaceType(type)) {
+            return type.methods.find(m => m.names.includes(name));
+        }
+
+        // Struct types: look up prototype methods
+        if (isStructType(type) && type.node) {
+            const typeDecl = AstUtils.getContainerOfType(type.node, ast.isTypeDeclaration);
+            if (typeDecl) {
+                const protoInfo = this.typeProvider.getStructPrototypeMethods(typeDecl);
+                if (protoInfo) {
+                    return protoInfo.methods.find(m => m.names.includes(name));
+                }
+            }
+        }
+
+        return undefined;
+    }
 
 
 

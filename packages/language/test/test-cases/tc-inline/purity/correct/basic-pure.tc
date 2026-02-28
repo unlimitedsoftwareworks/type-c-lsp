@@ -1,0 +1,74 @@
+// Test: basic pure method functionality
+
+// Interface with pure methods
+type Readable = interface {
+    pure fn getValue() -> i32
+    pure fn getName() -> string
+}
+
+// Interface mixing pure and non-pure methods
+type Container = interface {
+    pure fn size() -> u32
+    fn clear() -> void
+}
+
+// Class implementing interface with pure methods — non-mutating implementations
+type Point = class Readable {
+    let x: i32
+    let y: i32
+
+    fn init(x: i32, y: i32) {
+        this.x = x
+        this.y = y
+    }
+
+    fn getValue() -> i32 = this.x + this.y
+
+    fn getName() -> string = "Point"
+}
+
+// Static methods are always pure
+type Utils = class {
+    static fn add(a: i32, b: i32) -> i32 = a + b
+}
+
+// Calling pure methods on const objects is OK
+fn test_const_pure_calls() {
+    let const p = new Point(1i32, 2i32)
+
+    // These are pure methods on a const class-typed variable — OK
+    let v = p.getValue()
+    let n = p.getName()
+}
+
+// Calling methods on non-const objects is always OK
+fn test_mutable_calls() {
+    let p = new Point(1i32, 2i32)
+    let v = p.getValue()
+    let n = p.getName()
+}
+
+// Reading fields from this is not mutation
+type Reader = class {
+    let data: i32
+
+    fn init(data: i32) {
+        this.data = data
+    }
+
+    fn getData() -> i32 = this.data
+
+    fn getDoubled() -> i32 = this.data * 2i32
+}
+
+fn test_reader_const() {
+    let const r = new Reader(42i32)
+    let d = r.getData()
+    let dd = r.getDoubled()
+}
+
+// Calling methods on interface-typed values is always OK (purity unknown)
+fn test_interface_const(r: Readable) {
+    let v = r.getValue()
+    let n = r.getName()
+}

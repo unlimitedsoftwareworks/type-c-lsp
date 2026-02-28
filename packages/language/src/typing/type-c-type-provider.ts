@@ -162,6 +162,14 @@ export class TypeCTypeProvider {
     private readonly inferringPrototypes = new Set<ast.StructPrototypeDeclaration>();
 
     /**
+     * Guard for cycle detection during method mutability analysis.
+     * When analyzing whether a method mutates `this`, calling `this.bar()`
+     * may trigger recursive analysis of `bar`. If we encounter a cycle,
+     * we conservatively assume the method is pure (does not mutate).
+     */
+    private readonly analyzingMutability = new Set<ast.ClassMethod>();
+
+    /**
      * Registry of struct prototype methods, keyed first by document URI (for easy
      * invalidation), then by the `ast.TypeDeclaration` that the prototype targets.
      * Each TypeDeclaration has its own independent prototype — `prototype Point` and
@@ -1592,7 +1600,8 @@ export class TypeCTypeProvider {
                     genericParameters: genericParams,
                     isStatic: m.isStatic ?? false,
                     isOverride: m.isOverride ?? false,
-                    isLocal: m.isLocal ?? false
+                    isLocal: m.isLocal ?? false,
+                    isPure: false
                 };
             }) ?? [];
 
@@ -1643,7 +1652,8 @@ export class TypeCTypeProvider {
                         genericParameters: genericParams,
                         isStatic: m.isStatic ?? false,
                         isOverride: m.isOverride ?? false,
-                        isLocal: m.isLocal ?? false
+                        isLocal: m.isLocal ?? false,
+                        isPure: false
                     };
                 }
 
@@ -1678,7 +1688,8 @@ export class TypeCTypeProvider {
                         genericParameters: genericParams,
                         isStatic: m.isStatic ?? false,
                         isOverride: m.isOverride ?? false,
-                        isLocal: m.isLocal ?? false
+                        isLocal: m.isLocal ?? false,
+                        isPure: (m.isStatic ?? false) || !this.analyzeMethodMutatesThis(m)
                     };
                 } finally {
                     // Always remove from the set, even if inference fails
@@ -1741,7 +1752,8 @@ export class TypeCTypeProvider {
                     genericParameters: genericParams,
                     isStatic: m.isStatic ?? false,
                     isOverride: false,
-                    isLocal: false
+                    isLocal: false,
+                    isPure: false
                 };
             }) ?? [];
 
@@ -1789,7 +1801,8 @@ export class TypeCTypeProvider {
                         genericParameters: genericParams,
                         isStatic: m.isStatic ?? false,
                         isOverride: false,
-                        isLocal: false
+                        isLocal: false,
+                        isPure: false
                     };
                 }
 
@@ -1824,7 +1837,8 @@ export class TypeCTypeProvider {
                         genericParameters: genericParams,
                         isStatic: m.isStatic ?? false,
                         isOverride: false,
-                        isLocal: false
+                        isLocal: false,
+                        isPure: (m.isStatic ?? false) || !this.analyzeMethodMutatesThis(m)
                     };
                 } finally {
                     // Always remove from the set, even if inference fails
@@ -1949,7 +1963,8 @@ export class TypeCTypeProvider {
                     genericParameters: genericParams,
                     isStatic: false,
                     isOverride: false,
-                    isLocal: classMethod.isLocal ?? false
+                    isLocal: classMethod.isLocal ?? false,
+                    isPure: !this.analyzeMethodMutatesThis(classMethod)
                 });
             }
         } finally {
@@ -2009,6 +2024,132 @@ export class TypeCTypeProvider {
         return this.structPrototypeByUri.get(uriStr)?.get(typeDecl);
     }
 
+    /**
+     * Checks if an expression chain starts with `this`, including through
+     * local variable aliases (e.g. `let x = this; x.foo()`).
+     * Used by mutation analysis to determine if a mutation targets `this`.
+     */
+    private expressionStartsWithThis(expr: ast.Expression, visited?: Set<ast.VariableDeclaration>): boolean {
+        if (ast.isThisExpression(expr)) return true;
+        if (ast.isMemberAccess(expr)) return this.expressionStartsWithThis(expr.expr, visited);
+        if (ast.isIndexAccess(expr)) return this.expressionStartsWithThis(expr.expr, visited);
+        if (ast.isReverseIndexAccess(expr)) return this.expressionStartsWithThis(expr.expr, visited);
+        // Track this-aliases: `let x = this; x.mutate()` should be caught
+        if (ast.isQualifiedReference(expr)) {
+            try {
+                const ref = expr.reference?.ref;
+                if (ref && ast.isVariableDeclaration(ref) && ref.initializer) {
+                    // Prevent infinite loops for cyclic aliases
+                    const seen = visited ?? new Set<ast.VariableDeclaration>();
+                    if (seen.has(ref)) return false;
+                    seen.add(ref);
+                    return this.expressionStartsWithThis(ref.initializer, seen);
+                }
+            } catch {
+                // Reference not yet resolved — conservatively return false
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Analyzes whether a class/impl/prototype method mutates `this`.
+     * Returns `true` if any of these patterns appear in the method body:
+     * 1. Assignment where LHS starts with `this`
+     * 2. IndexSet/ReverseIndexSet on `this`
+     * 3. Postfix ops (++/--) on `this` members
+     * 4. Method call on `this` that is itself mutating (recursive check)
+     */
+    analyzeMethodMutatesThis(method: ast.ClassMethod): boolean {
+        // Cycle detection: if already analyzing this method, assume pure
+        if (this.analyzingMutability.has(method)) return false;
+        this.analyzingMutability.add(method);
+
+        try {
+            const body = method.body;
+            const exprBody = method.expr;
+
+            // Check expression-body methods (fn foo() = expr)
+            // Expression bodies are unlikely to mutate, but check for completeness
+            if (exprBody) {
+                return this.nodeMutatesThis(exprBody);
+            }
+
+            if (!body) return false;
+
+            return this.blockMutatesThis(body);
+        } finally {
+            this.analyzingMutability.delete(method);
+        }
+    }
+
+    /**
+     * Checks if a block statement contains any mutation of `this`.
+     */
+    private blockMutatesThis(block: ast.BlockStatement): boolean {
+        for (const stmt of block.statements) {
+            if (this.nodeMutatesThis(stmt)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Checks if an AST node (statement or expression) contains any mutation of `this`.
+     * Walks all descendants using streamAst, skipping nested class/struct/impl definitions.
+     */
+    private nodeMutatesThis(root: AstNode): boolean {
+        const nodes = AstUtils.streamAst(root);
+        for (const node of nodes) {
+            // Skip nested class/struct/impl definitions — they have their own `this`
+            if (node !== root && (ast.isClassType(node) || ast.isStructType(node) || ast.isImplementationType(node))) {
+                continue;
+            }
+
+            // Pattern 1: Assignment where LHS starts with `this`
+            if (ast.isBinaryExpression(node) && isAssignmentOperator(node.op)) {
+                if (this.expressionStartsWithThis(node.left)) {
+                    return true;
+                }
+            }
+
+            // Pattern 2: IndexSet/ReverseIndexSet on `this`
+            if (ast.isIndexSet(node) && this.expressionStartsWithThis(node.expr)) {
+                return true;
+            }
+            if (ast.isReverseIndexSet(node) && this.expressionStartsWithThis(node.expr)) {
+                return true;
+            }
+
+            // Pattern 3: Postfix ops (++/--) on `this` members
+            if (ast.isPostfixOp(node) && this.expressionStartsWithThis(node.expr)) {
+                return true;
+            }
+
+            // Pattern 4: Method call on `this` that is itself mutating
+            if (ast.isFunctionCall(node) && ast.isMemberAccess(node.expr)) {
+                const memberAccess = node.expr;
+                if (this.expressionStartsWithThis(memberAccess.expr)) {
+                    // Look up the method being called.
+                    // Wrap in try-catch: during class inference, references may not be
+                    // fully linked yet, causing cyclic reference resolution errors.
+                    try {
+                        const methodRef = memberAccess.element?.ref;
+                        if (methodRef && ast.isClassMethod(methodRef)) {
+                            if (this.analyzeMethodMutatesThis(methodRef)) {
+                                return true;
+                            }
+                        }
+                    } catch {
+                        // Cyclic reference resolution — conservatively assume mutating
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
     private inferMethodHeader(node: ast.MethodHeader): MethodType {
         const genericParams = (node.genericParameters?.map(g => this.inferGenericType(g)).filter((g): g is GenericTypeDescription => isGenericType(g)) ?? []);
         const params = node.header?.args?.map(arg => this.typeFactory.createFunctionParameterType(
@@ -2026,7 +2167,11 @@ export class TypeCTypeProvider {
             params,
             returnType,
             node,
-            genericParams
+            genericParams,
+            false,
+            false,
+            false,
+            node.isPure ?? false
         );
     }
 
@@ -2304,7 +2449,7 @@ export class TypeCTypeProvider {
                 ? this.getType(m.header.returnType)
                 : this.typeFactory.createVoidType(m);
 
-            return this.typeFactory.createMethodType([m.name], params, returnType, undefined);
+            return this.typeFactory.createMethodType([m.name], params, returnType, undefined, [], false, false, false, false);
         }) ?? [];
 
         return this.typeFactory.createFFIType(
@@ -3093,6 +3238,13 @@ export class TypeCTypeProvider {
                 constraints = current.method?.operatorConstraints;
             } else if (ast.isTypeDeclaration(current)) {
                 constraints = current.operatorConstraints;
+            } else if (ast.isStructPrototypeDeclaration(current)) {
+                // Prototypes are siblings of the TypeDeclaration, not children.
+                // Follow the target reference to pick up the type's operator constraints.
+                const targetDecl = current.target?.ref;
+                if (targetDecl && ast.isTypeDeclaration(targetDecl)) {
+                    constraints = targetDecl.operatorConstraints;
+                }
             } else if (ast.isLambdaExpression(current)) {
                 // Lambdas don't have their own operator constraints, skip
             }

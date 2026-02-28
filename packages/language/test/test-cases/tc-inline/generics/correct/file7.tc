@@ -1,0 +1,36 @@
+
+type MaybeBox<T> = class {
+    let value: T?
+
+    fn init(mut value: T?) {
+        this.value = value
+    }
+
+    fn set(mut value: T?) {
+        this.value = value
+    }
+
+    fn getOr(fallback: T) -> T {
+        return this.value ?? fallback
+    }
+}
+
+type Number<T> = class {
+    let v: T
+
+    fn init(value: T) {
+        this.v = value
+    }
+
+    fn get() -> T {
+        return this.v
+    }
+}
+
+fn test_case_1() {
+    let nested: MaybeBox<MaybeBox<Number<u32>>>? = new MaybeBox<MaybeBox<Number<u32>>>(new MaybeBox<Number<u32>>(new Number<u32>(11u32)))
+    /// When I hover here on `something` I get T??, but that is just hover provider. Still double `??` is suspicious, because we shouldnt wrap double optionals.
+  
+    /// @Type(something): Number<u32>?
+    let something = nested?.value?.value
+}

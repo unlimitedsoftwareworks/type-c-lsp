@@ -1,0 +1,22 @@
+// Test: class method implementing pure interface method must not mutate this
+
+type Immutable = interface {
+    pure fn getValue() -> i32
+}
+
+type MutatingClass = class Immutable {
+    let value: i32
+
+    fn init(v: i32) {
+        this.value = v
+    }
+
+    // This method mutates this.value, but Immutable requires getValue to be pure
+    fn getValue() -> i32 {
+        this.value = this.value + 1i32
+        return this.value
+    }
+}
+
+/// @Error(TCE007): method 'getValue' is declared as 'pure' in the interface, but the implementing method mutates 'this'. Pure methods must not modify any fields of 'this'.
+let x: Immutable = new MutatingClass(10i32)

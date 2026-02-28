@@ -276,6 +276,7 @@ export interface MethodType {
     readonly isStatic: boolean;
     readonly isOverride: boolean;
     readonly isLocal: boolean;
+    readonly isPure: boolean;
     node: ast.MethodHeader | undefined;
 }
 

@@ -978,6 +978,14 @@ export class TypeCTypeUtils {
                             `Remove the 'local' keyword from the class method to implement the interface.`
                         );
                     }
+                    // Purity check: if the interface method is pure, the implementing method must also be pure
+                    if (method.isPure && !classMethod.isPure) {
+                        return failure(
+                            `method '${method.names[0]}' is declared as 'pure' in the interface, ` +
+                            `but the implementing method mutates 'this'. ` +
+                            `Pure methods must not modify any fields of 'this'.`
+                        );
+                    }
                     foundMatch = true;
                     break;
                 }
@@ -1221,6 +1229,12 @@ export class TypeCTypeUtils {
                 // Check type compatibility (allowing covariant return types)
                 const result = this.isMethodImplementationCompatible(fromMethod, toMethod);
                 if (result.success) {
+                    // Purity check: if the target method is pure, the source must also be pure
+                    if (toMethod.isPure && !fromMethod.isPure) {
+                        lastError = `method '${toMethod.names[0]}' is declared as 'pure' in the target interface, ` +
+                            `but the source interface method is not pure`;
+                        continue;
+                    }
                     foundMatch = true;
                     break;
                 }
@@ -3290,6 +3304,7 @@ export class TypeCTypeUtils {
                 isStatic: firstMethod.isStatic,
                 isOverride: firstMethod.isOverride,
                 isLocal: firstMethod.isLocal,
+                isPure: firstMethod.isPure,
                 node: firstMethod.node
             });
         }
@@ -3399,6 +3414,7 @@ export class TypeCTypeUtils {
                 isStatic: false,
                 isOverride: false,
                 isLocal: false,
+                isPure: false,
                 node: firstMethod.node
             });
         }

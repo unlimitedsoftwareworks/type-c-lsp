@@ -1,0 +1,53 @@
+// Test: calling mutating method on const class-typed variable
+
+type Counter = class {
+    let count: i32
+
+    fn init() {
+        this.count = 0i32
+    }
+
+    fn increment() -> void {
+        this.count = this.count + 1i32
+    }
+
+    fn getCount() -> i32 = this.count
+}
+
+fn test() {
+    let const c = new Counter()
+
+    // Calling pure method on const is OK
+    let v = c.getCount()
+
+    // Calling mutating method on const is an error
+    /// @Error(TCE261): Cannot call mutating method 'increment' on a const value.
+    c.increment()
+}
+
+// --- Struct prototype const enforcement ---
+
+type Vec2 = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Vec2 {
+    fn length() -> f32 = this.x * this.x + this.y * this.y
+
+    fn scale(factor: f32) -> void {
+        this.x = this.x * factor
+        this.y = this.y * factor
+    }
+}
+
+fn testStructProto() {
+    let const v: Vec2 = { x: 1.0f, y: 2.0f }
+
+    // Calling pure prototype method on const is OK
+    let len = v.length()
+
+    // Calling mutating prototype method on const is an error
+    /// @Error(TCE261): Cannot call mutating method 'scale' on a const value.
+    v.scale(2.0f)
+}

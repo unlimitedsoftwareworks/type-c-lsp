@@ -509,7 +509,8 @@ function createMethodType(
     genericParameters: readonly GenericTypeDescription[] = [],
     isStatic: boolean = false,
     isOverride: boolean = false,
-    isLocal: boolean = false
+    isLocal: boolean = false,
+    isPure: boolean = false
 ): MethodType {
     return {
         names,
@@ -519,6 +520,7 @@ function createMethodType(
         isStatic,
         isOverride,
         isLocal,
+        isPure,
         node
     };
 }

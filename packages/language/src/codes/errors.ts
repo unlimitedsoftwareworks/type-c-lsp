@@ -180,4 +180,8 @@ export enum ErrorCode {
 
     // Self Type Errors (TCE250-TCE259)
     TC_SELF_TYPE_OUTSIDE_CONTEXT = 'TCE250',
+
+    // Purity Errors (TCE260-TCE269)
+    TC_PURE_METHOD_MUTATES_THIS = 'TCE260',
+    TC_MUTATING_METHOD_ON_CONST = 'TCE261',
 }

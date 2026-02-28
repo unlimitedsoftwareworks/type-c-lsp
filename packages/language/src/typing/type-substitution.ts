@@ -578,7 +578,8 @@ function substituteGenericsImpl(
                 m.genericParameters,
                 m.isStatic,
                 m.isOverride,
-                m.isLocal
+                m.isLocal,
+                m.isPure
             );
         });
         const substitutedImplementations = type.implementations.map(i =>
@@ -661,7 +662,8 @@ function substituteGenericsImpl(
                 m.genericParameters,
                 m.isStatic,
                 m.isOverride,
-                m.isLocal
+                m.isLocal,
+                m.isPure
             );
         });
         const substitutedSuperTypes = type.superTypes.map(t =>

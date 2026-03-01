@@ -69,7 +69,7 @@ type Integer = class {
     }
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let myMap: Map<string, Integer> = new Map<string, Integer>()
 
     myMap.insert("one", new Integer(1))

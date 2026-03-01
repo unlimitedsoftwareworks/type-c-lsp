@@ -1,7 +1,7 @@
 from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
 
     let z: u8[] = [1, 2, 3, 4, 5]
 
@@ -38,7 +38,7 @@ fn fib(n: u32) -> u32 =
         _ => fib(n - 1) + fib(n - 2)
     }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let res1 = fib(10)
     rn.assert_eq<u32>(res1, 55)
 
@@ -52,7 +52,7 @@ type ServerResponse = variant {
 }
 
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     let res: ServerResponse = ServerResponse.Ok(200)
 
     match res {
@@ -84,7 +84,7 @@ type Response = enum {
     Error
 }
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     
     // todo investigate why const is ignored later on
     let r = Response.Ok
@@ -117,7 +117,7 @@ type Phone = {
 }
 
 
-fn test_case_5(rn: TestUnit) {
+fn test_case_5(mut rn: TestUnit) {
     let phones: Phone[] = [
         {"Samsung Galaxy S10", 3400},  // <-
         {"iPhone 11", 3110}, 
@@ -139,7 +139,7 @@ fn test_case_5(rn: TestUnit) {
     }
 }
 
-fn test_case_6(rn: TestUnit) {
+fn test_case_6(mut rn: TestUnit) {
     let pairs: u8[] = [1, 1]
 
     match pairs {
@@ -192,7 +192,7 @@ type DataArray = class {
     }
 }
 
-fn test_case_7(rn: TestUnit) {
+fn test_case_7(mut rn: TestUnit) {
     let s: User? = {
         name: "John",
         age: 20u32
@@ -240,7 +240,7 @@ type AnotherServerResponse<T> = variant {
     Error(msg: string)
 }
 
-fn test_case_8<U> (rn: TestUnit) {
+fn test_case_8<U> (mut rn: TestUnit) {
     let response: AnotherServerResponse<U> = AnotherServerResponse.Error<U>("Error")
 
     match response {

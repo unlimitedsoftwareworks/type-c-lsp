@@ -31,7 +31,7 @@ type Point = {
 
 fn getPoints() -> (Point, Point) = ({xAndY: {x: 1.0f, y: 2.0f}, z: 3.0f}, {xAndY: {x: 4.0f, y: 5.0f}, z: 6.0f})
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     // tests regular nullable var decl
     let p? = {a: 1.0f, b: 2.0f, c: 3.0f}
     rn.assert_obj_not_null(p)

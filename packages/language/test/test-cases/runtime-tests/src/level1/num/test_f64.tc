@@ -1,6 +1,6 @@
 from std.unit.test import TestUnit
 
-fn test_f64_operations(runner: TestUnit) {
+fn test_f64_operations(mut runner: TestUnit) {
     // Declare variables for all types
     let v_f64: f64 = 10.0
     let v_u8: u8 = 1

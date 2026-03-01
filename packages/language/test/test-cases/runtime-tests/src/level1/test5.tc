@@ -30,7 +30,7 @@ fn factorial_imperative(n: u32) -> u32 {
 }
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let fib_10 = fib(10)
     rn.assert_eq<u32>(fib_10, 55)
 

@@ -27,7 +27,7 @@ fn printMode(m: FileOpenMode) {
 
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let modes2: FileOpenMode[] = ["read", "execute"] // should pass
     let modes4 = ["read", "write"] as FileOpenMode[] // should pass
     

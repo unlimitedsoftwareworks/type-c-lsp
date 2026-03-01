@@ -1,7 +1,7 @@
 from std.unit.test import TestUnit, UnitSet
 from std.collections.array.array import Array, StdArray
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let arr_1: f32[] = [1.0f, 2.0f, 3.0f, 4.0f, 6.0f]
     let arr_1_idx: u64[] = [0, 1, 2, 3, 4]
 
@@ -61,7 +61,7 @@ fn test_case_1(rn: TestUnit) {
     }
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     // tests matrix multiplication
     let a = new StdArray<Array<f32>>([
         new StdArray<f32>([1.0f, 2.0f, 3.0f]),

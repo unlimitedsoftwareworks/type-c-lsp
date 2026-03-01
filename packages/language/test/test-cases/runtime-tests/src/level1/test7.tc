@@ -8,7 +8,7 @@ type ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta = class {
     fn init() {}
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let alpha = new ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionAlpha()
     let beta = new ExtremelyLongClassNameForRuntimeInterfaceIsClassRegressionBeta()
 

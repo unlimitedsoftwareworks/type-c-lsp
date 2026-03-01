@@ -2,7 +2,7 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let z = fn (x: u32) -> u32 {
         return x + 1
     }
@@ -20,7 +20,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq<u32>(c, 2)
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     fn max(x: u32, y: u32) -> u32 {
         if (x > y) {
             return x
@@ -49,7 +49,7 @@ fn test_case_2(rn: TestUnit) {
     rn.assert_eq<u32>(c, 2)
 }
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     // test  lambda that returns a tuple
     let swap = fn (x: u32, y: u32) -> (u32, u32) =
         (y, x)
@@ -82,7 +82,7 @@ fn test_case_3(rn: TestUnit) {
     }
 }
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     fn f(x: u32) {
         let offset: u32 = 0
         fn g(y: u32) {
@@ -103,7 +103,7 @@ fn test_case_4(rn: TestUnit) {
     rn.assert_eq<u32>(z2(1), 203)
 }
 
-fn test_case_5(rn: TestUnit) {
+fn test_case_5(mut rn: TestUnit) {
     // pseudo object design
     fn f(x: u32, y: u32) {
 
@@ -135,7 +135,7 @@ fn test_case_5(rn: TestUnit) {
     rn.assert_eq<u32>(s.getY(), 100)
 }
 
-fn test_case_6(rn: TestUnit) {
+fn test_case_6(mut rn: TestUnit) {
     // Nested closures with multiple layers of captured variables
     fn outer(x: u32) -> fn(y: u32) -> fn(z: u32) -> u32 {
         fn middle(y: u32) -> fn(z: u32) -> u32 {
@@ -157,7 +157,7 @@ fn test_case_6(rn: TestUnit) {
 }
 
 
-fn test_case_7(rn: TestUnit) {
+fn test_case_7(mut rn: TestUnit) {
     fn counter() -> fn() -> u32 {
         let count = 0u32
         fn increment() -> u32 {
@@ -176,7 +176,7 @@ fn test_case_7(rn: TestUnit) {
     rn.assert_eq<u32>(new_inc(), 1)  // New count, reset to 0 + 1 = 1
 }
 
-fn test_case_8(rn: TestUnit) {
+fn test_case_8(mut rn: TestUnit) {
     fn make_adder(base: u32) -> fn(y: u32) -> u32 {
         fn add(y: u32) -> u32 {
             return base + y
@@ -194,7 +194,7 @@ fn test_case_8(rn: TestUnit) {
     rn.assert_eq<u32>(add_10(7), 17) // 10 + 7 = 17
 }
 
-fn test_case_9(rn: TestUnit) {
+fn test_case_9(mut rn: TestUnit) {
     let x = 10u32
 
     fn closure () -> u32 {
@@ -226,7 +226,7 @@ type ClosureClass = class {
     }
 }
 
-fn test_case_10(rn: TestUnit) {
+fn test_case_10(mut rn: TestUnit) {
     let c = new ClosureClass(10)
     let closure = c.closure()
     rn.assert_eq<u32>(closure(), 10)

@@ -31,7 +31,7 @@ type Placeholder<T> = class {
     impl DefaultCallBehavior<T>(v)
 }
 
-fn test_callable_placeholder(rn: TestUnit) {
+fn test_callable_placeholder(mut rn: TestUnit) {
     let p = new Placeholder<u32>(42)
     let v = p()
     rn.assert_eq(v, 42)
@@ -184,7 +184,7 @@ type GenericContainer<T> = class {
     }
 }
 
-fn test_generic_container(rn: TestUnit) {
+fn test_generic_container(mut rn: TestUnit) {
     let container = new GenericContainer<u32>(100)
     rn.assert_eq(container.getValue(), 100)
 
@@ -219,13 +219,13 @@ type MathOperation<T> = class {
     }
 }
 
-fn test_generic_math(rn: TestUnit) {
+fn test_generic_math(mut rn: TestUnit) {
     let op = new MathOperation<Vec3>(new Vec3(1.0f, 2.0f, 3.0f), new Vec3(4.0f, 5.0f, 6.0f))
     let result = op.addValues()
     rn.assert_obj_eq(result, new Vec3(5.0f, 7.0f, 9.0f))
 }
 
-fn test_static_mesh(rn: TestUnit) {
+fn test_static_mesh(mut rn: TestUnit) {
     let pos = new Vec3(1.0f, 2.0f, 3.0f)
     let rot = new Vec3(4.0f, 5.0f, 6.0f)
     let scale = new Vec3(7.0f, 8.0f, 9.0f)

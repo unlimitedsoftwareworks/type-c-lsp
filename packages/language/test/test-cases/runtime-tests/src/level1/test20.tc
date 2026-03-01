@@ -28,12 +28,12 @@ namespace tesla {
     }
 }
 
-fn test_static_initialization(rn: TestUnit) {
+fn test_static_initialization(mut rn: TestUnit) {
     // Ensure static block is executed and initializes correctly
     rn.assert_eq(tesla.SomeClass.value, 1)
 }
 
-fn test_static_increment(rn: TestUnit) {
+fn test_static_increment(mut rn: TestUnit) {
     // Create instances of SomeClass and test static value increment
     let instance_a = new tesla.SomeClass()
     rn.assert_eq(tesla.SomeClass.value, 2)
@@ -45,7 +45,7 @@ fn test_static_increment(rn: TestUnit) {
     rn.assert_eq(tesla.SomeClass.value, 4)
 }
 
-fn test_static_consistency(rn: TestUnit) {
+fn test_static_consistency(mut rn: TestUnit) {
     // Create an instance and check if static value remains consistent
     let instance = new tesla.SomeClass()
     rn.assert_eq(instance.getStaticValue(), tesla.SomeClass.value)

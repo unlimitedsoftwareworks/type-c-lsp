@@ -10,7 +10,7 @@ type Point2D = {
     y: i32
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let p1: Point2D = { x: 10, y: 20 }
     let p2: Point2D & { z: i32 } = { x: 20, y: -40, z: 34 }
 

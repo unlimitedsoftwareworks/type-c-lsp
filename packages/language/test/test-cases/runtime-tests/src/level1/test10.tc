@@ -152,7 +152,7 @@ type Data<T> = class {
     }
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let d = new Data<string>()
     let zzz = d[1, "hehe"] = "hi"
     let value1 = d[1]
@@ -192,7 +192,7 @@ fn sum(t: Tree)  -> i32 = match t {
     _ => 0 as i32
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
 
     let tree: Tree= Tree.BinaryNode(Tree.Number(4), Tree.Unary(Tree.Number(2), "-"), "*")
     let z = sum(tree)
@@ -282,7 +282,7 @@ type Ageable<T> = interface {
     fn age() -> T
 }
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     let x = new ClassUser3()
 
     let y = match x {
@@ -360,7 +360,7 @@ type GenericServerResponse<T> = variant {
     Error(code: T)
 }
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     let resp1 = ServerResponse.Error(404)
     let resp2 = GenericServerResponse.Error<string>("404 Not found")
 

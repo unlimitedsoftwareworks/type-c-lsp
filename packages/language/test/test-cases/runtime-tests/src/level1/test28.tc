@@ -34,7 +34,7 @@ prototype Vec2 {
 
 }
 
-fn test_vec2_methods(rn: TestUnit) {
+fn test_vec2_methods(mut rn: TestUnit) {
     let a: Vec2 = { x: 3.0f, y: 4.0f }
     let b: Vec2 = { x: 1.0f, y: 2.0f }
 
@@ -50,7 +50,7 @@ fn test_vec2_methods(rn: TestUnit) {
     rn.assert_f32_eq_pre(scaled.y, 8.0f, 0.001f)
 }
 
-fn test_vec2_operators(rn: TestUnit) {
+fn test_vec2_operators(mut rn: TestUnit) {
     let a: Vec2 = { x: 3.0f, y: 4.0f }
     let b: Vec2 = { x: 1.0f, y: 2.0f }
 
@@ -87,7 +87,7 @@ prototype Counter {
     }
 }
 
-fn test_counter(rn: TestUnit) {
+fn test_counter(mut rn: TestUnit) {
     let c: Counter = { value: 0i32 }
 
     let c1 = c.increment()
@@ -127,7 +127,7 @@ prototype Pt {
     }
 }
 
-fn test_alias_prototype(rn: TestUnit) {
+fn test_alias_prototype(mut rn: TestUnit) {
     let p1: Pt = { x: 1.0f, y: 2.0f }
     let p2: Pt = { x: 4.0f, y: 6.0f }
 
@@ -162,7 +162,7 @@ namespace Geo {
     }
 }
 
-fn test_namespace_prototype(rn: TestUnit) {
+fn test_namespace_prototype(mut rn: TestUnit) {
     let r: Geo.Rect = { w: 3.0f, h: 4.0f }
 
     rn.assert_f32_eq_pre(r.area(), 12.0f, 0.001f)

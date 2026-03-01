@@ -4,7 +4,7 @@ from std.unit.test import TestUnit, UnitSet
 // u8 narrowing tests
 // ============================================================================
 
-fn test_u8_add(rn: TestUnit) {
+fn test_u8_add(mut rn: TestUnit) {
     // basic overflow
     let a: u8 = 255u8
     rn.assert_eq<u8>(a + 1u8, 0u8)
@@ -23,7 +23,7 @@ fn test_u8_add(rn: TestUnit) {
     rn.assert_eq<u8>(d, 8u8)
 }
 
-fn test_u8_sub(rn: TestUnit) {
+fn test_u8_sub(mut rn: TestUnit) {
     // basic underflow
     let a: u8 = 0u8
     rn.assert_eq<u8>(a - 1u8, 255u8)
@@ -39,7 +39,7 @@ fn test_u8_sub(rn: TestUnit) {
     rn.assert_eq<u8>(c, 246u8)
 }
 
-fn test_u8_mul(rn: TestUnit) {
+fn test_u8_mul(mut rn: TestUnit) {
     rn.assert_eq<u8>(16u8 * 16u8, 0u8)     // 256 -> 0
     rn.assert_eq<u8>(16u8 * 17u8, 16u8)    // 272 -> 16
     rn.assert_eq<u8>(255u8 * 2u8, 254u8)   // 510 -> 254
@@ -47,7 +47,7 @@ fn test_u8_mul(rn: TestUnit) {
     rn.assert_eq<u8>(10u8 * 10u8, 100u8)   // no overflow
 }
 
-fn test_u8_shl(rn: TestUnit) {
+fn test_u8_shl(mut rn: TestUnit) {
     rn.assert_eq<u8>(1u8 << 7u8, 128u8)
     rn.assert_eq<u8>(1u8 << 8u8, 0u8)     // shifted out entirely
     rn.assert_eq<u8>(3u8 << 7u8, 128u8)   // 0x180 -> 0x80
@@ -55,7 +55,7 @@ fn test_u8_shl(rn: TestUnit) {
     rn.assert_eq<u8>(255u8 << 4u8, 240u8) // 0xFF0 -> 0xF0
 }
 
-fn test_u8_bnot(rn: TestUnit) {
+fn test_u8_bnot(mut rn: TestUnit) {
     rn.assert_eq<u8>(~0u8, 255u8)
     rn.assert_eq<u8>(~255u8, 0u8)
     rn.assert_eq<u8>(~1u8, 254u8)
@@ -63,7 +63,7 @@ fn test_u8_bnot(rn: TestUnit) {
     rn.assert_eq<u8>(~0x0Fu8, 0xF0u8)
 }
 
-fn test_u8_inc_dec(rn: TestUnit) {
+fn test_u8_inc_dec(mut rn: TestUnit) {
     // prefix increment overflow (using expression context)
     let a: u8 = 255u8
     let a2: u8 = ++a
@@ -97,7 +97,7 @@ fn test_u8_inc_dec(rn: TestUnit) {
     rn.assert_eq<u8>(d, 255u8)
 }
 
-fn test_u8_compound(rn: TestUnit) {
+fn test_u8_compound(mut rn: TestUnit) {
     let a: u8 = 250u8
     a += 10u8   // 260 -> 4
     rn.assert_eq<u8>(a, 4u8)
@@ -119,7 +119,7 @@ fn test_u8_compound(rn: TestUnit) {
 // u16 narrowing tests
 // ============================================================================
 
-fn test_u16_add(rn: TestUnit) {
+fn test_u16_add(mut rn: TestUnit) {
     let a: u16 = 65535u16
     rn.assert_eq<u16>(a + 1u16, 0u16)
     rn.assert_eq<u16>(a + 2u16, 1u16)
@@ -129,33 +129,33 @@ fn test_u16_add(rn: TestUnit) {
     rn.assert_eq<u16>(1000u16 + 2000u16, 3000u16)
 }
 
-fn test_u16_sub(rn: TestUnit) {
+fn test_u16_sub(mut rn: TestUnit) {
     let a: u16 = 0u16
     rn.assert_eq<u16>(a - 1u16, 65535u16)
     rn.assert_eq<u16>(a - 2u16, 65534u16)
     rn.assert_eq<u16>(100u16 - 200u16, 65436u16)
 }
 
-fn test_u16_mul(rn: TestUnit) {
+fn test_u16_mul(mut rn: TestUnit) {
     rn.assert_eq<u16>(256u16 * 256u16, 0u16)       // 65536 -> 0
     rn.assert_eq<u16>(256u16 * 257u16, 256u16)     // 65792 -> 256
     rn.assert_eq<u16>(1000u16 * 100u16, 34464u16)  // 100000 & 0xFFFF
 }
 
-fn test_u16_shl(rn: TestUnit) {
+fn test_u16_shl(mut rn: TestUnit) {
     rn.assert_eq<u16>(1u16 << 15u16, 32768u16)
     rn.assert_eq<u16>(1u16 << 16u16, 0u16)
     rn.assert_eq<u16>(0xFFu16 << 8u16, 0xFF00u16)
 }
 
-fn test_u16_bnot(rn: TestUnit) {
+fn test_u16_bnot(mut rn: TestUnit) {
     rn.assert_eq<u16>(~0u16, 65535u16)
     rn.assert_eq<u16>(~65535u16, 0u16)
     rn.assert_eq<u16>(~0x00FFu16, 0xFF00u16)
     rn.assert_eq<u16>(~0xFF00u16, 0x00FFu16)
 }
 
-fn test_u16_compound_and_incdec(rn: TestUnit) {
+fn test_u16_compound_and_incdec(mut rn: TestUnit) {
     let a: u16 = 65530u16
     a += 10u16   // 65540 -> 4
     rn.assert_eq<u16>(a, 4u16)
@@ -189,7 +189,7 @@ fn test_u16_compound_and_incdec(rn: TestUnit) {
 // u32 narrowing tests
 // ============================================================================
 
-fn test_u32_add(rn: TestUnit) {
+fn test_u32_add(mut rn: TestUnit) {
     let max: u32 = 4294967295u32
     rn.assert_eq<u32>(max + 1u32, 0u32)
     rn.assert_eq<u32>(max + 2u32, 1u32)
@@ -199,30 +199,30 @@ fn test_u32_add(rn: TestUnit) {
     rn.assert_eq<u32>(half + half, 0u32)
 }
 
-fn test_u32_sub(rn: TestUnit) {
+fn test_u32_sub(mut rn: TestUnit) {
     rn.assert_eq<u32>(0u32 - 1u32, 4294967295u32)
     rn.assert_eq<u32>(0u32 - 2u32, 4294967294u32)
     rn.assert_eq<u32>(100u32 - 200u32, 4294967196u32)
 }
 
-fn test_u32_mul(rn: TestUnit) {
+fn test_u32_mul(mut rn: TestUnit) {
     // 65536 * 65536 = 2^32 -> 0
     rn.assert_eq<u32>(65536u32 * 65536u32, 0u32)
     rn.assert_eq<u32>(65536u32 * 65537u32, 65536u32)
 }
 
-fn test_u32_shl(rn: TestUnit) {
+fn test_u32_shl(mut rn: TestUnit) {
     rn.assert_eq<u32>(1u32 << 31u32, 2147483648u32)
     rn.assert_eq<u32>(1u32 << 32u32, 0u32)
 }
 
-fn test_u32_bnot(rn: TestUnit) {
+fn test_u32_bnot(mut rn: TestUnit) {
     rn.assert_eq<u32>(~0u32, 4294967295u32)
     rn.assert_eq<u32>(~4294967295u32, 0u32)
     rn.assert_eq<u32>(~0x0000FFFFu32, 0xFFFF0000u32)
 }
 
-fn test_u32_compound_and_incdec(rn: TestUnit) {
+fn test_u32_compound_and_incdec(mut rn: TestUnit) {
     let a: u32 = 4294967295u32
     a += 1u32
     rn.assert_eq<u32>(a, 0u32)
@@ -260,7 +260,7 @@ fn test_u32_compound_and_incdec(rn: TestUnit) {
 // i8 narrowing tests
 // ============================================================================
 
-fn test_i8_add(rn: TestUnit) {
+fn test_i8_add(mut rn: TestUnit) {
     // positive overflow -> wraps to negative
     let a: i8 = 127i8
     rn.assert_eq<i8>(a + 1i8, -128i8)
@@ -271,7 +271,7 @@ fn test_i8_add(rn: TestUnit) {
     rn.assert_eq<i8>(-50i8 + -50i8, -100i8)
 }
 
-fn test_i8_sub(rn: TestUnit) {
+fn test_i8_sub(mut rn: TestUnit) {
     // negative overflow -> wraps to positive
     let a: i8 = -128i8
     rn.assert_eq<i8>(a - 1i8, 127i8)
@@ -281,18 +281,18 @@ fn test_i8_sub(rn: TestUnit) {
     rn.assert_eq<i8>(50i8 - 100i8, -50i8)
 }
 
-fn test_i8_mul(rn: TestUnit) {
+fn test_i8_mul(mut rn: TestUnit) {
     rn.assert_eq<i8>(64i8 * 2i8, -128i8)   // 128 -> -128 in i8
     rn.assert_eq<i8>(127i8 * 2i8, -2i8)    // 254 -> -2 in i8
     rn.assert_eq<i8>(-1i8 * -1i8, 1i8)     // no overflow
 }
 
-fn test_i8_shl(rn: TestUnit) {
+fn test_i8_shl(mut rn: TestUnit) {
     rn.assert_eq<i8>(1i8 << 6i8, 64i8)
     rn.assert_eq<i8>(1i8 << 7i8, -128i8)   // bit 7 is sign bit
 }
 
-fn test_i8_neg(rn: TestUnit) {
+fn test_i8_neg(mut rn: TestUnit) {
     // -(-128) overflows: 128 -> -128 in i8
     let a: i8 = -128i8
     rn.assert_eq<i8>(-a, -128i8)
@@ -305,14 +305,14 @@ fn test_i8_neg(rn: TestUnit) {
     rn.assert_eq<i8>(-c, 0i8)
 }
 
-fn test_i8_bnot(rn: TestUnit) {
+fn test_i8_bnot(mut rn: TestUnit) {
     rn.assert_eq<i8>(~0i8, -1i8)
     rn.assert_eq<i8>(~(-1i8), 0i8)
     rn.assert_eq<i8>(~127i8, -128i8)
     rn.assert_eq<i8>(~(-128i8), 127i8)
 }
 
-fn test_i8_inc_dec(rn: TestUnit) {
+fn test_i8_inc_dec(mut rn: TestUnit) {
     let a: i8 = 127i8
     let a2: i8 = ++a
     rn.assert_eq<i8>(a, -128i8)
@@ -334,7 +334,7 @@ fn test_i8_inc_dec(rn: TestUnit) {
     rn.assert_eq<i8>(d, 127i8)
 }
 
-fn test_i8_compound(rn: TestUnit) {
+fn test_i8_compound(mut rn: TestUnit) {
     let a: i8 = 120i8
     a += 20i8   // 140 -> -116 in i8
     rn.assert_eq<i8>(a, -116i8)
@@ -352,7 +352,7 @@ fn test_i8_compound(rn: TestUnit) {
 // i16 narrowing tests
 // ============================================================================
 
-fn test_i16_add(rn: TestUnit) {
+fn test_i16_add(mut rn: TestUnit) {
     let a: i16 = 32767i16
     rn.assert_eq<i16>(a + 1i16, -32768i16)
     rn.assert_eq<i16>(a + 2i16, -32767i16)
@@ -360,18 +360,18 @@ fn test_i16_add(rn: TestUnit) {
     rn.assert_eq<i16>(1000i16 + 2000i16, 3000i16) // no overflow
 }
 
-fn test_i16_sub(rn: TestUnit) {
+fn test_i16_sub(mut rn: TestUnit) {
     let a: i16 = -32768i16
     rn.assert_eq<i16>(a - 1i16, 32767i16)
     rn.assert_eq<i16>(a - 2i16, 32766i16)
 }
 
-fn test_i16_mul_shl(rn: TestUnit) {
+fn test_i16_mul_shl(mut rn: TestUnit) {
     rn.assert_eq<i16>(256i16 * 128i16, -32768i16)  // 32768 -> -32768
     rn.assert_eq<i16>(1i16 << 15i16, -32768i16)
 }
 
-fn test_i16_neg(rn: TestUnit) {
+fn test_i16_neg(mut rn: TestUnit) {
     let a: i16 = -32768i16
     rn.assert_eq<i16>(-a, -32768i16)  // -MIN overflows back to MIN
 
@@ -381,14 +381,14 @@ fn test_i16_neg(rn: TestUnit) {
     rn.assert_eq<i16>(-c, 0i16)
 }
 
-fn test_i16_bnot(rn: TestUnit) {
+fn test_i16_bnot(mut rn: TestUnit) {
     rn.assert_eq<i16>(~0i16, -1i16)
     rn.assert_eq<i16>(~(-1i16), 0i16)
     rn.assert_eq<i16>(~32767i16, -32768i16)
     rn.assert_eq<i16>(~(-32768i16), 32767i16)
 }
 
-fn test_i16_compound_and_incdec(rn: TestUnit) {
+fn test_i16_compound_and_incdec(mut rn: TestUnit) {
     let a: i16 = 32767i16
     a += 1i16
     rn.assert_eq<i16>(a, -32768i16)
@@ -426,24 +426,24 @@ fn test_i16_compound_and_incdec(rn: TestUnit) {
 // i32 narrowing tests
 // ============================================================================
 
-fn test_i32_add(rn: TestUnit) {
+fn test_i32_add(mut rn: TestUnit) {
     let a: i32 = 2147483647i32
     rn.assert_eq<i32>(a + 1i32, -2147483648i32)
     rn.assert_eq<i32>(a + 2i32, -2147483647i32)
 }
 
-fn test_i32_sub(rn: TestUnit) {
+fn test_i32_sub(mut rn: TestUnit) {
     let a: i32 = -2147483648i32
     rn.assert_eq<i32>(a - 1i32, 2147483647i32)
     rn.assert_eq<i32>(a - 2i32, 2147483646i32)
 }
 
-fn test_i32_mul_shl(rn: TestUnit) {
+fn test_i32_mul_shl(mut rn: TestUnit) {
     rn.assert_eq<i32>(65536i32 * 32768i32, -2147483648i32) // 2^31 -> MIN_I32
     rn.assert_eq<i32>(1i32 << 31i32, -2147483648i32)
 }
 
-fn test_i32_neg(rn: TestUnit) {
+fn test_i32_neg(mut rn: TestUnit) {
     let a: i32 = -2147483648i32
     rn.assert_eq<i32>(-a, -2147483648i32)  // -MIN overflows back to MIN
 
@@ -453,14 +453,14 @@ fn test_i32_neg(rn: TestUnit) {
     rn.assert_eq<i32>(-c, 0i32)
 }
 
-fn test_i32_bnot(rn: TestUnit) {
+fn test_i32_bnot(mut rn: TestUnit) {
     rn.assert_eq<i32>(~0i32, -1i32)
     rn.assert_eq<i32>(~(-1i32), 0i32)
     rn.assert_eq<i32>(~2147483647i32, -2147483648i32)
     rn.assert_eq<i32>(~(-2147483648i32), 2147483647i32)
 }
 
-fn test_i32_compound_and_incdec(rn: TestUnit) {
+fn test_i32_compound_and_incdec(mut rn: TestUnit) {
     let a: i32 = 2147483647i32
     a += 1i32
     rn.assert_eq<i32>(a, -2147483648i32)
@@ -498,7 +498,7 @@ fn test_i32_compound_and_incdec(rn: TestUnit) {
 // Cross-operation chains: narrow result feeds into next operation
 // ============================================================================
 
-fn test_chained_operations(rn: TestUnit) {
+fn test_chained_operations(mut rn: TestUnit) {
     // u8: chain of adds that each overflow
     let a: u8 = 200u8
     let b: u8 = a + 100u8  // 300 -> 44
@@ -531,7 +531,7 @@ fn test_chained_operations(rn: TestUnit) {
 // Narrowing in loops: accumulator wrapping
 // ============================================================================
 
-fn test_loop_accumulator(rn: TestUnit) {
+fn test_loop_accumulator(mut rn: TestUnit) {
     // u8: add 1 in a loop 256 times -> should wrap back to start
     let acc: u8 = 0u8
     foreach k: u32 in 0u32, 256u32, 1u32 {

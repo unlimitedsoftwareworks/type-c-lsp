@@ -41,7 +41,7 @@ type Data<T> = class {
 }
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let arr: Data<u32> = new Data<u32>()
     arr.push(1)
     arr.push(10)
@@ -56,7 +56,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq<u32>(sum, 1111)
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let arr2: Data<f64> = new Data<f64>()
     arr2.push(1.0)
     arr2.push(1.0)
@@ -74,7 +74,7 @@ fn test_case_2(rn: TestUnit) {
     rn.assert_f64_eq_pre(sum2, 7.89, 0.000001)
 }
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
 
     let arr3 = new Data<HttpResponse>()
 

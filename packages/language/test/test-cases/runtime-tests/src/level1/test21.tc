@@ -29,21 +29,21 @@ type Vec3 = class {
 }
 
 // Unit Tests for Vec3 class
-fn test_vec3_initialization_with_values(rn: TestUnit) {
+fn test_vec3_initialization_with_values(mut rn: TestUnit) {
     let v = new Vec3(1.0f, 2.0f, 3.0f)
     rn.assert_f32_eq_pre(v.x, 1.0f, 0.00001f)
     rn.assert_f32_eq_pre(v.y, 2.0f, 0.00001f)
     rn.assert_f32_eq_pre(v.z, 3.0f, 0.00001f)
 }
 
-fn test_vec3_default_initialization(rn: TestUnit) {
+fn test_vec3_default_initialization(mut rn: TestUnit) {
     let v = new Vec3()
     rn.assert_f32_eq_pre(v.x, 0.0f, 0.00001f)
     rn.assert_f32_eq_pre(v.y, 0.0f, 0.00001f)
     rn.assert_f32_eq_pre(v.z, 0.0f, 0.00001f)
 }
 
-fn test_vec3_copy_initialization(rn: TestUnit) {
+fn test_vec3_copy_initialization(mut rn: TestUnit) {
     let original = new Vec3(4.0f, 5.0f, 6.0f)
     let copy = new Vec3(original)
     rn.assert_f32_eq_pre(copy.x, 4.0f, 0.00001f)
@@ -51,7 +51,7 @@ fn test_vec3_copy_initialization(rn: TestUnit) {
     rn.assert_f32_eq_pre(copy.z, 6.0f, 0.00001f)
 }
 
-fn test_vec3_addition(rn: TestUnit) {
+fn test_vec3_addition(mut rn: TestUnit) {
     let v1 = new Vec3(1.0f, 2.0f, 3.0f)
     let v2 = new Vec3(4.0f, 5.0f, 6.0f)
     let result = v1 + v2

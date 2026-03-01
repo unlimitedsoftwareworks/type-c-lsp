@@ -1,13 +1,13 @@
 from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
-fn test1(runner: TestUnit) {
+fn test1(mut runner: TestUnit) {
     runner.assert_eq<u8>(1u8, 1u8)
 }
 
 type X = u32
 
-fn test2(runner: TestUnit) {
+fn test2(mut runner: TestUnit) {
     let s1: string = "hi"
     let s2: string = "hi"
     runner.assert_eq<string>(s1, s1)
@@ -38,7 +38,7 @@ type Point = class {
     }
 }
 
-fn test3(runner: TestUnit) {
+fn test3(mut runner: TestUnit) {
     let p1 = new Point(1, 2)
     let p2 = new Point(1, 2)
     runner.assert_obj_eq<Point>(p1, p2)
@@ -53,7 +53,7 @@ fn test3(runner: TestUnit) {
     runner.assert_obj_not_null<Point>(p5)
 }
 
-fn test4(runner: TestUnit) {
+fn test4(mut runner: TestUnit) {
     let arr: u32[] = [1, 2, 3, 4, 5, 1]
     let sum_everything_but_1 = 0u32
     foreach i, value in arr {

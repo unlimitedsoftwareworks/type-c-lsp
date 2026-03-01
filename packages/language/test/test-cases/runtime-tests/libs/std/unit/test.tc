@@ -29,11 +29,11 @@ fn assert_obj_eq<T: ComparableObject>(actual: T, expected: T) {
 type TestUnit = class {
     let const name: string
     let const description: string
-    let const runner: fn (unit: TestUnit) -> void
+    let const runner: fn (mut TestUnit) -> void
     let results: AssertionResult[]
     let state: UnitState
 
-    fn init(name: string, description: string, runner: fn (unit: TestUnit) -> void) {
+    fn init(name: string, description: string, runner: fn (mut TestUnit) -> void) {
         this.name = name
         this.description = description
         this.runner = runner
@@ -220,7 +220,7 @@ type UnitSet = class {
         this.units = units
     }
 
-    fn addUnit(unit: TestUnit) {
+    fn addUnit(mut unit: TestUnit) {
         this.units.resize(this.units.length+1)
         this.units[-1] = unit
     }

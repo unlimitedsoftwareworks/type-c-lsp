@@ -43,7 +43,7 @@ type AbstractPoint2D<T> = struct {
 
 type AbstractPoint3D<T> = AbstractPoint2D<T> & {z: T}
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let p1: Point3D = {x: 1.0f, y: 2.0f, z: 3.0f}
     rn.assert_f32_eq_pre(p1.x, 1.0f, 0.0001f)
     rn.assert_f32_eq_pre(p1.y, 2.0f, 0.0001f)
@@ -87,7 +87,7 @@ type Some3DObject = class {
     fn getLocation() = {x: 1.0f, y: 10.0f, z: 100.0f}
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let obj: LocationAware<Point3D> = new Some3DObject()
     let coords = obj.getLocation()
 

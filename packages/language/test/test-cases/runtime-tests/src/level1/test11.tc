@@ -28,7 +28,7 @@ type Z<T || (T+T) -> T> = class {
 }
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let arr: u32[] = [1, 2, 3, 4]
     let [x, y,...rest] = arr
 
@@ -41,7 +41,7 @@ fn test_case_1(rn: TestUnit) {
     }
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
 
     let user = {name: "John", age: 30u8, is_student: true}
 
@@ -53,7 +53,7 @@ fn test_case_2(rn: TestUnit) {
 }
 
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
 
     let (aa, bb) = Z.haha()
 

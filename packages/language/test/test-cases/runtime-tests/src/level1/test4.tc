@@ -8,7 +8,7 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     // initialize empty string
     let str1 = ""
     rn.assert_eq<u64>(str1.bytesLength(), 0)

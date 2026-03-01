@@ -76,7 +76,7 @@ type Shape = variant {
 
 // ---- 1. Class is Class ----
 
-fn tc_class_is_class(rn: TestUnit) {
+fn tc_class_is_class(mut rn: TestUnit) {
     let a = new Animal()
     let d = new Dog()
 
@@ -90,7 +90,7 @@ fn tc_class_is_class(rn: TestUnit) {
 
 // ---- 2. Generic class ----
 
-fn tc_generic_class_same(rn: TestUnit) {
+fn tc_generic_class_same(mut rn: TestUnit) {
     let b1 = new Box<u32>()
     let b2 = new Box<u32>()
 
@@ -102,7 +102,7 @@ fn tc_generic_class_same(rn: TestUnit) {
     rn.assert_eq<bool>(b2 is Box<i32>, false)
 }
 
-fn tc_generic_class_cross(rn: TestUnit) {
+fn tc_generic_class_cross(mut rn: TestUnit) {
     let bu = new Box<u32>()
     let bi = new Box<i32>()
     let bf = new Box<f32>()
@@ -127,7 +127,7 @@ fn tc_generic_class_cross(rn: TestUnit) {
 
 // ---- 3. Class is Interface ----
 
-fn tc_class_is_interface(rn: TestUnit) {
+fn tc_class_is_interface(mut rn: TestUnit) {
     let c = new Circle()
     let w = new Widget()
     let a = new Animal()
@@ -170,7 +170,7 @@ fn tc_iface_is_class_helper(obj: Drawable, expectCircle: bool, expectWidget: boo
     return true
 }
 
-fn tc_iface_is_class(rn: TestUnit) {
+fn tc_iface_is_class(mut rn: TestUnit) {
     let circle = new Circle()
     let widget = new Widget()
 
@@ -182,7 +182,7 @@ fn tc_iface_is_class(rn: TestUnit) {
 
 // ---- 5. Interface is Interface ----
 
-fn tc_iface_is_iface_wider(rn: TestUnit) {
+fn tc_iface_is_iface_wider(mut rn: TestUnit) {
     let w = new Widget()
     // Pass as DrawableAndResizable (has draw + resize)
     let obj: DrawableAndResizable = w
@@ -193,7 +193,7 @@ fn tc_iface_is_iface_wider(rn: TestUnit) {
     rn.assert_eq<bool>(obj is DrawableAndResizable, true)
 }
 
-fn tc_iface_is_iface_same(rn: TestUnit) {
+fn tc_iface_is_iface_same(mut rn: TestUnit) {
     let c = new Circle()
     let obj: Drawable = c
 
@@ -203,7 +203,7 @@ fn tc_iface_is_iface_same(rn: TestUnit) {
 
 // ---- 6. Variant constructors ----
 
-fn tc_option_variants(rn: TestUnit) {
+fn tc_option_variants(mut rn: TestUnit) {
     let some: Option<u32> = Option.Some(42)
     let none: Option<u32> = Option.None()
 
@@ -214,7 +214,7 @@ fn tc_option_variants(rn: TestUnit) {
     rn.assert_eq<bool>(none is Option.Some<u32>, false)
 }
 
-fn tc_result_variants(rn: TestUnit) {
+fn tc_result_variants(mut rn: TestUnit) {
     let ok: Result<u32, u32> = Result.Ok(100)
     let err: Result<u32, u32> = Result.Err(0)
 
@@ -224,7 +224,7 @@ fn tc_result_variants(rn: TestUnit) {
     rn.assert_eq<bool>(err is Result.Ok<u32, u32>, false)
 }
 
-fn tc_shape_variants(rn: TestUnit) {
+fn tc_shape_variants(mut rn: TestUnit) {
     let s1: Shape = Shape.Rect(10.0, 20.0)
     let s2: Shape = Shape.Circle(5.0)
     let s3: Shape = Shape.Point()
@@ -247,7 +247,7 @@ fn tc_shape_variants(rn: TestUnit) {
 
 // ---- 7. Null checks ----
 
-fn tc_null_check(rn: TestUnit) {
+fn tc_null_check(mut rn: TestUnit) {
     let a = new Animal()
     // Non-null is NOT null
     rn.assert_eq<bool>(a is null, false)
@@ -255,7 +255,7 @@ fn tc_null_check(rn: TestUnit) {
 
 // ---- 8. Mixed / stress ----
 
-fn tc_mixed_stress(rn: TestUnit) {
+fn tc_mixed_stress(mut rn: TestUnit) {
     let c = new Circle()
     let w = new Widget()
 

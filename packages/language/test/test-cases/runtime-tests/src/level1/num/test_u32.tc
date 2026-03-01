@@ -1,6 +1,6 @@
 from std.unit.test import TestUnit
 
-fn test_u32_operations(runner: TestUnit) {
+fn test_u32_operations(mut runner: TestUnit) {
     // Declare variables for all types
     let v_u32: u32 = 3
     let v_u8: u8 = 1

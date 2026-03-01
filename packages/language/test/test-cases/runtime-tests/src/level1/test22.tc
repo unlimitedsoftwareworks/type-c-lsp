@@ -120,7 +120,7 @@ type Vec3 = class Addable {
 }
 
 // Unit Tests for Addable, Vec3
-fn test_vec3_addition_operator(rn: TestUnit) {
+fn test_vec3_addition_operator(mut rn: TestUnit) {
     let v1 = new Vec3(1.0f, 2.0f, 3.0f)
     let v2 = new Vec3(4.0f, 5.0f, 6.0f)
     let result = v1 + v2
@@ -129,7 +129,7 @@ fn test_vec3_addition_operator(rn: TestUnit) {
     rn.assert_f32_eq_pre(result.z, 9.0f, 0.00001f)
 }
 
-fn test_vec3_subtraction_operator(rn: TestUnit) {
+fn test_vec3_subtraction_operator(mut rn: TestUnit) {
     let v1 = new Vec3(4.0f, 5.0f, 6.0f)
     let v2 = new Vec3(1.0f, 2.0f, 3.0f)
     println("Before subtraction")
@@ -140,7 +140,7 @@ fn test_vec3_subtraction_operator(rn: TestUnit) {
     rn.assert_f32_eq_pre(result.z, 3.0f, 0.00001f)
 }
 
-fn test_vec3_multiplication_operator(rn: TestUnit) {
+fn test_vec3_multiplication_operator(mut rn: TestUnit) {
     let v1 = new Vec3(1.0f, 2.0f, 3.0f)
     let v2 = new Vec3(4.0f, 5.0f, 6.0f)
     let result = v1 * v2
@@ -149,7 +149,7 @@ fn test_vec3_multiplication_operator(rn: TestUnit) {
     rn.assert_f32_eq_pre(result.z, 18.0f, 0.00001f)
 }
 
-fn test_vec3_division_operator(rn: TestUnit) {
+fn test_vec3_division_operator(mut rn: TestUnit) {
     let v1 = new Vec3(4.0f, 10.0f, 18.0f)
     let v2 = new Vec3(2.0f, 5.0f, 3.0f)
     let result = v1 / v2
@@ -158,7 +158,7 @@ fn test_vec3_division_operator(rn: TestUnit) {
     rn.assert_f32_eq_pre(result.z, 6.0f, 0.00001f)
 }
 
-fn test_vec3_modulus_operator(rn: TestUnit) {
+fn test_vec3_modulus_operator(mut rn: TestUnit) {
     let v1 = new Vec3(5.0f, 7.0f, 9.0f)
     let v2 = new Vec3(2.0f, 3.0f, 4.0f)
     let result = v1 % v2
@@ -167,7 +167,7 @@ fn test_vec3_modulus_operator(rn: TestUnit) {
     rn.assert_f32_eq_pre(result.z, 1.0f, 0.00001f)
 }
 
-fn test_vec3_comparison_operators(rn: TestUnit) {
+fn test_vec3_comparison_operators(mut rn: TestUnit) {
     let v1 = new Vec3(1.0f, 2.0f, 3.0f)
     let v2 = new Vec3(4.0f, 5.0f, 6.0f)
     rn.assert_eq(v1 < v2, true)
@@ -176,14 +176,14 @@ fn test_vec3_comparison_operators(rn: TestUnit) {
     rn.assert_eq(v1 >= v2, false)
 }
 
-fn test_vec3_reverse_indexing(rn: TestUnit) {
+fn test_vec3_reverse_indexing(mut rn: TestUnit) {
     let v = new Vec3(1.0f, 2.0f, 3.0f)
     rn.assert_f32_eq_pre(v[-(1 as u64)], 3.0f, 0.00001f)
     rn.assert_f32_eq_pre(v[-(2 as u64)], 2.0f, 0.00001f)
     rn.assert_f32_eq_pre(v[-(3 as u64)], 1.0f, 0.00001f)
 }
 
-fn test_vec3_reverse_setting(rn: TestUnit) {
+fn test_vec3_reverse_setting(mut rn: TestUnit) {
     let v = new Vec3(1.0f, 2.0f, 3.0f)
     v[-1] = 10.0f
     rn.assert_f32_eq_pre(v.z, 10.0f, 0.00001f)

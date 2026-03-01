@@ -37,7 +37,7 @@ namespace Main {
     }
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let value = Main.f()
     rn.assert_eq(value, "fhaha")
     rn.assert_f32_eq_pre(Main.getPI(), 3.14f, 0.00001f)
@@ -48,7 +48,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq(d.pos.y, 0)
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let value = publicAPI.getValue()
     rn.assert_eq(value, 1)
 
@@ -59,7 +59,7 @@ fn test_case_2(rn: TestUnit) {
 }
 
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     let version = engine.getVersion()
     rn.assert_eq(version, "1.0.0")
 
@@ -98,7 +98,7 @@ fn test_case_3(rn: TestUnit) {
 }
 
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     let version = engine.getVersion()
     rn.assert_eq(version, "1.0.0")
 

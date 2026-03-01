@@ -22,7 +22,7 @@
 from std.unit.test import TestUnit, UnitSet
 from std.collections.array.array import *
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     // test 1, direct access
     let length = (new StdArray<u32>([1,2,3])).length()
     rn.assert_eq(length, 3)
@@ -41,7 +41,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq(e2?.x ?? 10, 3)
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let e1 = new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}]).pop().x
     rn.assert_eq(e1, 3)
     let e2 = new StdArray<{x: u32}>([{x: 1}, {x: 2}, {x: 3}])[0].x

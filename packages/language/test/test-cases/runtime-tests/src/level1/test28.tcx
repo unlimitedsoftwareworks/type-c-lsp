@@ -115,7 +115,7 @@ fn murmurHash32(key: string, seed: u32) {
     return h1
 }
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let h1 = murmurHash32("hello, world", 1234)
     rn.assert_eq(h1, 2566024100)
 

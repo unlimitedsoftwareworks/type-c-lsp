@@ -2,7 +2,7 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     let z = 10
     let x = do {
         let a = 1
@@ -28,7 +28,7 @@ fn test_case_1(rn: TestUnit) {
     rn.assert_eq(y, 2)
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     let z = 5
     let result = do {
         let x = do {
@@ -52,7 +52,7 @@ fn test_case_2(rn: TestUnit) {
     rn.assert_eq(result, 9)
 }
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     let z = 8
     let result = do {
         let a = 1
@@ -66,7 +66,7 @@ fn test_case_3(rn: TestUnit) {
     rn.assert_eq(result, 25)  // Early return due to z > 6
 }
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     let z = 3
     let result = do {
         let a = 2
@@ -80,7 +80,7 @@ fn test_case_4(rn: TestUnit) {
     rn.assert_eq(result, 7)  // No early return, so a + b = 7
 }
 
-fn test_case_5(rn: TestUnit) {
+fn test_case_5(mut rn: TestUnit) {
     let x = 10
     let result = do {
         let a = 3
@@ -94,7 +94,7 @@ fn test_case_5(rn: TestUnit) {
     rn.assert_eq(result, 12)  // Condition x > 5 && b == 4 holds, so return a * b
 }
 
-fn test_case_6(rn: TestUnit) {
+fn test_case_6(mut rn: TestUnit) {
     let z = 10
     let result = do {
         let a = 2
@@ -112,7 +112,7 @@ fn test_case_6(rn: TestUnit) {
     rn.assert_eq(result, 50)  // Inner `do` returns 5 * 10 = 50
 }
 
-fn test_case_7(rn: TestUnit) {
+fn test_case_7(mut rn: TestUnit) {
     let z = 3
     let result = do {
         let a = 2
@@ -132,7 +132,7 @@ fn test_case_7(rn: TestUnit) {
 
 fn fff() -> (u32, u32) = (100, 200)
 
-fn test_case_8(rn: TestUnit) {
+fn test_case_8(mut rn: TestUnit) {
     let z = 5
     let result = do {
         let a = 3

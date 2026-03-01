@@ -64,7 +64,7 @@ type Particle = class {
     }
 }
 
-fn test_class_with_prototype(rn: TestUnit) {
+fn test_class_with_prototype(mut rn: TestUnit) {
     let p = new Particle(0.0f, 0.0f, 10.0f, 5.0f)
 
     // initial position
@@ -111,7 +111,7 @@ type Transform<T> = class {
     }
 }
 
-fn test_generic_class_with_prototype(rn: TestUnit) {
+fn test_generic_class_with_prototype(mut rn: TestUnit) {
     let t = new Transform<Vec2F>({ x: 1.0f, y: 2.0f })
 
     let v = t.get()
@@ -158,7 +158,7 @@ type RigidBody = class {
     }
 }
 
-fn test_shared_prototype(rn: TestUnit) {
+fn test_shared_prototype(mut rn: TestUnit) {
     // Both Particle and RigidBody use Vec2F prototype
     let p = new Particle(0.0f, 0.0f, 5.0f, 0.0f)
     let rb = new RigidBody(10.0f, 0.0f, 2.0f)
@@ -186,7 +186,7 @@ fn apply_scale(v: Vec2F, s: f32) -> Vec2F {
     return v.scale(s)
 }
 
-fn test_prototype_in_functions(rn: TestUnit) {
+fn test_prototype_in_functions(mut rn: TestUnit) {
     let a: Vec2F = { x: 1.0f, y: 2.0f }
     let b: Vec2F = { x: 3.0f, y: 4.0f }
 
@@ -222,7 +222,7 @@ prototype Pair {
     }
 }
 
-fn test_generic_struct_proto(rn: TestUnit) {
+fn test_generic_struct_proto(mut rn: TestUnit) {
     // Pair<u32> instantiation
     let p: Pair<u32> = { first: 1u32, second: 2u32 }
     let swapped = p.swap()
@@ -248,7 +248,7 @@ fn getFirstString(p: Pair<string>) -> string {
     return p.getFirst()
 }
 
-fn test_generic_proto_through_functions(rn: TestUnit) {
+fn test_generic_proto_through_functions(mut rn: TestUnit) {
     // Prototype method through a non-generic function
     let p: Pair<u32> = { first: 100u32, second: 200u32 }
     let s = swapPair(p)
@@ -282,7 +282,7 @@ prototype Builder {
     }
 }
 
-fn test_generic_proto_chaining(rn: TestUnit) {
+fn test_generic_proto_chaining(mut rn: TestUnit) {
     let b: Builder<string> = { items: "hello", count: 0u32 }
 
     // Chaining prototype methods

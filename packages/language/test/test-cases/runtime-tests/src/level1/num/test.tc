@@ -23,7 +23,7 @@ fn getErr(i: u64) -> Enum {
 }
 
 
-fn test_stuff(runner: TestUnit) {
+fn test_stuff(mut runner: TestUnit) {
     runner.assert_eq(getErr(0), Enum.Err)
     runner.assert_eq(getErr(1), Enum.Ok)
     runner.assert_eq(getErr(2), Enum.Maybe)

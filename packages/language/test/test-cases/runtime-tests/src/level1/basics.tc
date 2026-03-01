@@ -111,7 +111,7 @@ type Array = class {
     }
 }
 
-fn test_case_1(runner: TestUnit) {
+fn test_case_1(mut runner: TestUnit) {
     let arr1: Array = new Array(10)
     arr1.push(1)
     arr1.push(2)
@@ -164,7 +164,7 @@ type BasicArray = class {
     }
 }
 
-fn test_case_2(runner: TestUnit) {
+fn test_case_2(mut runner: TestUnit) {
     let arr: i32[] = [1, 10, 7, 8, 9, 1, 5]
 
     runner.assert_eq<u64>(arr.length, 7)
@@ -196,7 +196,7 @@ fn fib(x: i32) -> i32 {
 let x: fn(y: i32) -> i32 = fib
 let z = x(5)
 
-fn test_case_3(runner: TestUnit) {
+fn test_case_3(mut runner: TestUnit) {
     let xx = fib(10)
     let y = x(10)
     let a = fib(5)

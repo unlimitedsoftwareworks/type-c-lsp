@@ -38,7 +38,7 @@ prototype Vec3 {
     }
 }
 
-fn test_vec3(rn: TestUnit) {
+fn test_vec3(mut rn: TestUnit) {
     let a: Vec3 = { x: 1.0f, y: 2.0f, z: 3.0f }
     let b: Vec3 = { x: 4.0f, y: 5.0f, z: 6.0f }
 
@@ -103,7 +103,7 @@ prototype TopVec {
     }
 }
 
-fn test_deep_alias(rn: TestUnit) {
+fn test_deep_alias(mut rn: TestUnit) {
     let a: TopVec = { x: 3.0f, y: 7.0f }
     let b: TopVec = { x: 1.0f, y: 2.0f }
 
@@ -146,7 +146,7 @@ prototype Acc {
     }
 }
 
-fn test_accumulator(rn: TestUnit) {
+fn test_accumulator(mut rn: TestUnit) {
     let a: Acc = { val: 10i64 }
 
     // method chaining
@@ -188,7 +188,7 @@ namespace Math2D {
     }
 }
 
-fn test_namespace_alias(rn: TestUnit) {
+fn test_namespace_alias(mut rn: TestUnit) {
     let a: Math2D.Vec = { x: 3.0, y: 4.0 }
     let b: Math2D.Vec = { x: 1.0, y: 2.0 }
 

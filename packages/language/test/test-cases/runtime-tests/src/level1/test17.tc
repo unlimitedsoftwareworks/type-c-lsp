@@ -2,7 +2,7 @@ from std.io import println
 from std.unit.test import TestUnit, UnitSet
 
 
-fn test_case_1(rn: TestUnit) {
+fn test_case_1(mut rn: TestUnit) {
     cfn loop(x: u32[]) -> (u32, bool) {
         let i: u64 = 0
 
@@ -57,7 +57,7 @@ type DataGenerator = class {
     }
 }
 
-fn test_case_2(rn: TestUnit) {
+fn test_case_2(mut rn: TestUnit) {
     cfn dataGenerator() -> string {
         let data = ["hi", "hello", "hey"]
         
@@ -81,7 +81,7 @@ fn test_case_2(rn: TestUnit) {
     rn.assert_eq(c.co(), "hey")
 }
 
-fn test_case_3(rn: TestUnit) {
+fn test_case_3(mut rn: TestUnit) {
     cfn dataGenerator() -> string {
         let data = ["hi", "hello", "hey"]
         
@@ -105,7 +105,7 @@ fn test_case_3(rn: TestUnit) {
     rn.assert_eq(arr[2](), "hey")
 }
 
-fn test_case_4(rn: TestUnit) {
+fn test_case_4(mut rn: TestUnit) {
     cfn dataGenerator<T>(data: T[]) -> T {
         let const old = data
         yield old[0]
@@ -130,7 +130,7 @@ fn test_case_4(rn: TestUnit) {
     rn.assert_eq<u64>(e2, 2)
 }
 
-fn test_case_5(rn: TestUnit) {
+fn test_case_5(mut rn: TestUnit) {
     cfn dataGenerator<T>(data: T[]) -> T {
         yield data[0]
         yield data[1]

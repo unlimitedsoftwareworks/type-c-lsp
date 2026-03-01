@@ -5898,8 +5898,16 @@ export class TypeCTypeProvider {
         // Get the target type - this is what we're matching against
         const targetType = this.getType(baseExpression);
 
+        // Always start from the root pattern (the one directly under the match case),
+        // not from a potentially nested sub-pattern. The root pattern gets the match
+        // target type, and inferPatternTypes descends to give sub-patterns their
+        // correct narrowed types (e.g., array element type for patterns inside an array).
+        const rootPattern = (ast.isMatchCaseStatement(parentNode) || ast.isMatchCaseExpression(parentNode))
+            ? parentNode.pattern
+            : node;
+
         // Descend into the pattern tree and infer all variable types
-        this.inferPatternTypes(node, targetType, 0);
+        this.inferPatternTypes(rootPattern, targetType, 0);
     }
 
     /**

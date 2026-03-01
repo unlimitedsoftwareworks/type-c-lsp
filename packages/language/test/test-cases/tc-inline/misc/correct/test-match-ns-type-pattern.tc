@@ -1,0 +1,32 @@
+// Test: Namespace-qualified types in match patterns.
+// e.g. animals.Swimmer should be parsed as TypePattern, not VariablePattern.
+
+namespace animals {
+    type Swimmer = interface {
+        fn swim() -> string
+    }
+
+    type Walker = interface {
+        fn walk() -> string
+    }
+}
+
+fn test<T: animals.Swimmer | animals.Walker>(x: T) -> string {
+    match x {
+        animals.Swimmer & animals.Walker {
+            let y = x as! animals.Swimmer & animals.Walker
+            return y.swim() + y.walk()
+        }
+        animals.Swimmer {
+            let y = x as! animals.Swimmer
+            return y.swim()
+        }
+        animals.Walker {
+            let y = x as! animals.Walker
+            return y.walk()
+        }
+        _ {
+            return "other"
+        }
+    }
+}

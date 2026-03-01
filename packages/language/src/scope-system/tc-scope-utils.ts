@@ -22,6 +22,20 @@ type ReferencableSymbol =
     ast.ImplementationAttributeDecl;
 
 
+/**
+ * Returns true if a VariablePattern's name starts with an uppercase letter,
+ * indicating it should be treated as a type reference rather than a variable binding.
+ *
+ * Convention: uppercase-starting identifiers in match patterns = type checks,
+ * lowercase-starting identifiers = variable bindings.
+ *
+ * This resolves a grammar ambiguity where bare identifiers like `IA` are parsed
+ * as VariablePattern instead of TypePattern.
+ */
+export function isVariablePatternActuallyTypeReference(pattern: ast.VariablePattern): boolean {
+    return pattern.name.length > 0 && pattern.name[0] >= 'A' && pattern.name[0] <= 'Z';
+}
+
 export function isWithinClass(container: AstNode): boolean {
     const parentClass = AstUtils.getContainerOfType(container, ast.isClassType);
     return parentClass !== null;
@@ -204,22 +218,24 @@ export function extractPatternVariables(pattern: ast.MatchCasePattern | undefine
     }
 
     const variables: ReferencableSymbol[] = [];
-    
+
     // First, check if the pattern itself is a VariablePattern
     // This handles simple cases like: match x { a => ... }
-    if (ast.isVariablePattern(pattern)) {
+    // Skip uppercase-starting names — they are type references, not variable bindings
+    if (ast.isVariablePattern(pattern) && !isVariablePatternActuallyTypeReference(pattern)) {
         variables.push(pattern);
     }
-    
+
     // Then, stream all nested contents to find VariablePatterns in complex patterns
     // This handles nested cases like: match x { [a, b] => ..., {x: y} => ... }
+    // Skip uppercase-starting names — they are type references, not variable bindings
     AstUtils.streamAllContents(pattern)
-        .filter(node => ast.isVariablePattern(node))
+        .filter((node): node is ast.VariablePattern => ast.isVariablePattern(node) && !isVariablePatternActuallyTypeReference(node))
         .forEach(node => {
             variables.push(node);
         }
     );
-    
+
     return variables;
 }
 

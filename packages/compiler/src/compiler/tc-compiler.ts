@@ -5962,26 +5962,32 @@ export class IRGenerator {
 
         if (ast.isLiteralPattern(pattern)) {
             // Compare subject with literal (LiteralPattern IS the literal expression)
-            const litResult = this.visitExpression(pattern as unknown as ast.Expression, undefined);
+            const litResult = this.visitExpression(pattern as ast.Expression, undefined);
             const cmpReg = this.tmp();
             if (this.isStringIRType(subject.type)) {
                 f.cmpEqStr(cmpReg, subject.register, litResult.register);
             } else {
-                const cmpType = this.extractCmpType(subject.type, pattern as unknown as AstNode);
+                const cmpType = this.extractCmpType(subject.type, pattern as AstNode);
                 f.cmpEq(cmpReg, subject.register, litResult.register, cmpType);
             }
             f.br(cmpReg, matchLabel, failLabel);
         } else if (ast.isVariablePattern(pattern)) {
-            // Check if this variable name actually refers to a type declaration
-            // (grammar ambiguity: plain identifiers like User1 are parsed as VariablePattern)
-            const resolvedAsType = this.tryResolveVariableAsType(pattern.name);
-            if (resolvedAsType) {
-                // Treat as a type instance pattern — emit `is` check
-                const resolvedSubjectTd = subjectTd ? this.typeUtils.resolveIfReference(subjectTd) : undefined;
-                const checkReg = this.emitIsTypeCheck(
-                    subject.register, resolvedSubjectTd, resolvedAsType
-                );
-                f.br(checkReg, matchLabel, failLabel);
+            // Convention: uppercase-starting names are type references, not variable bindings
+            // (grammar ambiguity: plain identifiers like IA are parsed as VariablePattern)
+            const isTypeRef = pattern.name.length > 0 && pattern.name[0] >= 'A' && pattern.name[0] <= 'Z';
+            if (isTypeRef) {
+                const resolvedAsType = this.tryResolveVariableAsType(pattern.name);
+                if (resolvedAsType) {
+                    // Treat as a type instance pattern — emit `is` check
+                    const resolvedSubjectTd = subjectTd ? this.typeUtils.resolveIfReference(subjectTd) : undefined;
+                    const checkReg = this.emitIsTypeCheck(
+                        subject.register, resolvedSubjectTd, resolvedAsType
+                    );
+                    f.br(checkReg, matchLabel, failLabel);
+                } else {
+                    // Type not found — still jump to match label (will be caught by validation)
+                    f.jmp(matchLabel);
+                }
             } else {
                 // Variable pattern: always matches, binds in emitPatternBindings
                 f.jmp(matchLabel);
@@ -6069,12 +6075,12 @@ export class IRGenerator {
                     f.constInt(idxReg, i, 'u64');
                     const elemReg = this.tmp();
                     f.arrayGet(elemReg, subject.register, idxReg, elementIRType);
-                    const litResult = this.visitExpression(elemPattern as unknown as ast.Expression, undefined);
+                    const litResult = this.visitExpression(elemPattern as ast.Expression, undefined);
                     const elemCmpReg = this.tmp();
                     if (this.isStringIRType(elementIRType)) {
                         f.cmpEqStr(elemCmpReg, elemReg, litResult.register);
                     } else {
-                        const cmpType = this.extractCmpType(elementIRType, elemPattern as unknown as AstNode);
+                        const cmpType = this.extractCmpType(elementIRType, elemPattern as AstNode);
                         f.cmpEq(elemCmpReg, elemReg, litResult.register, cmpType);
                     }
                     const nextElemLabel = this.generateLabel('arr_pat_elem_ok');
@@ -6109,12 +6115,12 @@ export class IRGenerator {
                         : scalarType('u64');
                     const fieldReg = this.tmp();
                     f.structGet(fieldReg, subject.register, fieldNameId, fieldIRType);
-                    const litResult = this.visitExpression(field.pattern as unknown as ast.Expression, undefined);
+                    const litResult = this.visitExpression(field.pattern as ast.Expression, undefined);
                     const cmpReg2 = this.tmp();
                     if (this.isStringIRType(fieldIRType)) {
                         f.cmpEqStr(cmpReg2, fieldReg, litResult.register);
                     } else {
-                        const cmpType = this.extractCmpType(fieldIRType, field.pattern as unknown as AstNode);
+                        const cmpType = this.extractCmpType(fieldIRType, field.pattern as AstNode);
                         f.cmpEq(cmpReg2, fieldReg, litResult.register, cmpType);
                     }
                     const nextFieldLabel = this.generateLabel('struct_pat_field_ok');
@@ -6146,9 +6152,9 @@ export class IRGenerator {
         const f = this.func();
 
         if (ast.isVariablePattern(pattern)) {
-            // Skip binding if this variable name actually refers to a type (grammar ambiguity)
-            const resolvedAsType = this.tryResolveVariableAsType(pattern.name);
-            if (!resolvedAsType) {
+            // Skip binding for uppercase names — they are type references, not variable bindings
+            const isTypeRef = pattern.name.length > 0 && pattern.name[0] >= 'A' && pattern.name[0] <= 'Z';
+            if (!isTypeRef) {
                 // Bind subject value to pattern variable
                 const varType = subject.type;
                 const varReg = this.allocateVariable(pattern.name, varType);
@@ -6183,12 +6189,12 @@ export class IRGenerator {
                     } else if (ast.isLiteralPattern(nestedPattern)) {
                         // Literal: compare field value with literal and branch to fail
                         if (failLabel) {
-                            const litResult = this.visitExpression(nestedPattern as unknown as ast.Expression, undefined);
+                            const litResult = this.visitExpression(nestedPattern as ast.Expression, undefined);
                             const cmpReg = this.tmp();
                             if (this.isStringIRType(fieldType)) {
                                 f.cmpEqStr(cmpReg, fieldReg, litResult.register);
                             } else {
-                                const cmpType = this.extractCmpType(fieldType, nestedPattern as unknown as AstNode);
+                                const cmpType = this.extractCmpType(fieldType, nestedPattern as AstNode);
                                 f.cmpEq(cmpReg, fieldReg, litResult.register, cmpType);
                             }
                             const continueLabel = this.generateLabel('nested_ok');
@@ -6300,7 +6306,7 @@ export class IRGenerator {
             for (let i = 0; i < pattern.params.length; i++) {
                 const nestedPattern = pattern.params[i];
                 // Extract field from subject struct (offset +1 for variant tag)
-                const fieldType = this.getNodeIRType(nestedPattern as unknown as AstNode);
+                const fieldType = this.getNodeIRType(nestedPattern as AstNode);
                 const fieldReg = this.tmp();
                 f.structGet(fieldReg, subject.register, i + 1, fieldType);
                 const fieldSubject: ExpressionResult = { register: fieldReg, type: fieldType };

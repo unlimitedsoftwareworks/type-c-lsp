@@ -16,6 +16,7 @@ import type { TypeProviderProfiler } from '../workspace/tc-profiler.js';
 import { ArrayPrototypeBuiltin, CoroutinePrototypeBuiltin, StringPrototypeBuiltin } from '../builtins/index.js';
 import * as ast from '../generated/ast.js';
 import type { TypeCServices } from '../type-c-module.js';
+import { isVariablePatternActuallyTypeReference } from '../scope-system/tc-scope-utils.js';
 import { isAssignmentOperator, computeBinaryResultType, computeUnaryResultType, computeBinaryResultTypeStrict, computeUnaryResultTypeStrict } from './operator-utils.js';
 import {
     ArrayTypeDescription,
@@ -265,6 +266,16 @@ export class TypeCTypeProvider {
     getPatternValidationError(node: AstNode): { message: string } | undefined {
         const documentUri = AstUtils.getDocument(node).uri;
         return this.patternValidationErrorCache.get(documentUri, node, () => undefined);
+    }
+
+    /**
+     * Triggers pattern inference for a MatchCasePattern that has no lowercase
+     * variable bindings (e.g., patterns with only uppercase type-reference names).
+     * This ensures pattern validation errors (like "expected array type") are cached
+     * even when there are no variable patterns to trigger inference indirectly.
+     */
+    triggerMatchCasePatternInference(pattern: ast.MatchCasePattern): void {
+        this.inferMatchCasePattern(pattern);
     }
 
     /**
@@ -5812,6 +5823,24 @@ export class TypeCTypeProvider {
      * ```
      */
     private inferVariablePattern(node: ast.VariablePattern): TypeDescription {
+        // Uppercase-starting names are type references, not variable bindings.
+        // They act as type checks in match patterns (grammar ambiguity workaround).
+        if (isVariablePatternActuallyTypeReference(node)) {
+            // Resolve the name by searching for a matching type declaration in all documents
+            const allDocuments = this.services.shared.workspace.LangiumDocuments.all;
+            for (const doc of allDocuments) {
+                const module = doc.parseResult.value;
+                if (!ast.isModule(module)) continue;
+                for (const def of module.definitions) {
+                    if (ast.isTypeDeclaration(def) && def.name === node.name) {
+                        return this.getType(def);
+                    }
+                }
+            }
+            // Fallback: return error type
+            return this.typeFactory.createErrorType(`Type '${node.name}' not found`, undefined, node);
+        }
+
         /**
          * If we are here, it means the node is not cached, hence not inferred.
          * At this point we can go up in the hierarchy, but that is aweful, we go down as we have gravity.
@@ -5885,9 +5914,12 @@ export class TypeCTypeProvider {
         const documentUri = AstUtils.getDocument(pattern).uri;
 
         if (ast.isVariablePattern(pattern)) {
-            // Base case: cache the type for this variable
-            const type = contextType;
-            this.typeCache.set(documentUri, pattern, type);
+            // Uppercase-starting names are type references (not variable bindings) — skip caching
+            if (!isVariablePatternActuallyTypeReference(pattern)) {
+                // Base case: cache the type for this variable
+                const type = contextType;
+                this.typeCache.set(documentUri, pattern, type);
+            }
         }
         else if (ast.isArrayPattern(pattern)) {
             this.inferArrayPattern(pattern, contextType, depth);

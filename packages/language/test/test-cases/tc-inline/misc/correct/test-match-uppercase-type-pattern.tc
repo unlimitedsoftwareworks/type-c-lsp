@@ -1,0 +1,89 @@
+// Test: Uppercase identifiers in match patterns are type references, not variable bindings.
+// This verifies the convention: uppercase = type check, lowercase = variable binding.
+
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Swimmer = interface {
+    fn swim() -> string
+}
+
+type Dog = class Animal {
+    fn init() {}
+    fn speak() -> string = "woof"
+}
+
+type Duck = class Animal, Swimmer {
+    fn init() {}
+    fn speak() -> string = "quack"
+    fn swim() -> string = "paddle"
+}
+
+// Test 1: Uppercase pattern resolves to the type declaration, not a variable binding.
+// Inside the body, `Animal` refers to the interface type declaration (not a pattern variable).
+fn describeAnimal<T: Animal | Swimmer>(x: T) -> string {
+    match x {
+        Animal & Swimmer {
+            // Animal and Swimmer refer to the type declarations, enabling cast
+            let y = x as! Animal & Swimmer
+            return y.speak() + " and " + y.swim()
+        }
+        Animal {
+            // Animal refers to the interface type, allowing cast inside body
+            let y = x as! Animal
+            return y.speak()
+        }
+        Swimmer {
+            let y = x as! Swimmer
+            return y.swim()
+        }
+        _ {
+            return "unknown"
+        }
+    }
+}
+
+// Test 2: Lowercase patterns still work as variable bindings
+fn testLowercaseBinding() -> u32 {
+    let x = 42u32
+    let result = match x {
+        /// @Type(val): u32
+        val => val + 1u32,
+        _ => 0u32
+    }
+    return result
+}
+
+// Test 3: Mix of lowercase variable binding and uppercase type pattern in separate cases
+fn testMixed<T: Animal | Swimmer>(x: T) -> string {
+    let n = 10u32
+    match n {
+        count {
+            // count is lowercase => variable binding, usable as a value
+            let doubled = count * 2u32
+        }
+        _ {}
+    }
+
+    // In a different match, uppercase type pattern
+    match x {
+        Animal {
+            let y = x as! Animal
+            return y.speak()
+        }
+        _ {
+            return "other"
+        }
+    }
+}
+
+// Test 4: Uppercase type patterns in match expression (not statement)
+fn testMatchExpressionTypePattern<T: Animal | Swimmer>(x: T) -> string {
+    return match x {
+        Animal & Swimmer => "both",
+        Animal => "animal",
+        Swimmer => "swimmer",
+        _ => "none"
+    }
+}

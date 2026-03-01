@@ -88,3 +88,43 @@ fn testMatchWithGuard() -> u32 {
 
     return x
 }
+
+
+type IA = interface {
+    fn a() -> u32
+}
+
+type IB = interface {
+    fn b() -> u32
+}
+
+type OnlyA = class IA {
+    fn init() {}
+    fn a() -> u32 = 10u32
+}
+
+type Both = class IA, IB {
+    fn init() {}
+    fn a() -> u32 = 20u32
+    fn b() -> u32 = 30u32
+}
+
+fn describe<T: IA | IB>(x: T) -> string {
+    match x {
+        IA & IB {
+            let y = x as! IA & IB
+            return "ab:" + y.a() + ":" + y.b()
+        }
+        IA {
+            let y = x as! IA
+            return "a:" + y.a()
+        }
+        IB {
+            let y = x as! IB
+            return "b:" + y.b()
+        }
+        _ {
+            return "none"
+        }
+    }
+}

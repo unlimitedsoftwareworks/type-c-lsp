@@ -1,0 +1,44 @@
+// Test: Uppercase identifiers in match patterns are type references, NOT variable bindings.
+// Using them as values (e.g., arithmetic, assignment) should produce type errors
+// because they resolve to the type declaration, not a pattern-bound variable.
+
+type Animal = interface {
+    fn speak() -> string
+}
+
+type Swimmer = interface {
+    fn swim() -> string
+}
+
+type Dog = class Animal {
+    fn init() {}
+    fn speak() -> string = "woof"
+}
+
+// Test 1: Uppercase pattern resolves to interface type, not a variable.
+// Arithmetic on an interface type should fail.
+fn testUppercaseIsNotVariable<T: Animal>(x: T) -> u32 {
+    match x {
+        Animal {
+            /// @Error: Binary operator '+' error: Requires numeric or string operands
+            let y = Animal + 1u32
+        }
+        _ {}
+    }
+    return 0u32
+}
+
+// Test 2: Unsafe cast with plain `as` (not `as!`) should fail.
+// Since the type system can't prove T is always Animal, safe cast is invalid.
+fn testUnsafeCastNotAllowed<T: Animal | Swimmer>(x: T) -> string {
+    match x {
+        Animal {
+            /// @Error: Invalid cast
+            let y = x as Animal
+            return y.speak()
+        }
+        _ {
+            return "other"
+        }
+    }
+}

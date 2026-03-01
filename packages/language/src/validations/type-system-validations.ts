@@ -35,6 +35,7 @@ import {
 import * as valUtils from "./tc-valdiation-helper.js";
 import { isBinaryOpValid, isUnaryOpValid } from "../typing/operator-utils.js";
 import { TypeCTypedValidation } from "./typed-base-validation.js";
+import { isVariablePatternActuallyTypeReference } from "../scope-system/tc-scope-utils.js";
 
 /**
  * Type system validator for Type-C.
@@ -1897,24 +1898,28 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
      * be inferred, including caching any validation errors.
      */
     private triggerPatternInference(pattern: AstNode): void {
-        // Find any variable pattern in the tree
+        // Find a lowercase variable pattern in the tree (actual variable binding)
         const varPattern = this.findVariablePattern(pattern);
         if (varPattern) {
             // Calling getType on a variable pattern triggers inferMatchCasePattern
             // which infers the entire pattern tree and caches validation errors
             this.typeProvider.getType(varPattern);
-        } else {
+        } else if (ast.isMatchCasePattern(pattern)) {
+            // No lowercase variable patterns found (e.g., only uppercase type references).
+            // Trigger pattern inference directly to cache validation errors.
+            this.typeProvider.triggerMatchCasePatternInference(pattern);
         }
     }
 
     /**
-     * Recursively finds the first variable pattern in a pattern tree.
+     * Recursively finds the first lowercase variable pattern in a pattern tree.
+     * Skips uppercase-starting patterns since those are type references, not variable bindings.
      */
     private findVariablePattern(node: AstNode): ast.VariablePattern | undefined {
-        if (ast.isVariablePattern(node)) {
+        if (ast.isVariablePattern(node) && !isVariablePatternActuallyTypeReference(node)) {
             return node;
         }
-        
+
         // Recursively search children
         for (const child of AstUtils.streamContents(node)) {
             const found = this.findVariablePattern(child);
@@ -1922,7 +1927,7 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 return found;
             }
         }
-        
+
         return undefined;
     }
 

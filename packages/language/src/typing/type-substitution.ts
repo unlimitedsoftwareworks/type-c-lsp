@@ -182,15 +182,9 @@ function substituteGenericsImpl(
             return type;
         }
 
-        // Check for illegal nullable types during substitution
-        // 1. Check for double nullable (T? substituted with U? becomes U??)
+        // Flatten double nullable: T? where T→U? becomes U? (not U??)
         if (isNullableType(substitutedBase)) {
-            const errorMsg = `Illegal double nullable type '${substitutedBase.toString()}?' - nullable types cannot be nested${context ? ` in ${context}` : ''}`;
-            if (errors) {
-                errors.push(errorMsg);
-            }
-            // Return error type immediately for double nullable
-            return typeFactory.createErrorType(errorMsg, ErrorCode.TC_NULLABLE_PRIMITIVE_TYPE, type.node);
+            return substitutedBase;
         }
 
         // 2. Check for basic types being made nullable (u32? is illegal)

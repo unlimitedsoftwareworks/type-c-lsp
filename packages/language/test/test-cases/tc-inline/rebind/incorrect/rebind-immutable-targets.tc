@@ -1,0 +1,46 @@
+// Test: Rebind ':=' on parameters, iterators, and other immutable targets should fail
+
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+// Cannot rebind immutable parameter
+fn testParam(p: Point) {
+    /// @Error(TCE199): Cannot rebind parameter
+    p := {x: 1u32, y: 2u32}
+}
+
+// Cannot rebind mutable parameter either (`:=` is for const vars only)
+fn testMutParam(mut p: Point) {
+    /// @Error(TCE199): Cannot rebind parameter
+    p := {x: 1u32, y: 2u32}
+}
+
+// Regular `=` assign to const still blocked
+fn testRegularAssignConst() {
+    let const x: u32 = 10u32
+    /// @Error(TCE191): Cannot assign to const variable
+    x = 20u32
+}
+
+// Type mismatch on rebind
+type Box = class {
+    let value: u32
+    fn init(v: u32) {
+        this.value = v
+    }
+}
+
+type Container = class {
+    let data: u32
+    fn init(d: u32) {
+        this.data = d
+    }
+}
+
+fn testTypeMismatch() {
+    let const b = new Box(1u32)
+    /// @Error(TCE011): Rebind error: Class types differ
+    b := new Container(2u32)
+}

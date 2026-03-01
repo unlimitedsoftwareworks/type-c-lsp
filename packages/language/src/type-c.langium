@@ -272,7 +272,7 @@ AssignmentExpression infers Expression:
     )*;
 
 AssignmentOp returns string:
-    ('='|'+='|'-='|'*='|'/='|'%='|'&='|'|='|'^='|'<<='|RightShiftAssignOp);
+    (':='|'='|'+='|'-='|'*='|'/='|'%='|'&='|'|='|'^='|'<<='|RightShiftAssignOp);
 
 RightShiftAssignOp returns string:
     '>' '>' '=';
@@ -333,7 +333,6 @@ MultiplicativeExpression infers Expression:
 UnaryExpression infers Expression:
     {infer UnaryExpression} (op=('!' | '~' | '-' | '+' | '++' | '--') expr=UnaryExpression) |
     {infer ThrowExpression} 'throw' expr=Expression |
-    {infer MutateExpression} 'mutate' expr=Expression |
     {infer CoroutineExpression} 'coroutine' fn=Expression |
     {infer YieldExpression} style=('yield'|'yield!') expr=TupleExpression? |
     TypeCheckExpression;

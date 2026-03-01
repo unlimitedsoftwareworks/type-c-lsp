@@ -1,0 +1,23 @@
+// Test: Rebind const variable initialized from immutable parameter (the key use case)
+
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+// Const variable from immutable param, then rebind
+fn processPoint(p: Point) -> Point {
+    let const current = p
+    let const updated = {x: current.x + 1u32, y: current.y + 1u32}
+    current := updated
+    return current
+}
+
+// Rebind in a loop with immutable param source
+fn sumArray(items: u32[]) -> u32 {
+    let const sum: u32 = 0u32
+    for let i: u64 = 0; i < items.length; i += 1 {
+        sum := sum + items[i]
+    }
+    return sum
+}

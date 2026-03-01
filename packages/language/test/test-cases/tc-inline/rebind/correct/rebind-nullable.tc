@@ -1,0 +1,27 @@
+// Test: Rebind operator with nullable types
+
+type Widget = class {
+    let name: string
+    fn init(n: string) {
+        this.name = n
+    }
+}
+
+// Rebind nullable const to null
+fn testNullable() {
+    let const w: Widget? = new Widget("hello")
+    w := null
+}
+
+// Rebind nullable const to new value
+fn testNullableNewValue() {
+    let const w: Widget? = null
+    w := new Widget("world")
+}
+
+// Rebind nullable with reassignment from another nullable
+fn testNullableToNullable() {
+    let const a: Widget? = new Widget("a")
+    let const b: Widget? = new Widget("b")
+    a := b
+}

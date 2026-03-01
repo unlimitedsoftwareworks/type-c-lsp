@@ -58,6 +58,7 @@ import {
     VariantTypeDescription,
     VoidTypeDescription,
     isFunctionType,
+    isNullableType,
     isReferenceType,
 } from "./type-c-types.js";
 import { serializer } from "./type-serialization.js";
@@ -219,6 +220,10 @@ function createArrayType(elementType: TypeDescription, node?: AstNode): ArrayTyp
 }
 
 function createNullableType(baseType: TypeDescription, node?: AstNode): NullableTypeDescription | ErrorTypeDescription {
+    // Flatten: if baseType is already nullable, return it unchanged (no T??)
+    if (isNullableType(baseType)) {
+        return baseType;
+    }
     return {
         kind: TypeKind.Nullable,
         baseType,

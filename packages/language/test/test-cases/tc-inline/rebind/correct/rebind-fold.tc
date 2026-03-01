@@ -1,0 +1,48 @@
+// Test: Rebind operator in fold patterns and loops
+
+// The motivating use case: fold with immutable parameter
+fn foldValues(items: u32[], init: u32, f: fn(u32, u32) -> u32) -> u32 {
+    let const acc = init
+    for let i: u64 = 0; i < items.length; i += 1 {
+        acc := f(acc, items[i])
+    }
+    return acc
+}
+
+// Rebind inside if/else branches
+fn testBranch(condition: bool) {
+    let const x: u32 = 0u32
+    if condition {
+        x := 1u32
+    } else {
+        x := 2u32
+    }
+}
+
+// Rebind inside while loop
+fn testWhile() {
+    let const count: u32 = 0u32
+    let i: u32 = 0u32
+    while i < 10u32 {
+        count := count + 1u32
+        i = i + 1u32
+    }
+}
+
+// Multiple const variables with rebind
+fn testMultipleVars() {
+    let const a: u32 = 1u32
+    let const b: u32 = 2u32
+    a := b
+    b := a
+}
+
+// Rebind with function call result
+fn double(x: u32) -> u32 {
+    return x * 2u32
+}
+
+fn testFnResult() {
+    let const x: u32 = 5u32
+    x := double(x)
+}

@@ -1,0 +1,59 @@
+// Test: Basic rebind operator ':=' on const variables
+
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+type Box = class {
+    let value: u32
+    fn init(v: u32) {
+        this.value = v
+    }
+}
+
+// Rebind const primitive
+fn testPrimitive() {
+    let const x: u32 = 10u32
+    x := 20u32
+}
+
+// Rebind const string
+fn testString() {
+    let const s = "hello"
+    s := "world"
+}
+
+// Rebind const bool
+fn testBool() {
+    let const b = true
+    b := false
+}
+
+// Rebind const struct (reference type)
+fn testStruct() {
+    let const p = {x: 1u32, y: 2u32}
+    let const q = {x: 3u32, y: 4u32}
+    p := q
+}
+
+// Rebind const class instance
+fn testClass() {
+    let const b = new Box(1u32)
+    let const c = new Box(2u32)
+    b := c
+}
+
+// Rebind preserves type annotation
+fn testTypeAnnotation() {
+    let const x: u32 = 10u32
+    x := 42u32
+}
+
+// Multiple rebinds in sequence
+fn testMultipleRebinds() {
+    let const x: u32 = 1u32
+    x := 2u32
+    x := 3u32
+    x := 4u32
+}

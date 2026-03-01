@@ -1,0 +1,176 @@
+
+type Box<T> = class {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+
+    fn get() -> T {
+        return this.value
+    }
+}
+
+type MaybeBox<T> = class {
+    let value: T?
+
+    fn init(mut value: T?) {
+        this.value = value
+    }
+
+    fn getOr(fallback: T) -> T {
+        return this.value ?? fallback
+    }
+
+    fn getOptional() -> T? {
+        return this.value
+    }
+}
+
+type Number<T> = class {
+    let v: T
+
+    fn init(value: T) {
+        this.v = value
+    }
+
+    fn get() -> T {
+        return this.v
+    }
+}
+
+/// Test 1: Single-level optional chaining on nullable generic field
+fn test_single_level() {
+    let box: MaybeBox<Number<u32>>? = new MaybeBox<Number<u32>>(new Number<u32>(42u32))
+
+    /// @Type(result): Number<u32>?
+    let result = box?.value
+}
+
+/// Test 2: Multi-level nested generic classes with optional chaining
+fn test_multi_level() {
+    let nested: Box<Box<Box<u32>>>? = new Box<Box<Box<u32>>>(new Box<Box<u32>>(new Box<u32>(1u32)))
+
+    /// @Type(a): Box<Box<u32>>?
+    let a = nested?.value
+
+    /// @Type(b): Box<u32>?
+    let b = nested?.value?.value
+
+    /// @Type(c): u32
+    let c = nested?.value?.value?.value ?? 0u32
+}
+
+/// Test 3: Field already nullable + optional chain should NOT double-wrap
+fn test_no_double_nullable() {
+    let nested: MaybeBox<MaybeBox<Number<u32>>>? = new MaybeBox<MaybeBox<Number<u32>>>(new MaybeBox<Number<u32>>(new Number<u32>(11u32)))
+
+    /// The field `value` in MaybeBox has type T?, and T=MaybeBox<Number<u32>>
+    /// So value is MaybeBox<Number<u32>>?, and ?. should NOT wrap again
+    /// @Type(step1): MaybeBox<Number<u32>>?
+    let step1 = nested?.value
+
+    /// Accessing .value on MaybeBox<Number<u32>>? should give Number<u32>?
+    /// @Type(step2): Number<u32>?
+    let step2 = nested?.value?.value
+
+    /// Unwrap with ??
+    /// @Type(step3): Number<u32>
+    let step3 = nested?.value?.value ?? new Number<u32>(0u32)
+}
+
+/// Test 4: Mixed nullable and non-nullable fields
+type MixedBox<T> = class {
+    let required: T
+    let optional: T?
+
+    fn init(required: T, mut optional: T?) {
+        this.required = required
+        this.optional = optional
+    }
+}
+
+fn test_mixed_fields() {
+    let box: MixedBox<Number<u32>>? = new MixedBox<Number<u32>>(new Number<u32>(1u32), new Number<u32>(2u32))
+
+    /// Non-nullable field accessed via ?. becomes nullable
+    /// @Type(req): Number<u32>?
+    let req = box?.required
+
+    /// Already-nullable field accessed via ?. stays nullable (no double wrap)
+    /// @Type(opt): Number<u32>?
+    let opt = box?.optional
+}
+
+/// Test 5: Optional chaining on method returns
+fn test_method_returns() {
+    let box: MaybeBox<Number<u32>>? = new MaybeBox<Number<u32>>(new Number<u32>(42u32))
+
+    /// getOptional() returns T?, so box?.getOptional() should be T? not T??
+    /// @Type(result): Number<u32>?
+    let result = box?.getOptional()
+}
+
+/// Test 6: Generic with explicit nullable type arg
+/// Box<Number<u32>?> where field is T (not T?), access via ?.
+fn test_explicit_nullable_type_arg() {
+    let box: MaybeBox<Number<u32>>? = new MaybeBox<Number<u32>>(new Number<u32>(10u32))
+
+    /// value field is T?, and T=Number<u32>, so field type is Number<u32>?
+    /// Accessing via ?. should NOT create Number<u32>??
+    /// @Type(v): Number<u32>?
+    let v = box?.value
+}
+
+/// Test 7: Deep chain (4+ levels)
+fn test_deep_chain() {
+    let deep: Box<Box<Box<Box<Number<u32>>>>>? = new Box<Box<Box<Box<Number<u32>>>>>(
+        new Box<Box<Box<Number<u32>>>>(
+            new Box<Box<Number<u32>>>(
+                new Box<Number<u32>>(
+                    new Number<u32>(99u32)
+                )
+            )
+        )
+    )
+
+    /// @Type(l1): Box<Box<Box<Number<u32>>>>?
+    let l1 = deep?.value
+
+    /// @Type(l2): Box<Box<Number<u32>>>?
+    let l2 = deep?.value?.value
+
+    /// @Type(l3): Box<Number<u32>>?
+    let l3 = deep?.value?.value?.value
+
+    /// @Type(l4): Number<u32>?
+    let l4 = deep?.value?.value?.value?.value
+
+    /// Unwrap at the end
+    /// @Type(l5): u32
+    let l5 = deep?.value?.value?.value?.value?.v ?? 0u32
+}
+
+/// Test 8: Nullable MaybeBox chain — the hardest case
+/// MaybeBox has T? field, and T itself is MaybeBox which also has T? field
+fn test_maybe_chain() {
+    let m: MaybeBox<MaybeBox<MaybeBox<Number<u32>>>>? = new MaybeBox<MaybeBox<MaybeBox<Number<u32>>>>(
+        new MaybeBox<MaybeBox<Number<u32>>>(
+            new MaybeBox<Number<u32>>(
+                new Number<u32>(7u32)
+            )
+        )
+    )
+
+    /// @Type(a): MaybeBox<MaybeBox<Number<u32>>>?
+    let a = m?.value
+
+    /// @Type(b): MaybeBox<Number<u32>>?
+    let b = m?.value?.value
+
+    /// @Type(c): Number<u32>?
+    let c = m?.value?.value?.value
+
+    /// @Type(d): u32
+    let d = m?.value?.value?.value?.v ?? 0u32
+}

@@ -76,7 +76,6 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             AnonymousStructConstructionExpression: this.checkExpressionForErrors,
             TupleExpression: this.checkExpressionForErrors,
             ThrowExpression: this.checkExpressionForErrors,
-            MutateExpression: this.checkExpressionForErrors,
             CoroutineExpression: this.checkExpressionForErrors,
             InstanceCheckExpression: [this.checkInstanceCheckExpression, this.checkExpressionForErrors],
             ThisExpression: this.checkExpressionForErrors,
@@ -128,6 +127,30 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
                 );
                 return;
             }
+        }
+
+        // Rebind operator: ':=' can only target const variables
+        if (node.op === ':=') {
+            const rebindError = this.checkRebindTarget(node.left);
+            if (rebindError) {
+                accept('error', rebindError.message, {
+                    node: node.left,
+                    code: rebindError.code
+                });
+                return;
+            }
+            // Type compatibility (same as regular assignment)
+            const compatResult = this.isTypeCompatible(rightType, leftType);
+            if (!compatResult.success) {
+                const errorMsg = compatResult.message
+                    ? `Rebind error: ${compatResult.message}`
+                    : `Cannot rebind to type '${rightType.toString()}', expected '${leftType.toString()}'`;
+                accept('error', errorMsg, {
+                    node: node.right,
+                    code: ErrorCode.TC_ASSIGNMENT_TYPE_MISMATCH
+                });
+            }
+            return;
         }
 
         // Assignment operators: right must be compatible with left
@@ -2469,6 +2492,46 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
      * @param expr The expression to check
      * @returns Error info if invalid lvalue, undefined if valid
      */
+
+    /**
+     * Checks if an expression is a valid rebind (:=) target.
+     * Only flat const variables are valid targets.
+     */
+    private checkRebindTarget(expr: ast.Expression): { message: string; code: ErrorCode } | undefined {
+        // Must be a flat QualifiedReference (no member access, no indexing)
+        if (!ast.isQualifiedReference(expr)) {
+            return {
+                message: `Rebind ':=' can only target variables, not expressions like member access or indexing.`,
+                code: ErrorCode.TC_REBIND_NON_FLAT
+            };
+        }
+        const ref = expr.reference?.ref;
+        if (!ref) {
+            return { message: `Cannot rebind unresolved reference`, code: ErrorCode.TC_INVALID_ASSIGNMENT_TARGET };
+        }
+        // Must be a const variable
+        if (ast.isVariableDeclaration(ref)) {
+            if (!ref.isConst) {
+                return {
+                    message: `Rebind ':=' can only be used on const variables. '${ref.name}' is not const. Use '=' for mutable variables.`,
+                    code: ErrorCode.TC_REBIND_NON_CONST
+                };
+            }
+            return undefined; // Valid rebind target
+        }
+        // Everything else (parameters, iterators, patterns, class attributes) — rejected
+        if (ast.isFunctionParameter(ref)) {
+            return { message: `Cannot rebind parameter '${ref.name}'.`, code: ErrorCode.TC_REBIND_IMMUTABLE_TARGET };
+        }
+        if (ast.isIteratorVar(ref)) {
+            return { message: `Cannot rebind iterator variable.`, code: ErrorCode.TC_REBIND_IMMUTABLE_TARGET };
+        }
+        if (ast.isClassAttributeDecl(ref)) {
+            return { message: `Cannot rebind class attribute '${ref.name}'.`, code: ErrorCode.TC_REBIND_NON_FLAT };
+        }
+        return { message: `Invalid rebind target.`, code: ErrorCode.TC_REBIND_IMMUTABLE_TARGET };
+    }
+
     private checkLvalue(expr: ast.Expression): { message: string; code: ErrorCode } | undefined {
         // Valid lvalue: Variable reference (must check for const)
         if (ast.isQualifiedReference(expr)) {
@@ -2690,10 +2753,9 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
             };
         }
 
-        // Invalid lvalue: Throw/Yield/Mutate/Coroutine expressions
+        // Invalid lvalue: Throw/Yield/Coroutine expressions
         if (ast.isThrowExpression(expr) ||
             ast.isYieldExpression(expr) ||
-            ast.isMutateExpression(expr) ||
             ast.isCoroutineExpression(expr)) {
             return {
                 message: `Cannot assign to expression result`,

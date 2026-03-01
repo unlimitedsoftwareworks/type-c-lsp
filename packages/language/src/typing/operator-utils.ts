@@ -15,7 +15,7 @@ import type { TypeCTypeFactory } from './type-factory.js';
 import type { TypeCTypeUtils } from './type-utils.js';
 
 export function isAssignmentOperator(op: ast.BinaryExpression['op']): boolean {
-    return ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='].includes(op);
+    return ['=', ':=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='].includes(op);
 }
 
 /**

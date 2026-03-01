@@ -629,7 +629,7 @@ export class TypeCTypeProvider {
         // This enables: n < 2 (where n is u32) → 2 is inferred as u32
         if (ast.isBinaryExpression(parent)) {
             // Assignment operators: right side uses left's type
-            const assignmentOps = ['=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
+            const assignmentOps = ['=', ':=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^=', '<<=', '>>='];
             if (assignmentOps.includes(parent.op) && parent.right === node) {
                 return this.inferExpression(parent.left);
             }
@@ -3780,7 +3780,7 @@ export class TypeCTypeProvider {
                 // Wrap in nullable if using optional chaining
                 // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                    if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                         memberType = this.typeFactory.createNullableType(memberType, node);
                     }
                 }
@@ -3805,7 +3805,7 @@ export class TypeCTypeProvider {
                 // Wrap in nullable if using optional chaining
                 // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                    if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                         memberType = this.typeFactory.createNullableType(memberType, node);
                     }
                 }
@@ -3833,7 +3833,7 @@ export class TypeCTypeProvider {
                 // Wrap in nullable if using optional chaining
                 // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                    if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                         memberType = this.typeFactory.createNullableType(memberType, node);
                     }
                 }
@@ -3858,7 +3858,7 @@ export class TypeCTypeProvider {
                 // Wrap in nullable if using optional chaining
                 // BUT: Don't wrap basic types - they can't be nullable
                 if (node.isNullable || baseIsNullable) {
-                    if (!this.typeUtils.isTypeBasic(memberType)) {
+                    if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                         memberType = this.typeFactory.createNullableType(memberType, node);
                     }
                 }
@@ -3901,7 +3901,7 @@ export class TypeCTypeProvider {
                             }
                             // Wrap in nullable if using optional chaining
                             if (node.isNullable || baseIsNullable) {
-                                if (!this.typeUtils.isTypeBasic(memberType)) {
+                                if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                                     memberType = this.typeFactory.createNullableType(memberType, node);
                                 }
                             }
@@ -3933,7 +3933,7 @@ export class TypeCTypeProvider {
                                         memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
                                     }
                                     if (node.isNullable || baseIsNullable) {
-                                        if (!this.typeUtils.isTypeBasic(memberType)) {
+                                        if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                                             memberType = this.typeFactory.createNullableType(memberType, node);
                                         }
                                     }
@@ -3983,7 +3983,7 @@ export class TypeCTypeProvider {
                             
                             // Wrap in nullable if using optional chaining
                             if (node.isNullable || baseIsNullable) {
-                                if (!this.typeUtils.isTypeBasic(memberType)) {
+                                if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                                     memberType = this.typeFactory.createNullableType(memberType, node);
                                 }
                             }
@@ -4031,7 +4031,7 @@ export class TypeCTypeProvider {
                         memberType = this.typeUtils.substituteGenerics(memberType, genericSubstitutions);
                     }
                     if (node.isNullable || baseIsNullable) {
-                        if (!this.typeUtils.isTypeBasic(memberType)) {
+                        if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                             memberType = this.typeFactory.createNullableType(memberType, node);
                         }
                     }
@@ -4212,7 +4212,7 @@ export class TypeCTypeProvider {
         // 2. OR base was nullable (propagate nullability through chain: a?.b.c → c is nullable)
         // BUT: Don't wrap basic types - they can't be nullable
         if (node.isNullable || baseIsNullable) {
-            if (!this.typeUtils.isTypeBasic(memberType)) {
+            if (!this.typeUtils.isTypeBasic(memberType) && !isNullableType(memberType)) {
                 memberType = this.typeFactory.createNullableType(memberType, node);
             }
         }

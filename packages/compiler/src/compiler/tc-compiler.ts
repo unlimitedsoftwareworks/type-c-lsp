@@ -3523,7 +3523,7 @@ export class IRGenerator {
             // Check assignment expressions (=, +=, -=, etc.)
             if (ast.isBinaryExpression(node)) {
                 const op = node.op;
-                if (op === '=' || op === '+=' || op === '-=' || op === '*=' ||
+                if (op === '=' || op === ':=' || op === '+=' || op === '-=' || op === '*=' ||
                     op === '/=' || op === '%=' || op === '<<=' || op === '>>=' ||
                     op === '&=' || op === '|=' || op === '^=') {
                     if (ast.isQualifiedReference(node.left) &&
@@ -3865,11 +3865,6 @@ export class IRGenerator {
             return this.visitUnreachableExpression();
         }
 
-        // Mutate expression: mutate expr
-        if (ast.isMutateExpression(node)) {
-            return this.visitMutateExpression(node);
-        }
-
         // Binary string literal: b"..."
         if (ast.isBinaryStringLiteralExpression(node)) {
             return this.visitBinaryStringLiteral(node);
@@ -3929,7 +3924,7 @@ export class IRGenerator {
         const op = node.op;
 
         // Assignment operators
-        if (op === '=' || op === '+=' || op === '-=' || op === '*=' || op === '/=' ||
+        if (op === '=' || op === ':=' || op === '+=' || op === '-=' || op === '*=' || op === '/=' ||
             op === '%=' || op === '<<=' || op === '>>=' || op === '&=' || op === '|=' || op === '^=') {
             return this.visitAssignmentExpression(node);
         }
@@ -4201,8 +4196,8 @@ export class IRGenerator {
         const lhs = node.left;
         const f = this.func();
 
-        if (op === '=') {
-            // Simple assignment
+        if (op === '=' || op === ':=') {
+            // Simple assignment (`:=` is rebind — same codegen as `=`)
             const rhs = this.visitExpression(node.right, undefined);
             this.storeBack(lhs, rhs);
             return rhs;
@@ -7077,15 +7072,6 @@ export class IRGenerator {
         const temp = this.tmp();
         f.undef(temp, voidType());
         return { register: temp, type: voidType() };
-    }
-
-    // ---- Mutate Expression ----
-
-    private visitMutateExpression(node: ast.MutateExpression): ExpressionResult {
-        // `mutate expr` — evaluate the expression (the mutation is a semantic marker)
-        // At the IR level, this is just the expression itself since the compiler
-        // tracks mutability at the type level, not the IR level
-        return this.visitExpression(node.expr, undefined);
     }
 
     // ---- Binary String Literal ----

@@ -1,0 +1,18 @@
+// Test: Rebind ':=' on non-flat targets (member access, indexing) should fail
+
+type Point = struct {
+    x: u32,
+    y: u32
+}
+
+fn testMemberAccess() {
+    let const p = {x: 1u32, y: 2u32}
+    /// @Error(TCE198): Rebind ':=' can only target variables
+    p.x := 5u32
+}
+
+fn testArrayIndex() {
+    let const arr = [1u32, 2u32, 3u32]
+    /// @Error(TCE198): Rebind ':=' can only target variables
+    arr[0] := 10u32
+}

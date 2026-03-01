@@ -1,0 +1,65 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Op = enum as u8 {
+    Add = 1,
+    Sub = 2,
+    Mul = 3,
+    Div = 4
+}
+
+fn apply(op: Op, a: i32, b: i32) -> i32 {
+    match op {
+        Op.Add {
+            return a + b
+        }
+        Op.Sub {
+            return a - b
+        }
+        Op.Mul {
+            return a * b
+        }
+        Op.Div {
+            return a / b
+        }
+        _ {
+            return 0
+        }
+    }
+}
+
+fn parse(code: u8) -> Op {
+    match code {
+        1u8 {
+            return Op.Add
+        }
+        2u8 {
+            return Op.Sub
+        }
+        3u8 {
+            return Op.Mul
+        }
+        4u8 {
+            return Op.Div
+        }
+        _ {
+            return Op.Add
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    rn.assert_eq(apply(Op.Add, 5, 3), 8)
+    rn.assert_eq(apply(Op.Sub, 5, 3), 2)
+    rn.assert_eq(apply(Op.Mul, 5, 3), 15)
+    rn.assert_eq(apply(Op.Div, 12, 3), 4)
+
+    let op = parse(3u8)
+    rn.assert_eq(op, Op.Mul)
+    rn.assert_eq(apply(op, 7, 2), 14)
+}
+
+fn stress31() -> u32 {
+    let t1 = new TestUnit("enum encoding", "Encoded enums with decode/dispatch paths", test_case_1)
+    let set = new UnitSet("Stress 31", "Enum encoding stress", [t1])
+    return set.run()
+}

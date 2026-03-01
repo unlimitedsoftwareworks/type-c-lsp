@@ -1,0 +1,40 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn summarize(records: {id: u32, tags: string[], payload: {ok: bool, score: u32}}[]) -> string {
+    let out = ""
+
+    foreach record in records {
+        let {id, tags, payload} = record
+        let {ok, score} = payload
+
+        let [firstTag, ...restTags] = tags
+
+        out = out + id + ":" + firstTag + ":" + restTags.length + ":" + score + ":"
+
+        if ok {
+            out = out + "T"
+        } else {
+            out = out + "F"
+        }
+
+        out = out + ";"
+    }
+
+    return out
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let records: {id: u32, tags: string[], payload: {ok: bool, score: u32}}[] = [
+        {id: 1u32, tags: ["a", "b", "c"], payload: {ok: true, score: 10u32}},
+        {id: 2u32, tags: ["x", "y"], payload: {ok: false, score: 20u32}}
+    ]
+
+    let s = summarize(records)
+    rn.assert_eq(s, "1:a:2:10:T;2:x:1:20:F;")
+}
+
+fn stress27() -> u32 {
+    let t1 = new TestUnit("nested destructuring", "Multi-level struct/array destructuring in loops", test_case_1)
+    let set = new UnitSet("Stress 27", "Nested destructuring stress", [t1])
+    return set.run()
+}

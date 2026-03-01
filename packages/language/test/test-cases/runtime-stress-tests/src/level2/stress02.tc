@@ -1,0 +1,68 @@
+from std.unit.test import TestUnit, UnitSet
+
+type HasId = interface {
+    fn getId() -> u32
+}
+
+type HasName = interface {
+    fn getName() -> string
+}
+
+type IdTrait = impl HasId (
+    id: u32
+) {
+    fn getId() -> u32 {
+        return this.id
+    }
+}
+
+type NameTrait = impl HasName (
+    name: string
+) {
+    fn getName() -> string {
+        return this.name
+    }
+}
+
+type Entity = class HasId, HasName {
+    let id: u32
+    let name: string
+
+    impl IdTrait(id)
+    impl NameTrait(name)
+
+    fn init(mut id: u32, mut name: string) {
+        this.id = id
+        this.name = name
+    }
+
+    fn label() -> string {
+        return this.getName() + "#" + this.getId()
+    }
+}
+
+type EntityBox<T: HasId & HasName> = class {
+    let value: T
+
+    fn init(mut value: T) {
+        this.value = value
+    }
+
+    fn label() -> string {
+        return this.value.getName() + "#" + this.value.getId()
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let e = new Entity(42u32, "core")
+    let box = new EntityBox<Entity>(e)
+
+    rn.assert_eq(e.label(), "core#42")
+    rn.assert_eq(box.label(), "core#42")
+}
+
+fn stress02() -> u32 {
+    let t1 = new TestUnit("trait composition", "Composed impl traits + interface constraints", test_case_1)
+    let set = new UnitSet("Stress 02", "Trait and interface composition", [t1])
+    return set.run()
+}

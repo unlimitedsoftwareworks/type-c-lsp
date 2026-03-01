@@ -1,0 +1,51 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Link<T> = interface {
+    fn value() -> T
+    fn next() -> Link<T>?
+}
+
+type Node<T> = class Link<T> {
+    let data: T
+    let nxt: Node<T>?
+
+    fn init(mut data: T, mut nxt: Node<T>?) {
+        this.data = data
+        this.nxt = nxt
+    }
+
+    fn value() -> T {
+        return this.data
+    }
+
+    fn next() -> Node<T>? {
+        return this.nxt
+    }
+}
+
+fn sumList(head: Node<u32>?) -> u32 {
+    let total: u32 = 0u32
+    let const cur = head
+
+    while cur != null {
+        total += cur!.value()
+        cur := cur!.next()
+    }
+
+    return total
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let n3 = new Node<u32>(30u32, null)
+    let n2 = new Node<u32>(20u32, n3)
+    let n1 = new Node<u32>(10u32, n2)
+
+    rn.assert_eq(sumList(n1), 60u32)
+    rn.assert_eq<bool>(n1 is Link<u32>, true)
+}
+
+fn stress16() -> u32 {
+    let t1 = new TestUnit("recursive generic class", "Recursive nullable links with interface checks", test_case_1)
+    let set = new UnitSet("Stress 16", "Recursive generic stress", [t1])
+    return set.run()
+}

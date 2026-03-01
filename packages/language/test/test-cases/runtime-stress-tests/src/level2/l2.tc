@@ -1,0 +1,89 @@
+from level2.stress01 import stress01
+from level2.stress02 import stress02
+from level2.stress03 import stress03
+from level2.stress04 import stress04
+from level2.stress05 import stress05
+from level2.stress06 import stress06
+from level2.stress07 import stress07
+from level2.stress08 import stress08
+from level2.stress09 import stress09
+from level2.stress10 import stress10
+from level2.stress11 import stress11
+from level2.stress12 import stress12
+from level2.stress13 import stress13
+from level2.stress14 import stress14
+from level2.stress15 import stress15
+from level2.stress16 import stress16
+from level2.stress17 import stress17
+from level2.stress18 import stress18
+from level2.stress19 import stress19
+from level2.stress20 import stress20
+from level2.stress21 import stress21
+from level2.stress22 import stress22
+from level2.stress23 import stress23
+from level2.stress24 import stress24
+from level2.stress25 import stress25
+from level2.stress26 import stress26
+from level2.stress27 import stress27
+from level2.stress28 import stress28
+from level2.stress29 import stress29
+from level2.stress30 import stress30
+from level2.stress31 import stress31
+from level2.stress32 import stress32
+//from level2.stress33 import stress33
+from level2.stress34 import stress34
+from level2.stress35 import stress35
+from level2.stress36 import stress36
+from level2.stress37 import stress37
+from level2.stress38 import stress38
+from level2.stress39 import stress39
+from level2.stress40 import stress40
+
+fn l2() {
+    let funcs = [
+        stress01,
+        stress02,
+        stress03,
+        stress04,
+        stress05,
+        stress06,
+        stress07,
+        stress08,
+        stress09,
+        stress10,
+        stress11,
+        stress12,
+        stress13,
+        stress14,
+        stress15,
+        stress16,
+        stress17,
+        stress18,
+        stress19,
+        stress20,
+        stress21,
+        stress22,
+        stress23,
+        stress24,
+        stress25,
+        stress26,
+        stress27,
+        stress28,
+        stress29,
+        stress30,
+        stress31,
+        stress32,
+        //stress33,
+        stress34,
+        stress35,
+        stress36,
+        stress37,
+        stress38,
+        stress39,
+        stress40
+    ]
+
+    foreach f in funcs {
+        f()
+    }
+}

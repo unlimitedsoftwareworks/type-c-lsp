@@ -1,0 +1,55 @@
+from std.unit.test import TestUnit, UnitSet
+
+type FluentOps = impl (
+    x: i32,
+    y: i32
+) {
+    fn addX(v: i32) -> Self {
+        this.x += v
+        return this
+    }
+
+    fn addY(v: i32) -> Self {
+        this.y += v
+        return this
+    }
+
+    fn scale(v: i32) -> Self {
+        this.x *= v
+        this.y *= v
+        return this
+    }
+}
+
+type VecBuilder = class {
+    let x: i32
+    let y: i32
+
+    impl FluentOps(x, y)
+
+    fn init(x: i32, y: i32) {
+        this.x = x
+        this.y = y
+    }
+
+    fn finish() -> {x: i32, y: i32} {
+        return {x: this.x, y: this.y}
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let v = new VecBuilder(1, 2)
+        .addX(3)
+        .addY(5)
+        .scale(2)
+        .finish()
+
+    rn.assert_eq(v.x, 8)
+    rn.assert_eq(v.y, 14)
+}
+
+fn stress32() -> u32 {
+    let t1 = new TestUnit("fluent self", "Impl methods returning Self with chained updates", test_case_1)
+    let set = new UnitSet("Stress 32", "Self-returning impl stress", [t1])
+    return set.run()
+}

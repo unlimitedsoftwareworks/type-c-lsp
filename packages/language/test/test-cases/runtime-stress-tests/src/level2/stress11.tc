@@ -1,0 +1,47 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Drawable = interface {
+    fn draw() -> string
+}
+
+type Named = interface {
+    fn name() -> string
+}
+
+type Badge = class {
+    let label: string
+
+    fn init(mut label: string) {
+        this.label = label
+    }
+
+    fn draw() -> string {
+        return "<" + this.label + ">"
+    }
+
+    fn name() -> string {
+        return this.label
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let b = new Badge("node")
+
+    rn.assert_eq<bool>(b is Drawable, true)
+    rn.assert_eq<bool>(b is Named, true)
+    rn.assert_eq<bool>(b is Drawable & Named, true)
+
+    if b is Drawable & Named {
+        let dn = b as Drawable & Named
+        rn.assert_eq(dn.draw(), "<node>")
+        rn.assert_eq(dn.name(), "node")
+    } else {
+        rn.assert_unreachable()
+    }
+}
+
+fn stress11() -> u32 {
+    let t1 = new TestUnit("join interfaces", "is/as checks over interface joins", test_case_1)
+    let set = new UnitSet("Stress 11", "Join type and cast stress", [t1])
+    return set.run()
+}

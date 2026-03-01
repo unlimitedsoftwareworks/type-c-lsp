@@ -1,0 +1,38 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn sumOddUntil(limit: u64) -> u64 {
+    let total: u64 = 0
+
+    for let i: u64 = 0; i < limit; i += 1 {
+        if i % 2 == 0 {
+            continue
+        }
+
+        if i > 15 {
+            break
+        }
+
+        total += i
+    }
+
+    return total
+}
+
+fn rangeSum() -> u64 {
+    let total: u64 = 0
+    foreach i: u64 in 0, 5, 1 {
+        total += i
+    }
+    return total
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    rn.assert_eq(sumOddUntil(100), 64)
+    rn.assert_eq(rangeSum(), 10)
+}
+
+fn stress15() -> u32 {
+    let t1 = new TestUnit("loops", "for/foreach/while-style control flow", test_case_1)
+    let set = new UnitSet("Stress 15", "Loop and control-flow stress", [t1])
+    return set.run()
+}

@@ -1,0 +1,57 @@
+from std.unit.test import TestUnit, UnitSet
+
+type MaybeBox<T> = class {
+    let value: T?
+
+    fn init(mut value: T?) {
+        this.value = value
+    }
+
+    fn set(mut value: T?) {
+        this.value = value
+    }
+
+    fn getOr(fallback: T) -> T {
+        return this.value ?? fallback
+    }
+}
+
+type Number<T> = class {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+
+    fn get() -> T {
+        return this.value
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let b = new MaybeBox<Number<u32>>(null)
+    rn.assert_eq(b.getOr(new Number<u32>(99u32)).get(), 99u32)
+
+    b.set(new Number<u32>(7u32))
+    rn.assert_eq(b.getOr(new Number<u32>(99u32)).get(), 7u32)
+
+    let nested: MaybeBox<MaybeBox<Number<u32>>>? = new MaybeBox<MaybeBox<Number<u32>>>(new MaybeBox<Number<u32>>(new Number<u32>(11u32)))
+    let x = nested?.value?.value.value ?? 0u32
+    rn.assert_eq(x, 11u32)
+
+    nested = null
+    let y = b.value?.value ?? 123u32
+    rn.assert_eq(y, 123u32)
+
+    let maybeText: string? = null
+    rn.assert_eq(maybeText ?? "fallback", "fallback")
+
+    maybeText = "ok"
+    rn.assert_eq(maybeText!, "ok")
+}
+
+fn stress06() -> u32 {
+    let t1 = new TestUnit("nullable flow", "Nullability with ?. ?? and !", test_case_1)
+    let set = new UnitSet("Stress 06", "Nullable and optional-chain stress", [t1])
+    return set.run()
+}

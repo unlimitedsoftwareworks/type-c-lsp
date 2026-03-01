@@ -1,0 +1,58 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Outcome<T> = variant {
+    Ok(value: T),
+    Err(message: string)
+}
+
+type OutcomeBox<T> = class {
+    let value: Outcome<T>
+
+    fn init(mut value: Outcome<T>) {
+        this.value = value
+    }
+
+    fn map<U>(f: fn(T) -> U) -> OutcomeBox<U> {
+        match this.value {
+            Outcome.Ok(v) {
+                return new OutcomeBox<U>(Outcome.Ok(f(v)))
+            }
+            Outcome.Err(message) {
+                return new OutcomeBox<U>(Outcome.Err(message))
+            }
+            _ {
+                return new OutcomeBox<U>(Outcome.Err("unknown"))
+            }
+        }
+    }
+
+    fn unwrapOr(defaultValue: T) -> T {
+        match this.value {
+            Outcome.Ok(v) {
+                return v
+            }
+            Outcome.Err(_) {
+                return defaultValue
+            }
+            _ {
+                return defaultValue
+            }
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let ok = new OutcomeBox<u32>(Outcome.Ok(10u32))
+    let mapped = ok.map<string>(fn(v: u32) = "value:" + v)
+    rn.assert_eq(mapped.unwrapOr("nope"), "value:10")
+
+    let err = new OutcomeBox<u32>(Outcome.Err("bad"))
+    let mappedErr = err.map<string>(fn(v: u32) = "v:" + v)
+    rn.assert_eq(mappedErr.unwrapOr("fallback"), "fallback")
+}
+
+fn stress19() -> u32 {
+    let t1 = new TestUnit("generic variants", "Generic variant container and mapped propagation", test_case_1)
+    let set = new UnitSet("Stress 19", "Generic variant stress", [t1])
+    return set.run()
+}

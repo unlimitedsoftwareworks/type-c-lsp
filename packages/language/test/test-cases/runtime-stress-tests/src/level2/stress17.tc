@@ -1,0 +1,34 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Token = variant {
+    Num(v: i32),
+    Word(v: string),
+    None()
+}
+
+fn describe(t: Token) -> string = match t {
+    Token.Num(v) => if v == 0 => "zero" else "num",
+    Token.Word(v) => "word:" + v,
+    Token.None() => "none",
+    _ => "unknown"
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let out =
+        let a = Token.Num(0) in
+            let b = Token.Word("x") in
+                let c = Token.None() in do {
+                    let x = describe(a)
+                    let y = describe(b)
+                    let z = describe(c)
+                    return x + "|" + y + "|" + z
+                }
+
+    rn.assert_eq(out, "zero|word:x|none")
+}
+
+fn stress17() -> u32 {
+    let t1 = new TestUnit("expression nesting", "let-in + do + match-expression composition", test_case_1)
+    let set = new UnitSet("Stress 17", "Expression composition stress", [t1])
+    return set.run()
+}

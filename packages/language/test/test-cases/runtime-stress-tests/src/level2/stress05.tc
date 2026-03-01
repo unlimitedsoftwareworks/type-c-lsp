@@ -1,0 +1,32 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn test_case_1(mut rn: TestUnit) {
+    let arr: u32[] = [10u32, 20u32, 30u32, 40u32, 50u32]
+    let [head, second, ...tail] = arr
+
+    rn.assert_eq(head, 10u32)
+    rn.assert_eq(second, 20u32)
+
+    match tail {
+        [30u32, 40u32, 50u32] {
+            rn.assert_reachable()
+        }
+        _ {
+            rn.assert_unreachable()
+        }
+    }
+
+    let user = {id: 7u32, name: "neo", active: true, score: 99u32}
+    let {name, ...rest} = user
+
+    rn.assert_eq(name, "neo")
+    rn.assert_eq(rest.id, 7u32)
+    rn.assert_eq(rest.active, true)
+    rn.assert_eq(rest.score, 99u32)
+}
+
+fn stress05() -> u32 {
+    let t1 = new TestUnit("destructuring", "Array, struct and tuple destructuring with spread", test_case_1)
+    let set = new UnitSet("Stress 05", "Destructuring stress", [t1])
+    return set.run()
+}

@@ -1,0 +1,40 @@
+from std.unit.test import TestUnit, UnitSet
+
+type FnBox<T, U> = class {
+    let transform: fn(T) -> U
+
+    fn init(mut transform: fn(T) -> U) {
+        this.transform = transform
+    }
+
+    fn map(value: T) -> U {
+        return this.transform(value)
+    }
+}
+
+fn compose<A, B, C>(ab: fn(A) -> B, bc: fn(B) -> C) -> fn(A) -> C {
+    return fn(x: A) = bc(ab(x))
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let bias = 3u32
+
+    let plus = new FnBox<u32, u32>(fn(x: u32) = x + bias)
+    let mul = new FnBox<u32, u32>(fn(x: u32) = x * 2u32)
+
+    rn.assert_eq(plus.map(10u32), 13u32)
+    rn.assert_eq(mul.map(10u32), 20u32)
+
+    let combo = compose<u32, u32, string>(
+        fn(x: u32) = plus.map(x),
+        fn(y: u32) = "v=" + mul.map(y)
+    )
+
+    rn.assert_eq(combo(5u32), "v=16")
+}
+
+fn stress28() -> u32 {
+    let t1 = new TestUnit("function values", "Function-typed fields and higher-order composition", test_case_1)
+    let set = new UnitSet("Stress 28", "Higher-order field stress", [t1])
+    return set.run()
+}

@@ -1,0 +1,53 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Packet = variant {
+    Ping(id: u32),
+    Data(meta: {source: string, priority: u32}, values: u32[]),
+    Error(code: u32, message: string)
+}
+
+fn classify(p: Packet) -> string {
+    match p {
+        Packet.Ping(id) if id % 2u32 == 0u32 {
+            return "ping-even"
+        }
+        Packet.Ping(_) {
+            return "ping-odd"
+        }
+        Packet.Data(meta, values) if meta.priority > 10u32 && values.length > 2 {
+            return "data-hot"
+        }
+        Packet.Data(meta, values) {
+            return "data:" + meta.source + ":" + values.length
+        }
+        Packet.Error(code, message) if code >= 500u32 {
+            return "error-fatal:" + message
+        }
+        Packet.Error(_, message) {
+            return "error:" + message
+        }
+        _ {
+            return "unknown"
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    rn.assert_eq(classify(Packet.Ping(2u32)), "ping-even")
+    rn.assert_eq(classify(Packet.Ping(3u32)), "ping-odd")
+
+    let p1: Packet = Packet.Data({source: "edge", priority: 5u32}, [1u32])
+    rn.assert_eq(classify(p1), "data:edge:1")
+
+    let p2: Packet = Packet.Data({source: "core", priority: 99u32}, [1u32, 2u32, 3u32])
+    rn.assert_eq(classify(p2), "data-hot")
+
+    rn.assert_eq(classify(Packet.Error(503u32, "down")), "error-fatal:down")
+    rn.assert_eq(classify(Packet.Error(404u32, "miss")), "error:miss")
+}
+
+fn stress25() -> u32 {
+    let t1 = new TestUnit("pattern guards", "Variant matching with guard-heavy branches", test_case_1)
+    let set = new UnitSet("Stress 25", "Pattern guard stress", [t1])
+    return set.run()
+}

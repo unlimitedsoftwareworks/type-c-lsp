@@ -1,0 +1,59 @@
+from std.unit.test import TestUnit, UnitSet
+
+type OptionalExecutor<T> = class {
+    let fnPrimary: fn(T) -> T?
+    let fnFallback: fn(T) -> T?
+
+    fn init(mut fnPrimary: fn(T) -> T?, mut fnFallback: fn(T) -> T?) {
+        this.fnPrimary = fnPrimary
+        this.fnFallback = fnFallback
+    }
+
+    fn run(input: T) -> T? {
+        let first = this.fnPrimary(input)
+        if first != null {
+            return first
+        }
+        return this.fnFallback(input)
+    }
+}
+
+type Object<T> = class {
+    let value: T
+
+    fn init(value: T) {
+        this.value = value
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let ex = new OptionalExecutor<Object<u32>>(
+        fn(x: Object<u32>) -> Object<u32>? {
+            if x.value % 2u32 == 0u32 {
+                return new Object<u32>(x.value / 2u32)
+            }
+            return null
+        },
+        fn(x: Object<u32>) -> Object<u32>? {
+            if x.value > 10u32 {
+                return new Object<u32>(x.value - 10u32)
+            }
+            return null
+        }
+    )
+
+    let a = ex.run(new Object<u32>(8u32))
+    rn.assert_eq(a!.value, 4u32)
+
+    let b = ex.run(new Object<u32>(25u32))
+    rn.assert_eq(b!.value, 15u32)
+
+    let c = ex.run(new Object<u32>(5u32))
+    rn.assert_obj_null<Object<u32>>(c)
+}
+
+fn stress29() -> u32 {
+    let t1 = new TestUnit("nullable callables", "Nullable return flow across chained executors", test_case_1)
+    let set = new UnitSet("Stress 29", "Nullable callable stress", [t1])
+    return set.run()
+}

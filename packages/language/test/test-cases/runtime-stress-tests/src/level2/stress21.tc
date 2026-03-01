@@ -1,0 +1,97 @@
+from std.unit.test import TestUnit, UnitSet
+
+namespace workflow {
+    type Stage = enum {
+        Init,
+        Running,
+        Done,
+        Failed
+    }
+
+    type Payload = variant {
+        Empty(),
+        Text(value: string),
+        Numbers(values: u32[])
+    }
+
+    type PipelineStep = interface {
+        fn execute(input: Payload) -> Payload
+        fn name() -> string
+    }
+
+    type PrefixStep = class PipelineStep {
+        let label: string
+
+        fn init(mut label: string) {
+            this.label = label
+        }
+
+        fn execute(input: Payload) -> Payload {
+            match input {
+                Payload.Text(value) {
+                    return Payload.Text(this.label + value)
+                }
+                Payload.Numbers(values) {
+                    return Payload.Text(this.label + values.length)
+                }
+                _ {
+                    return Payload.Text(this.label + "empty")
+                }
+            }
+        }
+
+        fn name() -> string {
+            return "PrefixStep"
+        }
+    }
+
+    type Router = class {
+        let step: PipelineStep
+        let stage: Stage
+
+        fn init(mut step: PipelineStep) {
+            this.step = step
+            this.stage = Stage.Init
+        }
+
+        fn run(input: Payload) -> Payload {
+            this.stage = Stage.Running
+            let out = this.step.execute(input)
+            this.stage = Stage.Done
+            return out
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let step: workflow.PipelineStep = new workflow.PrefixStep("[pfx]-")
+    let r = new workflow.Router(step)
+
+    let out1 = r.run(workflow.Payload.Text("hello"))
+    match out1 {
+        workflow.Payload.Text(value) {
+            rn.assert_eq(value, "[pfx]-hello")
+        }
+        _ {
+            rn.assert_unreachable()
+        }
+    }
+
+    let out2 = r.run(workflow.Payload.Numbers([1u32, 2u32, 3u32, 4u32]))
+    match out2 {
+        workflow.Payload.Text(value) {
+            rn.assert_eq(value, "[pfx]-4")
+        }
+        _ {
+            rn.assert_unreachable()
+        }
+    }
+
+    rn.assert_eq(r.stage, workflow.Stage.Done)
+}
+
+fn stress21() -> u32 {
+    let t1 = new TestUnit("workflow routing", "Nested namespaces with enum/variant/interface dispatch", test_case_1)
+    let set = new UnitSet("Stress 21", "Namespace and pipeline stress", [t1])
+    return set.run()
+}

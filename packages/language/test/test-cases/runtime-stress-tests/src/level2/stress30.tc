@@ -1,0 +1,56 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Pair<T || (T + T) -> T> = struct {
+    left: T,
+    right: T
+}
+
+prototype Pair {
+    fn swap() -> Pair<T> {
+        return {left: this.right, right: this.left}
+    }
+
+    fn merge() -> T {
+        return this.left + this.right
+    }
+}
+
+type PairStore<T || (T + T) -> T> = class {
+    let items: Pair<T>[]
+
+    fn init() {
+        this.items = []
+    }
+
+    fn push(item: Pair<T>) {
+        this.items.resize(this.items.length + 1)
+        this.items[-1] = item
+    }
+
+    fn mergedAt(index: u64) -> T {
+        return this.items[index].merge()
+    }
+
+    fn swapAt(index: u64) -> Pair<T> {
+        return this.items[index].swap()
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let store = new PairStore<u32>()
+    store.push({left: 1u32, right: 2u32})
+    store.push({left: 10u32, right: 20u32})
+
+    rn.assert_eq(store.mergedAt(0), 3u32)
+    rn.assert_eq(store.mergedAt(1), 30u32)
+
+    let swapped = store.swapAt(1)
+    rn.assert_eq(swapped.left, 20u32)
+    rn.assert_eq(swapped.right, 10u32)
+}
+
+fn stress30() -> u32 {
+    let t1 = new TestUnit("generic pair store", "Generic struct prototype consumed by generic class", test_case_1)
+    let set = new UnitSet("Stress 30", "Generic prototype-store stress", [t1])
+    return set.run()
+}

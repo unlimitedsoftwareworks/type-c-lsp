@@ -1,0 +1,39 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Vec2<T || (T + T) -> T, (T * T) -> T> = struct {
+    x: T,
+    y: T
+}
+
+prototype Vec2 {
+    fn + (other: Vec2<T>) -> Vec2<T> {
+        return {
+            x: this.x + other.x,
+            y: this.y + other.y
+        }
+    }
+
+    fn dot(other: Vec2<T>) -> T {
+        return this.x * other.x + this.y * other.y
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let a: Vec2<u32> = {x: 2u32, y: 3u32}
+    let b: Vec2<u32> = {x: 4u32, y: 5u32}
+    let c = a + b
+
+    rn.assert_eq(c.x, 6u32)
+    rn.assert_eq(c.y, 8u32)
+    rn.assert_eq(a.dot(b), 23u32)
+
+    let fa: Vec2<f32> = {x: 1.5f, y: 2.0f}
+    let fb: Vec2<f32> = {x: 2.0f, y: 3.0f}
+    rn.assert_f32_eq_pre(fa.dot(fb), 9.0f, 0.0001f)
+}
+
+fn stress03() -> u32 {
+    let t1 = new TestUnit("generic prototypes", "Prototype methods over constrained generic structs", test_case_1)
+    let set = new UnitSet("Stress 03", "Generic struct prototypes", [t1])
+    return set.run()
+}

@@ -1,0 +1,67 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Named = interface {
+    fn name() -> string
+}
+
+type Timestamped = interface {
+    fn createdAt() -> u64
+}
+
+type Auditable = interface {
+    fn auditLine() -> string
+}
+
+type NameImpl = impl Named (
+    _name: string
+) {
+    fn name() -> string {
+        return this._name
+    }
+}
+
+type TimeImpl = impl Timestamped (
+    _createdAt: u64
+) {
+    fn createdAt() -> u64 {
+        return this._createdAt
+    }
+}
+
+type AuditImpl = impl Named, Timestamped () {
+    fn auditLine() -> string {
+        return this.name() + "@" + this.createdAt()
+    }
+}
+
+type Record = class Named, Timestamped, Auditable {
+    let _name: string
+    let _createdAt: u64
+
+    impl NameImpl(_name)
+    impl TimeImpl(_createdAt)
+    impl AuditImpl()
+
+    fn init(mut name: string, createdAt: u64) {
+        this._name = name
+        this._createdAt = createdAt
+    }
+
+    override fn auditLine() -> string {
+        return "record:" + this.name() + "@" + this.createdAt()
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let r = new Record("session", 1700000000)
+    rn.assert_eq(r.name(), "session")
+    rn.assert_eq(r.createdAt(), 1700000000)
+    rn.assert_eq(r.auditLine(), "record:session@1700000000")
+    rn.assert_eq<bool>(r is Named & Timestamped & Auditable, true)
+}
+
+fn stress24() -> u32 {
+    let t1 = new TestUnit("multi-trait composition", "Layered impl composition with override", test_case_1)
+    let set = new UnitSet("Stress 24", "Trait composition stress", [t1])
+    return set.run()
+}

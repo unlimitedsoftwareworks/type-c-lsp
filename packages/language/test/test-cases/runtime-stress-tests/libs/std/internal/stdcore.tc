@@ -1,0 +1,72 @@
+
+
+extern StdCore from "stdcore" = {
+    fn load_runtimeEnv(name: u8[]) -> u8[]
+    /**
+     * @brief series of functions to Convert numbers to a string.
+     * The returned array is preallocated and doesn't use C's null terminated strings.
+     */
+    fn f64_toStringArray(number: f64) -> u8[]
+    fn f32_toStringArray(number: f32) -> u8[]
+    fn bool_toStringArray(number: bool) -> u8[]
+    fn u8_toStringArray(number: u8) -> u8[]
+    fn i8_toStringArray(number: i8) -> u8[]
+    fn u16_toStringArray(number: u16) -> u8[]
+    fn i16_toStringArray(number: i16) -> u8[]
+    fn u32_toStringArray(number: u32) -> u8[]
+    fn i32_toStringArray(number: i32) -> u8[]
+    fn u64_toStringArray(number: u64) -> u8[]
+    fn i64_toStringArray(number: i64) -> u8[]
+
+    /**
+     * @brief Convert a number to a string, pasting it into a string at a given position.
+     *
+     * The function will first compute if there enough space in the string to paste the number.
+     * Enough is defined as setting up a max number of characters to paste. if not, it will extend the string 
+     * by the max number of characters. Will return the number of characters pasted. It will overwrite any
+     * data that was in the string, between the pos argument and actual number of bytes pasted.
+     * 
+     * Returns the number of characters appended.
+     * @param s: The string to append to
+     * @param number: The number to append
+     * @param pos: The position to append at
+     * @returns: The number of characters appended
+     */
+    fn stringAppend_f64(s: u8[], number: f64, pos: u32) -> u32
+    fn stringAppend_f32(s: u8[], number: f32, pos: u32) -> u32
+    fn stringAppend_u64(s: u8[], number: u64, pos: u32) -> u32
+    fn stringAppend_i64(s: u8[], number: i64, pos: u32) -> u32
+    fn stringAppend_u32(s: u8[], number: u32, pos: u32) -> u32
+    fn stringAppend_i32(s: u8[], number: i32, pos: u32) -> u32
+    fn stringAppend_u16(s: u8[], number: u16, pos: u32) -> u32
+    fn stringAppend_i16(s: u8[], number: i16, pos: u32) -> u32
+    fn stringAppend_u8(s: u8[], number: u8, pos: u32) -> u32
+    fn stringAppend_i8(s: u8[], number: i8, pos: u32) -> u32
+    fn stringAppend_bool(s: u8[], number: bool, pos: u32) -> u32
+
+    /**
+     * Low level cast functions
+     * from u8[] to various types
+     */
+    fn stringArray_toF64(s: u8[]) -> f64
+    fn stringArray_toF32(s: u8[]) -> f32
+    fn stringArray_toBool(s: u8[]) -> bool
+    fn stringArray_toU8(s: u8[]) -> u8
+    fn stringArray_toI8(s: u8[]) -> i8
+    fn stringArray_toU16(s: u8[]) -> u16
+    fn stringArray_toI16(s: u8[]) -> i16
+    fn stringArray_toU32(s: u8[]) -> u32
+    fn stringArray_toI32(s: u8[]) -> i32
+    fn stringArray_toU64(s: u8[]) -> u64
+    fn stringArray_toI64(s: u8[]) -> i64
+
+    /**
+     * Date and time functions
+     */
+    fn now() -> (u16, u8, u8, u8, u8, u8, u16, bool)
+    fn parse(s: u8[]) -> (u16, u8, u8, u8, u8, u8, u16, bool)
+    fn toUnixTimestamp(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8, millisecond: u16) -> (i64, bool)
+    fn fromUnixTimestamp(timestamp: i64) -> (u16, u8, u8, u8, u8, u8, u16, bool)
+    fn getDayOfWeek(year: u16, month: u8, day: u8) -> (u8, bool)
+    fn toLocalTime(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8, millisecond: u16) -> (u16, u8, u8, u8, u8, u8, u16, bool)
+}

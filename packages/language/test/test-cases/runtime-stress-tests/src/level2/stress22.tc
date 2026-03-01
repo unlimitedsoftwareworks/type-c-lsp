@@ -1,0 +1,72 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Node<T> = class {
+    let value: T
+    let edges: Node<T>[]
+
+    fn init(mut value: T) {
+        this.value = value
+        this.edges = []
+    }
+
+    fn connect(other: Node<T>) {
+        this.edges.resize(this.edges.length + 1)
+        this.edges[-1] = other
+    }
+}
+
+type Graph<T> = class {
+    let nodes: Node<T>[]
+
+    fn init() {
+        this.nodes = []
+    }
+
+    fn addNode(value: T) -> Node<T> {
+        let n = new Node<T>(value)
+        this.nodes.resize(this.nodes.length + 1)
+        this.nodes[-1] = n
+        return n
+    }
+
+    fn findValue(target: T) -> bool {
+        foreach node in this.nodes {
+            if node.value == target {
+                return true
+            }
+        }
+        return false
+    }
+
+    fn countEdges() -> u32 {
+        let total: u32 = 0u32
+        foreach node in this.nodes {
+            total += node.edges.length as u32
+        }
+        return total
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let g = new Graph<string>()
+
+    let a = g.addNode("A")
+    let b = g.addNode("B")
+    let c = g.addNode("C")
+    let d = g.addNode("D")
+
+    a.connect(b)
+    b.connect(c)
+    c.connect(d)
+    a.connect(d)
+
+    rn.assert_eq(g.findValue("A"), true)
+    rn.assert_eq(g.findValue("Z"), false)
+    rn.assert_eq(g.countEdges(), 4u32)
+}
+
+fn stress22() -> u32 {
+    let t1 = new TestUnit("generic graph", "Class graph with generic nodes and adjacency", test_case_1)
+    let set = new UnitSet("Stress 22", "Generic graph stress", [t1])
+    return set.run()
+}

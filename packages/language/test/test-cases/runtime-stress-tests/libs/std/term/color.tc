@@ -1,0 +1,23 @@
+fn reset() -> string {
+    return "[0m"
+}
+
+fn bold(input: string) -> string {
+    return "[1m" + input + reset()
+}
+
+fn dim(input: string) -> string {
+    return "[2m" + input + reset()
+}
+
+fn red(input: string) -> string {
+    return "[31m" + input + reset()
+}
+
+fn green(input: string) -> string {
+    return "[32m" + input + reset()
+}
+
+fn cyan(input: string) -> string {
+    return "[36m" + input + reset()
+}

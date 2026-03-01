@@ -1,0 +1,55 @@
+from std.unit.test import TestUnit, UnitSet
+/*
+type IA = interface {
+    fn a() -> u32
+}
+
+type IB = interface {
+    fn b() -> u32
+}
+
+type OnlyA = class IA {
+    fn init() {}
+    fn a() -> u32 = 10u32
+}
+
+type Both = class IA, IB {
+    fn init() {}
+    fn a() -> u32 = 20u32
+    fn b() -> u32 = 30u32
+}
+
+fn describe<T>(x: T) -> string {
+    match x {
+        IA & IB {
+            let y = x as! IA & IB
+            return "ab:" + y.a() + ":" + y.b()
+        }
+        IA {
+            let y = x as! IA
+            return "a:" + y.a()
+        }
+        IB {
+            let y = x as IB
+            return "b:" + y.b()
+        }
+        _ {
+            return "none"
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let a: IA | IB = new OnlyA()
+    let b: IA | IB = new Both()
+
+    rn.assert_eq(describe(a), "a:10")
+    rn.assert_eq(describe(b), "ab:20:30")
+}
+
+fn stress33() -> u32 {
+    let t1 = new TestUnit("union join typing", "Union input refined into join branches", test_case_1)
+    let set = new UnitSet("Stress 33", "Union/join refinement stress", [t1])
+    return set.run()
+}
+*/

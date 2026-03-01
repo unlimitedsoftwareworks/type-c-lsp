@@ -1,0 +1,46 @@
+from std.unit.test import TestUnit, UnitSet
+
+cfn stream(values: u32[]) -> (u32, bool) {
+    let i: u64 = 0
+    while i < values.length {
+        let done = i + 1 == values.length
+        if done {
+            yield! (values[i], true)
+        } else {
+            yield (values[i], false)
+        }
+        i += 1
+    }
+}
+
+fn consumeAndSquare(values: u32[]) -> u32[] {
+    let co = coroutine stream
+    let out: u32[] = []
+
+    while co.state != 3 {
+        let (v, done) = co(values)
+        out.resize(out.length + 1)
+        out[-1] = v * v
+
+        if done {
+            break
+        }
+    }
+
+    return out
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let squared = consumeAndSquare([2u32, 3u32, 4u32, 5u32])
+    rn.assert_eq(squared.length, 4u64)
+    rn.assert_eq(squared[0], 4u32)
+    rn.assert_eq(squared[1], 9u32)
+    rn.assert_eq(squared[2], 16u32)
+    rn.assert_eq(squared[3], 25u32)
+}
+
+fn stress26() -> u32 {
+    let t1 = new TestUnit("coroutine pipeline", "Coroutine stream consumed through state-driven loop", test_case_1)
+    let set = new UnitSet("Stress 26", "Coroutine pipeline stress", [t1])
+    return set.run()
+}

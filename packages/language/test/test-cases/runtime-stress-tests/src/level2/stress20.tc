@@ -1,0 +1,86 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Vec2 = struct {
+    x: i32,
+    y: i32
+}
+
+prototype Vec2 {
+    fn + (other: Vec2) -> Vec2 {
+        return {x: this.x + other.x, y: this.y + other.y}
+    }
+
+    fn toText() -> string {
+        return "(" + this.x + "," + this.y + ")"
+    }
+}
+
+type Snapshot = interface {
+    fn snapshot() -> string
+}
+
+type PositionTrait = impl Snapshot (
+    name: string,
+    pos: Vec2
+) {
+    fn snapshot() -> string {
+        return this.name + ":" + this.pos.toText()
+    }
+}
+
+type Entity = class Snapshot {
+    let name: string
+    let pos: Vec2
+
+    impl PositionTrait(name, pos)
+
+    fn init(mut name: string, x: i32, y: i32) {
+        this.name = name
+        this.pos = {x: x, y: y}
+    }
+
+    fn move(delta: Vec2) {
+        this.pos = this.pos + delta
+    }
+}
+
+type World = class {
+    let entities: Snapshot[]
+
+    fn init() {
+        this.entities = []
+    }
+
+    fn add(e: Snapshot) {
+        this.entities.resize(this.entities.length + 1)
+        this.entities[-1] = e
+    }
+
+    fn dump() -> string {
+        let out = ""
+        foreach e in this.entities {
+            out = out + e.snapshot() + ";"
+        }
+        return out
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let e1 = new Entity("a", 1, 2)
+    let e2 = new Entity("b", 10, 20)
+
+    e1.move({x: 5, y: -1})
+    e2.move({x: -2, y: 3})
+
+    let w = new World()
+    w.add(e1)
+    w.add(e2)
+
+    rn.assert_eq(w.dump(), "a:(6,1);b:(8,23);")
+}
+
+fn stress20() -> u32 {
+    let t1 = new TestUnit("full composition", "Traits + prototypes + interfaces + classes", test_case_1)
+    let set = new UnitSet("Stress 20", "Cross-feature composition stress", [t1])
+    return set.run()
+}

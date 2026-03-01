@@ -1,0 +1,47 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn makeCounter(start: i32) -> {value: i32, next: fn() -> i32, reset: fn(i32) -> void, label: fn() -> string} {
+    let state = start
+
+    let obj = {
+        value: state,
+        next: fn() -> i32 { return 0 },
+        reset: fn(v: i32) -> void {},
+        label: fn() -> string { return "" }
+    }
+
+    obj.next = fn() -> i32 {
+        state += 1
+        obj.value = state
+        return state
+    }
+
+    obj.reset = fn(v: i32) -> void {
+        state = v
+        obj.value = state
+    }
+
+    obj.label = fn() -> string {
+        return "counter:" + obj.value
+    }
+
+    return obj
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let c = makeCounter(10)
+
+    rn.assert_eq(c.next(), 11)
+    rn.assert_eq(c.next(), 12)
+    rn.assert_eq(c.label(), "counter:12")
+
+    c.reset(100)
+    rn.assert_eq(c.next(), 101)
+    rn.assert_eq(c.label(), "counter:101")
+}
+
+fn stress39() -> u32 {
+    let t1 = new TestUnit("mutable anonymous object", "Anonymous struct with mutable function slots and closures", test_case_1)
+    let set = new UnitSet("Stress 39", "Anonymous callable object stress", [t1])
+    return set.run()
+}

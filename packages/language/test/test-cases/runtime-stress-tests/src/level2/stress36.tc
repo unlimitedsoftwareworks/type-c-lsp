@@ -1,0 +1,95 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Maybe<T> = variant {
+    Value(value: T),
+    None()
+}
+
+type Reader<T> = interface {
+    fn get(index: u64) -> Maybe<T>
+}
+
+type Writer<T> = interface {
+    fn set(index: u64, value: T) -> void
+}
+
+type Store<T> = interface Reader<T>, Writer<T> {
+    fn size() -> u64
+}
+
+type ArrayStore<T> = class Store<T> {
+    let data: Maybe<T>[]
+
+    fn init() {
+        this.data = []
+    }
+
+    fn get(index: u64) -> Maybe<T> {
+        if index >= this.data.length {
+            return Maybe.None()
+        }
+        return this.data[index]
+    }
+
+    fn set(index: u64, value: T) -> void {
+        while index >= this.data.length {
+            this.data.resize(this.data.length + 1)
+            this.data[-1] = Maybe.None()
+        }
+        this.data[index] = Maybe.Value(value)
+    }
+
+    fn size() -> u64 {
+        return this.data.length
+    }
+}
+
+fn total(store: Store<u32>) -> u32 {
+    let out: u32 = 0u32
+    for let i: u64 = 0; i < store.size(); i += 1 {
+        match store.get(i) {
+            Maybe.Value(v) {
+                out += v
+            }
+            Maybe.None() {
+            }
+            _ {
+            }
+        }
+    }
+    return out
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let s = new ArrayStore<u32>()
+    s.set(0u64, 3u32)
+    s.set(3u64, 9u32)
+    s.set(1u64, 5u32)
+
+    rn.assert_eq(s.size(), 4u64)
+    match s.get(0u64) {
+        Maybe.Value(v) {
+            rn.assert_eq(v, 3u32)
+        }
+        _ {
+            rn.assert_unreachable()
+        }
+    }
+
+    match s.get(2u64) {
+        Maybe.None() {
+            rn.assert_reachable()
+        }
+        _ {
+            rn.assert_unreachable()
+        }
+    }
+
+    rn.assert_eq(total(s), 17u32)
+}
+
+fn stress36() -> u32 {
+    let t1 = new TestUnit("store hierarchy", "Interface inheritance with generic Maybe<T> storage", test_case_1)
+    let set = new UnitSet("Stress 36", "Interface inheritance stress", [t1])
+    return set.run()
+}

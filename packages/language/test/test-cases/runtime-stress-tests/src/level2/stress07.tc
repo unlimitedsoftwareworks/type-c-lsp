@@ -1,0 +1,52 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Ring = class {
+    let data: u32[]
+
+    fn init(mut data: u32[]) {
+        this.data = data
+    }
+
+    fn [](index: u64) -> u32 {
+        return this.data[index % this.data.length]
+    }
+
+    fn []=(index: u64, hint: u32, value: u32) -> u32 {
+        this.data[index % this.data.length] = value
+        return value
+    }
+
+    fn ()(index: u64) -> u32 {
+        return this[index]
+    }
+
+    fn ++ () -> Ring {
+        let i: u64 = 0
+        while i < this.data.length {
+            this.data[i] += 1u32
+            i += 1
+        }
+        return this
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let r = new Ring([1u32, 2u32, 3u32])
+
+    rn.assert_eq(r[0], 1u32)
+    rn.assert_eq(r[4], 2u32)
+
+    let written = r[5, 0u32] = 99u32
+    rn.assert_eq(written, 99u32)
+    rn.assert_eq(r(2), 99u32)
+
+    let r2 = ++r
+    rn.assert_eq(r2[0], 2u32)
+    rn.assert_eq(r2[2], 100u32)
+}
+
+fn stress07() -> u32 {
+    let t1 = new TestUnit("operator overloads", "Index/call/unary operators on class", test_case_1)
+    let set = new UnitSet("Stress 07", "Operator overload stress", [t1])
+    return set.run()
+}

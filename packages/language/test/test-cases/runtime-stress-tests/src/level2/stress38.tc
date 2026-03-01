@@ -1,0 +1,42 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Item = variant {
+    Count(v: u32),
+    Label(v: string),
+    Empty()
+}
+
+fn normalize(item: Item) -> string =
+    let base = match item {
+        Item.Count(v) => "n:" + v,
+        Item.Label(v) => "s:" + v,
+        Item.Empty() => "none",
+        _ => "unknown"
+    } in
+        if base == "none" => "EMPTY" else base
+
+fn reduce(items: Item[]) -> string {
+    let out = ""
+    foreach item in items {
+        let fragment = normalize(item)
+        out = out + "[" + fragment + "]"
+    }
+    return out
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let items: Item[] = [
+        Item.Count(5u32),
+        Item.Label("ok"),
+        Item.Empty()
+    ]
+
+    let res = reduce(items)
+    rn.assert_eq(res, "[n:5][s:ok][EMPTY]")
+}
+
+fn stress38() -> u32 {
+    let t1 = new TestUnit("expression reduction", "let-in + match-expression + conditional-expression", test_case_1)
+    let set = new UnitSet("Stress 38", "Expression reduction stress", [t1])
+    return set.run()
+}

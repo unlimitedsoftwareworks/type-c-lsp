@@ -1,0 +1,71 @@
+from std.unit.test import TestUnit, UnitSet
+
+namespace system {
+    let const VERSION = "2.1.0"
+
+    fn getVersion() -> string {
+        return VERSION
+    }
+
+    namespace math {
+        fn sum(values: u32[]) -> u32 {
+            let out: u32 = 0u32
+            foreach value in values {
+                out += value
+            }
+            return out
+        }
+
+        type Counter = class {
+            let value: u32
+
+            fn init(start: u32) {
+                this.value = start
+            }
+
+            fn inc() -> u32 {
+                this.value += 1u32
+                return this.value
+            }
+        }
+    }
+
+    namespace model {
+        type Point = class {
+            let x: u32
+            let y: u32
+
+            fn init(x: u32, y: u32) {
+                this.x = x
+                this.y = y
+            }
+
+            fn toText() -> string {
+                return "(" + this.x + "," + this.y + ")"
+            }
+        }
+
+        fn makePoint(x: u32, y: u32) -> Point {
+            return new Point(x, y)
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    rn.assert_eq(system.getVersion(), "2.1.0")
+
+    let c = new system.math.Counter(10u32)
+    rn.assert_eq(c.inc(), 11u32)
+    rn.assert_eq(c.inc(), 12u32)
+
+    rn.assert_eq(system.math.sum([1u32, 2u32, 3u32, 4u32]), 10u32)
+
+    let p = system.model.makePoint(3u32, 4u32)
+    rn.assert_eq(p.toText(), "(3,4)")
+}
+
+fn stress09() -> u32 {
+    let t1 = new TestUnit("namespaces", "Nested namespaces with types and functions", test_case_1)
+    let set = new UnitSet("Stress 09", "Namespace stress", [t1])
+    return set.run()
+}

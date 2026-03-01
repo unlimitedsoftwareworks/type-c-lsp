@@ -1,0 +1,41 @@
+from std.unit.test import TestUnit, UnitSet
+
+cfn scan(nums: u32[]) -> (u32, bool) {
+    let i: u64 = 0
+
+    while i < nums.length {
+        let isLast = i + 1 == nums.length
+
+        if isLast {
+            yield! (nums[i], true)
+        } else {
+            yield (nums[i], false)
+        }
+
+        i += 1
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let co = coroutine scan
+
+    let (v1, d1) = co([4u32, 5u32, 6u32])
+    rn.assert_eq(v1, 4u32)
+    rn.assert_eq(d1, false)
+    rn.assert_eq<u8>(co.state, 2)
+
+    let (v2, d2) = co([4u32, 5u32, 6u32])
+    rn.assert_eq(v2, 5u32)
+    rn.assert_eq(d2, false)
+
+    let (v3, d3) = co([4u32, 5u32, 6u32])
+    rn.assert_eq(v3, 6u32)
+    rn.assert_eq(d3, true)
+    rn.assert_eq<u8>(co.state, 3)
+}
+
+fn stress08() -> u32 {
+    let t1 = new TestUnit("coroutine stepping", "Coroutine state progression and tuple yields", test_case_1)
+    let set = new UnitSet("Stress 08", "Coroutine stress", [t1])
+    return set.run()
+}

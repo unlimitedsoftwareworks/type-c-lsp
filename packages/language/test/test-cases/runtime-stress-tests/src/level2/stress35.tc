@@ -1,0 +1,58 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type ResultBox<T, E> = class {
+    let current: Result<T, E>
+
+    fn init(mut current: Result<T, E>) {
+        this.current = current
+    }
+
+    fn map<U>(f: fn(T) -> U) -> ResultBox<U, E> {
+        match this.current {
+            Result.Ok(v) {
+                return new ResultBox<U, E>(Result.Ok(f(v)))
+            }
+            Result.Err(e) {
+                return new ResultBox<U, E>(Result.Err(e))
+            }
+            _ {
+                unreachable
+            }
+        }
+    }
+
+    fn orElse(defaultValue: T) -> T {
+        match this.current {
+            Result.Ok(v) {
+                return v
+            }
+            Result.Err(_) {
+                return defaultValue
+            }
+            _ {
+                return defaultValue
+            }
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let ok = new ResultBox<u32, string>(Result.Ok(7u32))
+    let s = ok.map<string>(fn(v: u32) = "num:" + (v * 3u32))
+    rn.assert_eq(s.orElse("none"), "num:21")
+
+    let err = new ResultBox<u32, string>(Result.Err("boom"))
+    let s2 = err.map<string>(fn(v: u32) = "num:" + v)
+    rn.assert_eq(s2.orElse("fallback"), "fallback")
+}
+
+fn stress35() -> u32 {
+    let t1 = new TestUnit("result pipeline", "Generic result map/orElse flow", test_case_1)
+    let set = new UnitSet("Stress 35", "Generic result stress", [t1])
+    return set.run()
+}

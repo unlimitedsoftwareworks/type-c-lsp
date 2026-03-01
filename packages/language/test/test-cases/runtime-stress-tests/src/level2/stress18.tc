@@ -1,0 +1,63 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Runner = interface {
+    fn run() -> u32
+}
+
+type AddRunner = class Runner {
+    let a: u32
+    let b: u32
+
+    fn init(a: u32, b: u32) {
+        this.a = a
+        this.b = b
+    }
+
+    fn run() -> u32 {
+        return this.a + this.b
+    }
+}
+
+type MulRunner = class Runner {
+    let a: u32
+    let b: u32
+
+    fn init(a: u32, b: u32) {
+        this.a = a
+        this.b = b
+    }
+
+    fn run() -> u32 {
+        return this.a * this.b
+    }
+}
+
+fn executeAll(items: Runner[]) -> u32 {
+    let total: u32 = 0u32
+
+    foreach item in items {
+        total += item.run()
+    }
+
+    return total
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let runners: Runner[] = [
+        new AddRunner(1u32, 2u32),
+        new MulRunner(3u32, 4u32),
+        new AddRunner(10u32, 20u32)
+    ]
+
+    rn.assert_eq(executeAll(runners), 45u32)
+
+    rn.assert_eq<bool>(runners[0] is AddRunner, true)
+    let first = runners[0] as AddRunner
+    rn.assert_eq(first.run(), 3u32)
+}
+
+fn stress18() -> u32 {
+    let t1 = new TestUnit("interface arrays", "Dynamic dispatch with is/as! checks", test_case_1)
+    let set = new UnitSet("Stress 18", "Interface dispatch stress", [t1])
+    return set.run()
+}

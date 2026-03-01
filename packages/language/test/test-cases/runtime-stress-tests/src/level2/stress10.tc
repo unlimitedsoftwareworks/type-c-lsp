@@ -1,0 +1,41 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn mapValues<T, U>(items: T[], f: fn(T) -> U) -> U[] {
+    let out: U[] = []
+    out.resize(items.length)
+
+    for let i: u64 = 0; i < items.length; i += 1 {
+        out[i] = f(items[i])
+    }
+
+    return out
+}
+
+fn foldValues<T>(items: T[], init: T, f: fn(T, T) -> T) -> T {
+    let const acc = init
+    for let i: u64 = 0; i < items.length; i += 1 {
+        acc := f(acc, items[i])
+    }
+    return acc
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let factor = 3u32
+
+    let scaled = mapValues<u32, u32>([1u32, 2u32, 3u32, 4u32], fn(x: u32) = x * factor)
+    rn.assert_eq(scaled[0], 3u32)
+    rn.assert_eq(scaled[3], 12u32)
+
+    let total = foldValues<u32>(scaled, 0u32, fn(a: u32, b: u32) = a + b)
+    rn.assert_eq(total, 30u32)
+
+    let words = mapValues<u32, string>([1u32, 2u32, 3u32], fn(x: u32) = "n" + x)
+    rn.assert_eq(words[0], "n1")
+    rn.assert_eq(words[2], "n3")
+}
+
+fn stress10() -> u32 {
+    let t1 = new TestUnit("higher-order", "Lambdas, generics and array transforms", test_case_1)
+    let set = new UnitSet("Stress 10", "Higher-order function stress", [t1])
+    return set.run()
+}

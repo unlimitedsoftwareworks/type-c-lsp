@@ -1,0 +1,15 @@
+{
+    "name": "Type-C Runtime Stress Tests",
+    "version": "1.0.0",
+    "author": "praisethemoon",
+    "dependencies": {
+        "@type-c/stdlib": "=0.0.1"
+    },
+    "description": "Stress-heavy runtime and typing coverage suite",
+    "compiler": {
+        "target": "runnable",
+        "entry": "main.tc"
+    },
+    "dependenciesFolder": "./libs",
+    "sourceFolder": "./src"
+}

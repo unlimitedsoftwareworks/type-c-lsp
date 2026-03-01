@@ -1,0 +1,61 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Indexable = interface {
+    fn [](i: u64) -> i32
+    fn []=(i: u64, hint: i32, v: i32) -> i32
+    fn [-](i: u64) -> i32
+    fn [-]=(i: u64, v: i32) -> void
+}
+
+type RingTrait = impl Indexable (
+    data: i32[]
+) {
+    fn [](i: u64) -> i32 {
+        return this.data[i % this.data.length]
+    }
+
+    fn []=(i: u64, hint: i32, v: i32) -> i32 {
+        this.data[i % this.data.length] = v
+        return v
+    }
+
+    fn [-](i: u64) -> i32 {
+        return this.data[-(i % this.data.length)]
+    }
+
+    fn [-]=(i: u64, v: i32) -> void {
+        this.data[-(i % this.data.length)] = v
+    }
+}
+
+type RingArray = class Indexable {
+    let data: i32[]
+
+    impl RingTrait(data)
+
+    fn init(mut data: i32[]) {
+        this.data = data
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let r = new RingArray([10, 20, 30, 40])
+
+    rn.assert_eq(r[0], 10)
+    rn.assert_eq(r[5], 20)
+    rn.assert_eq(r[-1], 40)
+    rn.assert_eq(r[-2], 30)
+
+    let x = r[6, 0] = 99
+    rn.assert_eq(x, 99)
+    rn.assert_eq(r[2], 99)
+
+    r[-1] = 77
+    rn.assert_eq(r[3], 77)
+}
+
+fn stress34() -> u32 {
+    let t1 = new TestUnit("reverse index trait", "Trait-provided forward/reverse index operator set", test_case_1)
+    let set = new UnitSet("Stress 34", "Reverse indexing trait stress", [t1])
+    return set.run()
+}

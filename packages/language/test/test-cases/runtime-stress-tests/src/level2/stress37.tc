@@ -1,0 +1,40 @@
+from std.unit.test import TestUnit, UnitSet
+
+fn matMul2(a: i32[][], b: i32[][]) -> i32[][] {
+    let out: i32[][] = [[0, 0], [0, 0]]
+
+    for let i: u64 = 0; i < 2u64; i += 1 {
+        for let j: u64 = 0; j < 2u64; j += 1 {
+            let acc = 0
+            for let k: u64 = 0; k < 2u64; k += 1 {
+                acc += a[i][k] * b[k][j]
+            }
+            out[i][j] = acc
+        }
+    }
+
+    return out
+}
+
+fn diagSum(m: i32[][]) -> i32 {
+    return m[0][0] + m[1][1]
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let a: i32[][] = [[1, 2], [3, 4]]
+    let b: i32[][] = [[2, 0], [1, 2]]
+
+    let c = matMul2(a, b)
+
+    rn.assert_eq(c[0][0], 4)
+    rn.assert_eq(c[0][1], 4)
+    rn.assert_eq(c[1][0], 10)
+    rn.assert_eq(c[1][1], 8)
+    rn.assert_eq(diagSum(c), 12)
+}
+
+fn stress37() -> u32 {
+    let t1 = new TestUnit("nested loops", "Matrix multiplication via triple nested loops", test_case_1)
+    let set = new UnitSet("Stress 37", "Nested numeric loop stress", [t1])
+    return set.run()
+}

@@ -1,0 +1,56 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Mode = "read" | "write" | "exec"
+
+type Permission = variant {
+    User(mode: Mode),
+    Group(mode: Mode),
+    None()
+}
+
+fn modeWeight(mode: Mode) -> u32 {
+    match mode {
+        "read" {
+            return 1u32
+        }
+        "write" {
+            return 2u32
+        }
+        "exec" {
+            return 4u32
+        }
+        _ {
+            return 0u32
+        }
+    }
+}
+
+fn permissionWeight(p: Permission) -> u32 {
+    match p {
+        Permission.User(mode) {
+            return modeWeight(mode)
+        }
+        Permission.Group(mode) {
+            return modeWeight(mode) + 10u32
+        }
+        Permission.None() {
+            return 0u32
+        }
+        _ {
+            return 0u32
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    rn.assert_eq(permissionWeight(Permission.User("read")), 1u32)
+    rn.assert_eq(permissionWeight(Permission.User("exec")), 4u32)
+    rn.assert_eq(permissionWeight(Permission.Group("write")), 12u32)
+    rn.assert_eq(permissionWeight(Permission.None()), 0u32)
+}
+
+fn stress14() -> u32 {
+    let t1 = new TestUnit("string-enum variant", "String enum aliases combined with variant matching", test_case_1)
+    let set = new UnitSet("Stress 14", "String enum and variant stress", [t1])
+    return set.run()
+}

@@ -1,0 +1,50 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Expr = variant {
+    Lit(n: i32),
+    Add(lhs: Expr, rhs: Expr),
+    Neg(v: Expr),
+    IfZero(cond: Expr, whenZero: Expr, whenNonZero: Expr)
+}
+
+fn eval(expr: Expr) -> i32 {
+    match expr {
+        Expr.Lit(n) {
+            return n
+        }
+        Expr.Add(lhs, rhs) {
+            return eval(lhs) + eval(rhs)
+        }
+        Expr.Neg(v) {
+            return -eval(v)
+        }
+        Expr.IfZero(cond, whenZero, whenNonZero) {
+            if eval(cond) == 0 {
+                return eval(whenZero)
+            }
+            return eval(whenNonZero)
+        }
+        _ {
+            return 0
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let expr: Expr = Expr.Add(
+        Expr.Neg(Expr.Lit(5)),
+        Expr.IfZero(
+            Expr.Lit(0),
+            Expr.Add(Expr.Lit(3), Expr.Lit(4)),
+            Expr.Lit(99)
+        )
+    )
+
+    rn.assert_eq(eval(expr), 2)
+}
+
+fn stress04() -> u32 {
+    let t1 = new TestUnit("variant evaluator", "Deep nested variants and recursive match", test_case_1)
+    let set = new UnitSet("Stress 04", "Variant recursion and matching", [t1])
+    return set.run()
+}

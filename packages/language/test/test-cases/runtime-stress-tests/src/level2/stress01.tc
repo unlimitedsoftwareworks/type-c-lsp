@@ -1,0 +1,79 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Renderable = interface {
+    fn render() -> string
+}
+
+type TextRenderer = class Renderable {
+    let text: string
+
+    fn init(mut text: string) {
+        this.text = text
+    }
+
+    fn render() -> string {
+        return this.text
+    }
+}
+
+type Cell = class Renderable {
+    let content: Renderable
+
+    fn init(mut content: Renderable) {
+        this.content = content
+    }
+
+    fn render() -> string {
+        return "[" + this.content.render() + "]"
+    }
+}
+
+type Grid<T: interface { fn render() -> string }> = class {
+    let items: T[]
+
+    fn init(mut items: T[]) {
+        this.items = items
+    }
+
+    fn join() -> string {
+        let out = ""
+        foreach item in this.items {
+            out = out + item.render()
+        }
+        return out
+    }
+}
+
+type Dashboard = class {
+    let primary: Grid<Cell>
+    let fallback: Grid<Renderable>
+
+    fn init() {
+        this.primary = new Grid<Cell>([
+            new Cell(new TextRenderer("A")),
+            new Cell(new TextRenderer("B")),
+            new Cell(new TextRenderer("C"))
+        ])
+
+        let raw: Renderable[] = [
+            new TextRenderer("L"),
+            new TextRenderer("2")
+        ]
+        this.fallback = new Grid<Renderable>(raw)
+    }
+
+    fn render() -> string {
+        return this.primary.join() + "::" + this.fallback.join()
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let d = new Dashboard()
+    rn.assert_eq(d.render(), "[A][B][C]::L2")
+}
+
+fn stress01() -> u32 {
+    let t1 = new TestUnit("nested renderables", "Classes and interfaces nested through generic containers", test_case_1)
+    let set = new UnitSet("Stress 01", "Nested class/interface orchestration", [t1])
+    return set.run()
+}

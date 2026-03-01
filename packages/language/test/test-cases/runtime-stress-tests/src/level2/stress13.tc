@@ -1,0 +1,53 @@
+from std.unit.test import TestUnit, UnitSet
+
+type XY = interface {
+    fn getX() -> i32
+    fn getY() -> i32
+    fn sum() -> i32
+}
+
+type XYTrait = impl XY (
+    px: i32,
+    py: i32
+) {
+    fn getX() -> i32 {
+        return this.px
+    }
+
+    fn getY() -> i32 {
+        return this.py
+    }
+
+    fn sum() -> i32 {
+        return this.getX() + this.getY()
+    }
+}
+
+type Pixel = class XY {
+    let px: i32
+    let py: i32
+
+    impl XYTrait(px, py)
+
+    fn init(px: i32, py: i32) {
+        this.px = px
+        this.py = py
+    }
+
+    override fn sum() -> i32 {
+        return this.getX() + this.getY() + 1
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let p = new Pixel(5, 6)
+    rn.assert_eq(p.getX(), 5)
+    rn.assert_eq(p.getY(), 6)
+    rn.assert_eq(p.sum(), 12)
+}
+
+fn stress13() -> u32 {
+    let t1 = new TestUnit("impl override", "Impl trait methods overridden in class", test_case_1)
+    let set = new UnitSet("Stress 13", "Impl and override stress", [t1])
+    return set.run()
+}

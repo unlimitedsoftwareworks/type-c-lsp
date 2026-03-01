@@ -1,0 +1,85 @@
+from std.unit.test import TestUnit, UnitSet
+
+type Vec2 = struct {
+    x: f32,
+    y: f32
+}
+
+prototype Vec2 {
+    fn + (other: Vec2) -> Vec2 {
+        return {x: this.x + other.x, y: this.y + other.y}
+    }
+
+    fn scale(s: f32) -> Vec2 {
+        return {x: this.x * s, y: this.y * s}
+    }
+}
+
+type Updatable = interface {
+    fn step(dt: f32) -> void
+    fn position() -> Vec2
+}
+
+type MotionTrait = impl Updatable (
+    pos: Vec2,
+    vel: Vec2
+) {
+    fn step(dt: f32) -> void {
+        this.pos = this.pos + this.vel.scale(dt)
+    }
+
+    fn position() -> Vec2 {
+        return this.pos
+    }
+}
+
+type Particle = class Updatable {
+    let pos: Vec2
+    let vel: Vec2
+
+    impl MotionTrait(pos, vel)
+
+    fn init(px: f32, py: f32, vx: f32, vy: f32) {
+        this.pos = {x: px, y: py}
+        this.vel = {x: vx, y: vy}
+    }
+}
+
+cfn runTicks(p: Updatable, ticks: u32, dt: f32) -> Vec2 {
+    let i: u32 = 0u32
+    while i < ticks {
+        p.step(dt)
+        let snapshot = p.position()
+        i += 1u32
+
+        if i == ticks {
+            yield! snapshot
+        } else {
+            yield snapshot
+        }
+    }
+}
+
+fn test_case_1(mut rn: TestUnit) {
+    let p: Updatable = new Particle(0.0f, 0.0f, 1.5f, -0.5f)
+    let co = coroutine runTicks
+
+    let s1 = co(p, 3u32, 2.0f)
+    rn.assert_f32_eq_pre(s1.x, 3.0f, 0.0001f)
+    rn.assert_f32_eq_pre(s1.y, -1.0f, 0.0001f)
+
+    let s2 = co(p, 3u32, 2.0f)
+    rn.assert_f32_eq_pre(s2.x, 6.0f, 0.0001f)
+    rn.assert_f32_eq_pre(s2.y, -2.0f, 0.0001f)
+
+    let s3 = co(p, 3u32, 2.0f)
+    rn.assert_f32_eq_pre(s3.x, 9.0f, 0.0001f)
+    rn.assert_f32_eq_pre(s3.y, -3.0f, 0.0001f)
+    rn.assert_eq<u8>(co.state, 3)
+}
+
+fn stress40() -> u32 {
+    let t1 = new TestUnit("physics integration", "Prototype + trait + interface + coroutine integration", test_case_1)
+    let set = new UnitSet("Stress 40", "Cross-feature integration stress", [t1])
+    return set.run()
+}

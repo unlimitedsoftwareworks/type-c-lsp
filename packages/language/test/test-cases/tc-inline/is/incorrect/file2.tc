@@ -12,6 +12,6 @@ fn test() {
     /// @Error(TCE160): Cannot safely cast
     let b = z as Option.Some<u32>
 
-    /// @Error(TCE180): Types are completely unrelated
+    /// @Error(TCE180): Incompatible generic arguments
     let c = z is Option.Some<string>
 }

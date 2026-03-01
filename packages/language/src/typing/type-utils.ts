@@ -1353,24 +1353,29 @@ export class TypeCTypeUtils {
             });
         }
 
-        // Check each parameter
+        // Check each parameter (names and types)
         for (let i = 0; i < fromConstructor.parameters.length; i++) {
-            const fromParamType = fromConstructor.parameters[i].type;
-            const toParamType = toConstructor.parameters[i].type;
+            const fromParam = fromConstructor.parameters[i];
+            const toParam = toConstructor.parameters[i];
+
+            // Parameter names must match (structural requirement)
+            if (fromParam.name !== toParam.name) {
+                return failure(`Constructor '${from.constructorName}' parameter at position ${i} has name '${fromParam.name}' but target expects '${toParam.name}'`);
+            }
 
             // Substitute generics in the from parameter type
             const resolvedFromParamType = fromSubstitutions.size > 0
-                ? this.substituteGenerics(fromParamType, fromSubstitutions)
-                : fromParamType;
+                ? this.substituteGenerics(fromParam.type, fromSubstitutions)
+                : fromParam.type;
 
             // Check assignability: never is compatible with anything
             if (isNeverType(resolvedFromParamType)) {
                 continue;
             }
 
-            const result = this.isAssignable(resolvedFromParamType, toParamType);
+            const result = this.isAssignable(resolvedFromParamType, toParam.type);
             if (!result.success) {
-                return failure(`Constructor '${from.constructorName}' parameter ${i + 1} type mismatch: ${result.message}`);
+                return failure(`Constructor '${from.constructorName}' parameter '${fromParam.name}' type incompatible - ${result.message}`);
             }
         }
 
@@ -1392,37 +1397,111 @@ export class TypeCTypeUtils {
     isVariantConstructorAssignableToVariantConstructor(
         from: VariantConstructorTypeDescription,
         to: VariantConstructorTypeDescription,
-        
+
     ): TypeCheckResult {
         // Constructors must have the same name
         if (from.constructorName !== to.constructorName) {
             return failure(`Constructor names differ: ${from.constructorName} vs ${to.constructorName}`);
         }
 
-        // Generic arguments must be compatible
-        // If lengths don't match, not compatible
-        if (from.genericArgs.length !== to.genericArgs.length) {
-            if (from.genericArgs.length === 0) {
-                return success(); // Allow if from has no generics
+        // Check if both constructors come from the same variant declaration
+        const sameDeclaration = from.variantDeclaration && to.variantDeclaration
+            && from.variantDeclaration === to.variantDeclaration;
+
+        if (sameDeclaration) {
+            // Same variant: compare generic args only (parameter names/types are guaranteed identical)
+            if (from.genericArgs.length !== to.genericArgs.length) {
+                if (from.genericArgs.length === 0) {
+                    return success(); // Allow if from has no generics
+                }
+                return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
             }
-            return failure(`Generic argument count mismatch: ${from.genericArgs.length} vs ${to.genericArgs.length}`);
+
+            for (let i = 0; i < from.genericArgs.length; i++) {
+                const fromArg = from.genericArgs[i];
+                const toArg = to.genericArgs[i];
+
+                if (isNeverType(fromArg)) {
+                    continue;
+                }
+
+                const result = this.isAssignable(fromArg, toArg);
+                if (!result.success) {
+                    return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
+                }
+            }
+
+            return success();
         }
 
-        // Check each generic argument
-        // never in 'from' is compatible with any type in 'to'
-        for (let i = 0; i < from.genericArgs.length; i++) {
-            const fromArg = from.genericArgs[i];
-            const toArg = to.genericArgs[i];
+        // Cross-variant (different declarations or anonymous): structural parameter comparison
+        return this.compareConstructorParametersStructurally(from, to);
+    }
 
-            // If from is never, it's compatible with any target type
-            if (isNeverType(fromArg)) {
+    /**
+     * Builds a generic substitution map from a variant constructor's genericArgs
+     * and its variant declaration's generic parameters.
+     */
+    private buildGenericSubstitutionMap(ctor: VariantConstructorTypeDescription): Map<string, TypeDescription> {
+        const substitutions = new Map<string, TypeDescription>();
+        if (ctor.genericArgs.length > 0 && ctor.variantDeclaration?.genericParameters) {
+            ctor.variantDeclaration.genericParameters.forEach((param, i) => {
+                if (i < ctor.genericArgs.length) {
+                    substitutions.set(param.name, ctor.genericArgs[i]);
+                }
+            });
+        }
+        return substitutions;
+    }
+
+    /**
+     * Compares constructor parameters structurally between two variant constructors
+     * from different variant declarations. Checks parameter count, names, and types
+     * (after generic substitution).
+     */
+    private compareConstructorParametersStructurally(
+        from: VariantConstructorTypeDescription,
+        to: VariantConstructorTypeDescription,
+    ): TypeCheckResult {
+        const fromConstructor = from.baseVariant.constructors.find(c => c.name === from.constructorName);
+        const toConstructor = to.baseVariant.constructors.find(c => c.name === to.constructorName);
+
+        if (!fromConstructor || !toConstructor) {
+            return failure(`Constructor definition not found`);
+        }
+
+        if (fromConstructor.parameters.length !== toConstructor.parameters.length) {
+            return failure(`Constructor '${from.constructorName}' parameter count mismatch: ${fromConstructor.parameters.length} vs ${toConstructor.parameters.length}`);
+        }
+
+        const fromSubstitutions = this.buildGenericSubstitutionMap(from);
+        const toSubstitutions = this.buildGenericSubstitutionMap(to);
+
+        for (let i = 0; i < fromConstructor.parameters.length; i++) {
+            const fromParam = fromConstructor.parameters[i];
+            const toParam = toConstructor.parameters[i];
+
+            // Parameter names must match (structural requirement)
+            if (fromParam.name !== toParam.name) {
+                return failure(`Constructor '${from.constructorName}' parameter at position ${i} has name '${fromParam.name}' but target expects '${toParam.name}'`);
+            }
+
+            // Substitute generics in parameter types
+            const resolvedFromType = fromSubstitutions.size > 0
+                ? this.substituteGenerics(fromParam.type, fromSubstitutions)
+                : fromParam.type;
+            const resolvedToType = toSubstitutions.size > 0
+                ? this.substituteGenerics(toParam.type, toSubstitutions)
+                : toParam.type;
+
+            // never is compatible with anything
+            if (isNeverType(resolvedFromType)) {
                 continue;
             }
 
-            // Otherwise, check normal assignability
-            const result = this.isAssignable(fromArg, toArg);
+            const result = this.isAssignable(resolvedFromType, resolvedToType);
             if (!result.success) {
-                return failure(`Generic argument ${i + 1} not assignable: ${result.message}`);
+                return failure(`Constructor '${from.constructorName}' parameter '${fromParam.name}' type incompatible - ${result.message}`);
             }
         }
 

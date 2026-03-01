@@ -1,0 +1,151 @@
+// Cross-variant structural assignability tests
+// Spec: Variants use structural typing on constructors.
+// A variant/constructor from one variant can be assigned to another if constructors match.
+
+// ============================================================================
+// Setup: Two variants with overlapping constructors
+// ============================================================================
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type MaybeError<U, V> = variant {
+    Ok(value: U),
+    Err(error: V)
+}
+
+// Variant with a subset of constructors
+type OkOnly<T> = variant {
+    Ok(value: T)
+}
+
+// Variant with a superset of constructors
+type ExtendedResult<T, E> = variant {
+    Ok(value: T),
+    Err(error: E),
+    Pending(message: string)
+}
+
+// Non-generic variant
+type HttpError = variant {
+    Ok(value: u32),
+    Err(error: string)
+}
+
+// ============================================================================
+// Case 1: Variant <- Variant (all source constructors must exist in target)
+// ============================================================================
+
+fn testVariantToVariant() -> void {
+    // OkOnly has 1 constructor (Ok). Result has 2 (Ok, Err).
+    // OkOnly<u32> -> Result<u32, string>: Ok exists in Result -> OK
+    let ok: OkOnly<u32> = OkOnly.Ok(42u32)
+    let result: Result<u32, string> = ok
+
+    // Result<u32, string> -> ExtendedResult<u32, string>: Ok and Err both exist -> OK
+    let r: Result<u32, string> = Result.Ok(1u32)
+    let ext: ExtendedResult<u32, string> = r
+}
+
+// ============================================================================
+// Case 2: Variant <- VariantConstructor (cross-variant)
+// ============================================================================
+
+fn testVariantConstructorToVariant() -> void {
+    // MaybeError.Ok<u32, never> -> Result<u32, string>
+    // Result has Ok(value: T) constructor, and MaybeError.Ok structurally matches
+    let a = MaybeError.Ok(42u32)
+    let b: Result<u32, string> = a
+
+    // OkOnly.Ok<u32> -> Result<u32, string>
+    let c = OkOnly.Ok(100u32)
+    let d: Result<u32, string> = c
+
+    // OkOnly.Ok<u32> -> ExtendedResult<u32, string>
+    let e = OkOnly.Ok(200u32)
+    let f: ExtendedResult<u32, string> = e
+}
+
+// ============================================================================
+// Case 3: VariantConstructor <- VariantConstructor (cross-variant)
+// ============================================================================
+
+fn testConstructorToConstructor() -> void {
+    // MaybeError.Ok<u32, never> -> Result.Ok<u32, never>
+    // Both are "Ok(value: u32)" structurally
+    let a = MaybeError.Ok(42u32)
+    let b: Result.Ok<u32, never> = a
+
+    // Result.Err<never, string> -> MaybeError.Err<never, string>
+    let c = Result.Err("error")
+    let d: MaybeError.Err<never, string> = c
+}
+
+// ============================================================================
+// Case 4: never type transparency in cross-variant contexts
+// ============================================================================
+
+fn testNeverTransparency() -> void {
+    // MaybeError.Ok<u32, never> should be assignable to Result<u32, string>
+    // because never in the E position is transparent
+    let a = MaybeError.Ok(1u32)
+    let b: Result<u32, string> = a
+
+    // HttpError.Ok -> Result<u32, string> (non-generic to generic variant)
+    // HttpError.Ok is Ok(value: u32), Result.Ok<u32, string> is Ok(value: u32) -> match
+    let c = HttpError.Ok(200u32)
+    let d: Result<u32, string> = c
+}
+
+// ============================================================================
+// Case 5: Same-variant subtype relationships (already supported, regression test)
+// ============================================================================
+
+fn testSameVariantSubtype() -> void {
+    // Result.Ok is a subtype of Result
+    let a = Result.Ok(42)
+    let b: Result<i32, string> = a
+
+    // Result.Err is a subtype of Result
+    let c = Result.Err("error")
+    let d: Result<i32, string> = c
+
+    // Both in conditional
+    let cond = true
+    let e: Result<i32, string> = if cond => Result.Ok(1) else Result.Err("no")
+}
+
+// ============================================================================
+// Case 6: Function parameter and return type contexts
+// ============================================================================
+
+fn processResult(r: Result<u32, string>) -> u32 {
+    return 0u32
+}
+
+fn testFunctionContext() -> void {
+    // Passing cross-variant constructor as argument
+    let a = MaybeError.Ok(42u32)
+    processResult(a)
+
+    // Passing OkOnly constructor as argument
+    let b = OkOnly.Ok(100u32)
+    processResult(b)
+}
+
+fn returnCrossVariant() -> Result<u32, string> {
+    // Returning a cross-variant constructor
+    return MaybeError.Ok(42u32)
+}
+
+fn main() -> void {
+    testVariantToVariant()
+    testVariantConstructorToVariant()
+    testConstructorToConstructor()
+    testNeverTransparency()
+    testSameVariantSubtype()
+    testFunctionContext()
+    let r = returnCrossVariant()
+}

@@ -1,0 +1,133 @@
+// Cross-variant assignability error tests
+// Tests cases that MUST produce errors
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type MaybeError<U, V> = variant {
+    Ok(value: U),
+    Err(error: V)
+}
+
+// Different constructor names
+type HttpStatus = variant {
+    Success(value: u32),
+    Failure(error: string)
+}
+
+// Same constructor name but different parameter names
+type BadResult<T, E> = variant {
+    Ok(data: T),
+    Err(msg: E)
+}
+
+// Same constructor name but different parameter types
+type WrongTypes = variant {
+    Ok(value: string),
+    Err(error: u32)
+}
+
+// Superset (has more constructors than target)
+type ExtendedResult<T, E> = variant {
+    Ok(value: T),
+    Err(error: E),
+    Pending(message: string)
+}
+
+// ============================================================================
+// Error 1: Variant <- Variant with missing constructors in target
+// ExtendedResult has 3 constructors, Result has 2. Pending is not in Result.
+// ============================================================================
+
+fn testMissingConstructorInTarget() -> void {
+    let ext: ExtendedResult<u32, string> = ExtendedResult.Ok(1u32)
+    /// @Error(TCE006): is not assignable to
+    let r: Result<u32, string> = ext
+}
+
+// ============================================================================
+// Error 2: Variant <- Variant with no matching constructors
+// HttpStatus has Success/Failure, Result has Ok/Err -> no overlap
+// ============================================================================
+
+fn testNoMatchingConstructors() -> void {
+    let status: HttpStatus = HttpStatus.Success(200u32)
+    /// @Error(TCE006): is not assignable to
+    let r: Result<u32, string> = status
+}
+
+// ============================================================================
+// Error 3: Variant <- Variant with mismatched parameter names
+// BadResult.Ok(data: T) vs Result.Ok(value: T) -> param names differ
+// ============================================================================
+
+fn testMismatchedParamNames() -> void {
+    let bad: BadResult<u32, string> = BadResult.Ok(1u32)
+    /// @Error(TCE006): is not assignable to
+    let r: Result<u32, string> = bad
+}
+
+// ============================================================================
+// Error 4: Variant <- Variant with mismatched parameter types
+// WrongTypes.Ok(value: string) vs Result.Ok(value: u32) -> types differ
+// ============================================================================
+
+fn testMismatchedParamTypes() -> void {
+    let wrong: WrongTypes = WrongTypes.Ok("hello")
+    /// @Error(TCE006): is not assignable to
+    let r: Result<u32, string> = wrong
+}
+
+// ============================================================================
+// Error 5: VariantConstructor <- Variant (not allowed without `is` check)
+// Cannot narrow from a variant to a constructor without runtime check
+// ============================================================================
+
+fn testConstructorFromVariant() -> void {
+    let r: Result<u32, string> = Result.Ok(42u32)
+    /// @Error(TCE006): is not assignable to
+    let ok: Result.Ok<u32, string> = r
+}
+
+// ============================================================================
+// Error 6: Cross-variant constructor with mismatched parameter names
+// ============================================================================
+
+fn testCrossVariantBadParamNames() -> void {
+    let bad = BadResult.Ok(42u32)
+    /// @Error(TCE006): type mismatch
+    let ok: Result.Ok<u32, string> = bad
+}
+
+// ============================================================================
+// Error 7: Cross-variant constructor with mismatched parameter types
+// ============================================================================
+
+fn testCrossVariantBadParamTypes() -> void {
+    let wrong = WrongTypes.Ok("hello")
+    /// @Error(TCE006): type mismatch
+    let ok: Result.Ok<u32, string> = wrong
+}
+
+// ============================================================================
+// Error 8: Cross-variant constructor with different constructor names
+// ============================================================================
+
+fn testCrossVariantDifferentNames() -> void {
+    let success = HttpStatus.Success(200u32)
+    /// @Error(TCE006): type mismatch
+    let ok: Result.Ok<u32, string> = success
+}
+
+fn main() -> void {
+    testMissingConstructorInTarget()
+    testNoMatchingConstructors()
+    testMismatchedParamNames()
+    testMismatchedParamTypes()
+    testConstructorFromVariant()
+    testCrossVariantBadParamNames()
+    testCrossVariantBadParamTypes()
+    testCrossVariantDifferentNames()
+}

@@ -1,0 +1,75 @@
+// Variant `is` type-check error tests
+// Spec: Guaranteed paths (always true) and impossible paths (always false) are errors.
+
+type Tree<T> = variant {
+    Leaf(value: T),
+    Binary(lhs: Tree<T>, rhs: Tree<T>),
+    Unary(uhs: Tree<T>)
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+// Completely unrelated variant (no shared constructors with Tree)
+type Color = variant {
+    Red,
+    Green,
+    Blue
+}
+
+// ============================================================================
+// Error 1: `x is Variant` when x is already that variant type (always true)
+// ============================================================================
+
+fn testGuaranteedTrue() -> void {
+    let node: Tree<u32> = Tree.Leaf(1u32)
+
+    // node is already Tree<u32>, checking `is Tree` is guaranteed true -> error
+    /// @Error(TCE180): Invalid 'is' check
+    let c = node is Tree
+}
+
+// ============================================================================
+// Error 2: `x is Constructor` when x is already that constructor (always true)
+// ============================================================================
+
+fn testConstructorAlwaysTrue() -> void {
+    let leaf = Tree.Leaf(1u32)
+
+    // leaf is Tree.Leaf<u32>, checking `is Tree.Leaf` is guaranteed true -> error
+    /// @Error(TCE180): Invalid 'is' check
+    let c = leaf is Tree.Leaf
+}
+
+// ============================================================================
+// Error 3: `x is VariantConstructor` on unrelated variant (always false)
+// ============================================================================
+
+fn testUnrelatedVariants() -> void {
+    let r: Result<u32, string> = Result.Ok(42u32)
+
+    // Result and Color share no constructors -> always false -> error
+    /// @Error(TCE180): Invalid 'is' check
+    let c = r is Color.Red
+}
+
+// ============================================================================
+// Error 4: Constructor `is` different constructor of same variant (always false)
+// ============================================================================
+
+fn testConstructorAlwaysFalse() -> void {
+    let leaf = Tree.Leaf(1u32)
+
+    // leaf is Tree.Leaf, can never be Tree.Binary -> error
+    /// @Error(TCE180): Invalid 'is' check
+    let c = leaf is Tree.Binary
+}
+
+fn main() -> void {
+    testGuaranteedTrue()
+    testConstructorAlwaysTrue()
+    testUnrelatedVariants()
+    testConstructorAlwaysFalse()
+}

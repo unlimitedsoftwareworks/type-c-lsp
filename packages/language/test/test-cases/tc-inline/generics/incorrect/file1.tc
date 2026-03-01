@@ -18,6 +18,6 @@ type Status<T> = variant {
 
 // Test 1: Simple variant constructor type without generics
 fn testSimpleConstructorType() -> void { 
-    /// @Error: Constructor 'Some' parameter 1 type mismatch
+    /// @Error: Constructor 'Some' parameter 'value' type incompatible
     let noneVal: Option<string> = Option.Some({x: 1u32})
 }

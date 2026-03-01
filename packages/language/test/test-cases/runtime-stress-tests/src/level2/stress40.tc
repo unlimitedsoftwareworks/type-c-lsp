@@ -17,7 +17,7 @@ prototype Vec2 {
 
 type Updatable = interface {
     fn step(dt: f32) -> void
-    fn position() -> Vec2
+    pure fn position() -> Vec2
 }
 
 type MotionTrait = impl Updatable (

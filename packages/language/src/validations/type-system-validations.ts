@@ -2163,15 +2163,111 @@ export class TypeCTypeSystemValidator extends TypeCTypedValidation {
         if (resolvedDest.kind === TypeKind.Null) {
             return;
         }
-        
-        // Now validate that there's a valid relationship between LHS and RHS
-        // Similar to cast validation, check if there's ANY relationship between the types
+
+        // Unwrap nullable for the source type (e.g., Tree<u32>? → Tree<u32>)
+        let effectiveSource = resolvedSource;
+        if (isNullableType(resolvedSource)) {
+            effectiveSource = resolvedSource.baseType;
+        }
+
+        const errorCode = ErrorCode.TC_INSTANCE_CHECK_INVALID_RHS_TYPE;
+
+        // Helper: extract the variant's TypeDeclaration from a resolved+original type pair
+        const getVariantDecl = (resolved: TypeDescription, original: TypeDescription): ast.TypeDeclaration | undefined => {
+            if (isVariantConstructorType(resolved)) return resolved.variantDeclaration;
+            if (isVariantType(resolved)) {
+                let orig = original;
+                if (isNullableType(orig)) orig = orig.baseType;
+                if (isReferenceType(orig)) return orig.declaration;
+            }
+            return undefined;
+        };
+
+        // Helper: get source variant's generic args from the original (unresolved) type
+        const getSourceGenericArgs = (): readonly TypeDescription[] => {
+            let orig = sourceType;
+            if (isNullableType(orig)) orig = orig.baseType;
+            if (isReferenceType(orig)) return orig.genericArgs;
+            return [];
+        };
+
+        // ── Variant is VariantConstructor ──
+        // Valid if the constructor name exists in the source variant AND generic args are compatible.
+        if (isVariantType(effectiveSource) && isVariantConstructorType(resolvedDest)) {
+            const sourceDecl = getVariantDecl(effectiveSource, sourceType);
+            const destDecl = resolvedDest.variantDeclaration;
+
+            if (sourceDecl && destDecl && sourceDecl === destDecl) {
+                // Same variant — constructor definitely exists.
+                // If dest specifies explicit generic args, verify they match the source.
+                if (resolvedDest.genericArgs.length > 0) {
+                    const sourceArgs = getSourceGenericArgs();
+                    if (sourceArgs.length > 0) {
+                        for (let i = 0; i < Math.min(resolvedDest.genericArgs.length, sourceArgs.length); i++) {
+                            const destArg = resolvedDest.genericArgs[i];
+                            const srcArg = sourceArgs[i];
+                            if (isNeverType(destArg) || isNeverType(srcArg)) continue;
+                            const result = this.typeUtils.isAssignable(srcArg, destArg);
+                            if (!result.success) {
+                                accept('error',
+                                    `Invalid 'is' check from '${sourceType.toString()}' to '${destType.toString()}': Incompatible generic arguments. ` +
+                                    `Generic argument at position ${i + 1} ('${srcArg.toString()}' vs '${destArg.toString()}') is not compatible.`,
+                                    { node: node.destType, code: errorCode }
+                                );
+                                return;
+                            }
+                        }
+                    }
+                }
+                // Valid — constructor exists and generic args are compatible (or unspecified)
+                return;
+            }
+
+            // Different variant — check if constructor name exists in source variant
+            const hasConstructor = effectiveSource.constructors.some(
+                c => c.name === resolvedDest.constructorName
+            );
+            if (!hasConstructor) {
+                accept('error',
+                    `Invalid 'is' check from '${sourceType.toString()}' to '${destType.toString()}': Types are completely unrelated. ` +
+                    `The 'is' operator can only be used when there's a valid type relationship between the operands.`,
+                    { node: node.destType, code: errorCode }
+                );
+            }
+            return;
+        }
+
+        // ── VariantConstructor is VariantConstructor (same variant) ──
+        if (isVariantConstructorType(effectiveSource) && isVariantConstructorType(resolvedDest)) {
+            const sameVariant = effectiveSource.variantDeclaration && resolvedDest.variantDeclaration
+                && effectiveSource.variantDeclaration === resolvedDest.variantDeclaration;
+
+            if (sameVariant) {
+                if (effectiveSource.constructorName === resolvedDest.constructorName) {
+                    // Same constructor — guaranteed true at runtime
+                    accept('error',
+                        `Invalid 'is' check: '${sourceType.toString()}' is already '${destType.toString()}', this check is guaranteed to be true.`,
+                        { node: node.destType, code: errorCode }
+                    );
+                } else {
+                    // Different constructor of same variant — always false at runtime
+                    accept('error',
+                        `Invalid 'is' check: '${sourceType.toString()}' is '${effectiveSource.constructorName}', so checking against '${resolvedDest.constructorName}' will always be false.`,
+                        { node: node.destType, code: errorCode }
+                    );
+                }
+                return;
+            }
+            // Different variant — fall through to canCastTypes
+        }
+
+        // ── All other combinations (including V-is-V, VC-is-V, cross-variant VC-is-VC):
+        //    fall through to bidirectional canCastTypes check ──
         const sourceToDestResult = this.typeUtils.canCastTypes(resolvedSource, resolvedDest);
         const destToSourceResult = this.typeUtils.canCastTypes(resolvedDest, resolvedSource);
         const hasRelationship = sourceToDestResult.success || destToSourceResult.success;
-        
+
         if (!hasRelationship) {
-            const errorCode = ErrorCode.TC_INSTANCE_CHECK_INVALID_RHS_TYPE;
             accept('error',
                 `Invalid 'is' check from '${sourceType.toString()}' to '${destType.toString()}': Types are completely unrelated. ` +
                 `The 'is' operator can only be used when there's a valid type relationship between the operands.`,

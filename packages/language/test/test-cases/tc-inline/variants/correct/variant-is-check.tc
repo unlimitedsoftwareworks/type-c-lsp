@@ -1,0 +1,80 @@
+// Variant `is` type-check tests (positive cases)
+// Spec: `x is VariantConstructor` is valid when x could be that constructor
+// The check returns bool at runtime.
+
+type Tree<T> = variant {
+    Leaf(value: T),
+    Binary(lhs: Tree<T>, rhs: Tree<T>),
+    Unary(uhs: Tree<T>)
+}
+
+type Result<T, E> = variant {
+    Ok(value: T),
+    Err(error: E)
+}
+
+type Option<T> = variant {
+    Some(value: T),
+    None
+}
+
+// ============================================================================
+// Basic `is` checks: Variant is VariantConstructor
+// ============================================================================
+
+fn testBasicIsCheck() -> void {
+    let node: Tree<u32> = Tree.Leaf(1u32)
+
+    // Variant value checked against its own constructors -> valid
+    /// @Type(c1): bool
+    let c1 = node is Tree.Leaf
+    /// @Type(c2): bool
+    let c2 = node is Tree.Binary
+    /// @Type(c3): bool
+    let c3 = node is Tree.Unary
+}
+
+fn testResultIsCheck() -> void {
+    let r: Result<i32, string> = Result.Ok(42)
+
+    /// @Type(isOk): bool
+    let isOk = r is Result.Ok
+    /// @Type(isErr): bool
+    let isErr = r is Result.Err
+}
+
+// ============================================================================
+// `is` check in control flow
+// ============================================================================
+
+fn testIsInControlFlow() -> void {
+    let node: Tree<u32> = Tree.Leaf(10u32)
+
+    if node is Tree.Leaf {
+        // narrowed to Tree.Leaf
+    }
+
+    if node is Tree.Binary {
+        // narrowed to Tree.Binary
+    }
+}
+
+// ============================================================================
+// `is` check with nullable variants
+// ============================================================================
+
+fn testIsWithNullable() -> void {
+    let opt: Option<u32> = Option.Some(42u32)
+
+    /// @Type(isSome): bool
+    let isSome = opt is Option.Some
+    /// @Type(isNone): bool
+    let isNone = opt is Option.None
+}
+
+fn main() -> void {
+    testBasicIsCheck()
+    testResultIsCheck()
+    testIsInControlFlow()
+    testIsWithNullable()
+}
